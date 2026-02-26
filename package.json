@@ -183,9 +183,9 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "allowElevation": true,
-      "installerIcon": "build/icon.png",
-      "uninstallerIcon": "build/icon.png",
-      "installerHeaderIcon": "build/icon.png",
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "installerHeaderIcon": "build/icon.ico",
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "Chat2API",
@@ -218,7 +218,7 @@
         }
       ],
       "category": "Utility",
-      "icon": "build/icons",
+      "icon": "build/icon.png",
       "maintainer": "Chat2API Team <support@chat2api.com>",
       "artifactName": "${productName}-${version}-${arch}.${ext}",
       "desktop": {
