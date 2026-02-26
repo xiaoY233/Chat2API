@@ -43,13 +43,13 @@
 
 | Provider         | Auth Type        | OAuth | Models                                           |
 | ---------------- | ---------------- | ----- | ------------------------------------------------ |
-| DeepSeek         | User Token       | Yes   | DeepSeek-V3.2, DeepSeek-R1, DeepSeek-Search      |
-| GLM              | Refresh Token    | Yes   | GLM-5, GLM-5-Flash, GLM-4-Plus, GLM-4-Flash      |
-| Kimi             | JWT Token        | Yes   | kimi, kimi-search, kimi-research, kimi-k1        |
+| DeepSeek         | User Token       | Yes   | DeepSeek-V3.2                                    |
+| GLM              | Refresh Token    | Yes   | GLM-5                                            |
+| Kimi             | JWT Token        | Yes   | kimi-k2.5                                        |
 | MiniMax          | JWT Token        | Yes   | MiniMax-M2.5                                     |
-| Qwen (CN)        | SSO Ticket       | Yes   | Qwen3, Qwen3-Max, Qwen3-Plus, Qwen3-Coder        |
-| Qwen AI (Global) | JWT Token        | Yes   | Qwen3.5-Plus, Qwen3-Max, Qwen3-Coder             |
-| Z.ai             | JWT Token        | Yes   | GLM-5, GLM-4.7, GLM-4.6V                         |
+| Qwen (CN)        | SSO Ticket       | Yes   | Qwen3.5-Plus, Qwen3-Max, Qwen3-Flash, Qwen3-Coder, qwen-max-latest |
+| Qwen AI (Global) | JWT Token        | Yes   | Qwen3.5-Plus, Qwen3-Max, Qwen3-VL-Plus, Qwen3-Coder-Plus, Qwen-Plus, Qwen-Turbo |
+| Z.ai             | JWT Token        | Yes   | GLM-5, GLM-4.7, GLM-4.6V, GLM-4.6              |
 
 ## 📥 Installation
 

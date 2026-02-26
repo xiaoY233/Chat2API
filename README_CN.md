@@ -43,13 +43,13 @@
 
 | 服务商           | 认证类型      | OAuth | 模型                                              |
 | ---------------- | ------------- | ----- | ------------------------------------------------- |
-| DeepSeek         | User Token    | 是    | DeepSeek-V3.2, DeepSeek-R1, DeepSeek-Search       |
-| GLM              | Refresh Token | 是    | GLM-5, GLM-5-Flash, GLM-4-Plus, GLM-4-Flash       |
-| Kimi             | JWT Token     | 是    | kimi, kimi-search, kimi-research, kimi-k1         |
-| MiniMax          | JWT Token     | 是    | MiniMax-M2.5                                      |
-| Qwen (国内版)    | SSO Ticket    | 是    | Qwen3, Qwen3-Max, Qwen3-Plus, Qwen3-Coder         |
-| Qwen AI (国际版) | JWT Token     | 是    | Qwen3.5-Plus, Qwen3-Max, Qwen3-Coder              |
-| Z.ai             | JWT Token     | 是    | GLM-5, GLM-4.7, GLM-4.6V                          |
+| DeepSeek         | User Token    | 是    | DeepSeek-V3.2                                    |
+| GLM              | Refresh Token | 是    | GLM-5                                            |
+| Kimi             | JWT Token     | 是    | kimi-k2.5                                        |
+| MiniMax          | JWT Token     | 是    | MiniMax-M2.5                                     |
+| Qwen (国内版)    | SSO Ticket    | 是    | Qwen3.5-Plus, Qwen3-Max, Qwen3-Flash, Qwen3-Coder, qwen-max-latest |
+| Qwen AI (国际版) | JWT Token     | 是    | Qwen3.5-Plus, Qwen3-Max, Qwen3-VL-Plus, Qwen3-Coder-Plus, Qwen-Plus, Qwen-Turbo |
+| Z.ai             | JWT Token     | 是    | GLM-5, GLM-4.7, GLM-4.6V, GLM-4.6             |
 
 ## 📥 安装
 
