@@ -46,15 +46,15 @@ jobs:
 
       - name: Build Electron app (macOS)
         if: matrix.os == 'macos-latest'
-        run: npx electron-builder --mac --${{ matrix.arch }}
+        run: npx electron-builder --mac --${{ matrix.arch }} --publish=never
 
       - name: Build Electron app (Windows)
         if: matrix.os == 'windows-latest'
-        run: npx electron-builder --win --${{ matrix.arch }}
+        run: npx electron-builder --win --${{ matrix.arch }} --publish=never
 
       - name: Build Electron app (Linux)
         if: matrix.os == 'ubuntu-latest'
-        run: npx electron-builder --linux --${{ matrix.arch }}
+        run: npx electron-builder --linux --${{ matrix.arch }} --publish=never
 
       - name: Find and list build outputs
         id: find_outputs
