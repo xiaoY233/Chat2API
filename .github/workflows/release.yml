@@ -46,34 +46,22 @@ jobs:
 
       - name: Build Electron app (macOS)
         if: matrix.os == 'macos-latest'
-        run: npx electron-builder --mac --${{ matrix.arch }}
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx electron-builder --mac --${{ matrix.arch }} -p dir
 
       - name: Build Electron app (Windows)
         if: matrix.os == 'windows-latest'
-        run: npx electron-builder --win --${{ matrix.arch }}
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx electron-builder --win --${{ matrix.arch }} -p dir
 
       - name: Build Electron app (Linux)
         if: matrix.os == 'ubuntu-latest'
-        run: npx electron-builder --linux --${{ matrix.arch }}
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx electron-builder --linux --${{ matrix.arch }} -p dir
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.os }}-${{ matrix.arch }}
           path: |
-            dist/*.dmg
-            dist/*.exe
-            dist/*.AppImage
-            dist/*.deb
-            dist/*.tar.gz
-            dist/*.blockmap
-            dist/latest*.yml
+            dist/*
           retention-days: 1
 
   create-release:
@@ -88,30 +76,29 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: dist
+          merge-multiple: true
 
       - name: Get version from tag
         id: get_version
         run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
       - name: Create Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
-          name: Chat2API Manager v${{ steps.get_version.outputs.VERSION }}
+          name: Chat2API v${{ steps.get_version.outputs.VERSION }}
           body: |
-            ## Chat2API Manager v${{ steps.get_version.outputs.VERSION }}
-            
+            ## Chat2API v${{ steps.get_version.outputs.VERSION }}
+
             ### Downloads
             | Platform | Architecture | Download |
             |----------|--------------|----------|
-            | macOS | Apple Silicon (M1/M2) | `Chat2API Manager-${{ steps.get_version.outputs.VERSION }}-mac-arm64.dmg` |
-            | macOS | Intel | `Chat2API Manager-${{ steps.get_version.outputs.VERSION }}-mac-x64.dmg` |
-            | Windows | x64 | `Chat2API Manager-${{ steps.get_version.outputs.VERSION }}-x64-setup.exe` |
-            | Linux | x64 | `Chat2API Manager-${{ steps.get_version.outputs.VERSION }}-x64.AppImage` |
-            | Linux | ARM64 | `Chat2API Manager-${{ steps.get_version.outputs.VERSION }}-arm64.AppImage` |
-            
-            For detailed changes, see [CHANGELOG.md](./CHANGELOG.md).
+            | macOS | Apple Silicon (M1/M2) | `Chat2API-${{ steps.get_version.outputs.VERSION }}-mac-arm64.dmg` |
+            | macOS | Intel | `Chat2API-${{ steps.get_version.outputs.VERSION }}-mac-x64.dmg` |
+            | Windows | x64 | `Chat2API-${{ steps.get_version.outputs.VERSION }}-x64-setup.exe` |
+            | Linux | x64 | `Chat2API-${{ steps.get_version.outputs.VERSION }}-x64.AppImage` |
+            | Linux | ARM64 | `Chat2API-${{ steps.get_version.outputs.VERSION }}-arm64.AppImage` |
           files: |
-            dist/**/*
+            dist/*
           draft: false
           prerelease: false
         env:
