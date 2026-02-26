@@ -46,15 +46,15 @@ jobs:
 
       - name: Build Electron app (macOS)
         if: matrix.os == 'macos-latest'
-        run: npx electron-builder --mac --${{ matrix.arch }} -p dir
+        run: npx electron-builder --mac --${{ matrix.arch }} --dir
 
       - name: Build Electron app (Windows)
         if: matrix.os == 'windows-latest'
-        run: npx electron-builder --win --${{ matrix.arch }} -p dir
+        run: npx electron-builder --win --${{ matrix.arch }} --dir
 
       - name: Build Electron app (Linux)
         if: matrix.os == 'ubuntu-latest'
-        run: npx electron-builder --linux --${{ matrix.arch }} -p dir
+        run: npx electron-builder --linux --${{ matrix.arch }} --dir
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
