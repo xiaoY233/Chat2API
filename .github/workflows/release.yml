@@ -48,15 +48,18 @@ jobs:
         run: npx electron-builder --mac --${{ matrix.arch }} --publish=onTag
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
 
       - name: Build and Publish (Windows)
         if: matrix.os == 'windows-latest'
         run: npx electron-builder --win --${{ matrix.arch }} --publish=onTag
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
 
       - name: Build and Publish (Linux)
         if: matrix.os == 'ubuntu-latest'
         run: npx electron-builder --linux --${{ matrix.arch }} --publish=onTag
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
