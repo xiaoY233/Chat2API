@@ -176,7 +176,7 @@
           ]
         }
       ],
-      "icon": "build/icon.png",
+      "icon": "build/icon.ico",
       "artifactName": "${productName}-${version}-${arch}-setup.${ext}"
     },
     "nsis": {
