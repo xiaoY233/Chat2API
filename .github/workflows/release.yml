@@ -8,25 +8,22 @@ on:
 jobs:
   release:
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
 
     strategy:
       matrix:
         include:
           - os: macos-latest
             arch: arm64
-            target: dmg
           - os: macos-latest
             arch: x64
-            target: dmg
           - os: windows-latest
             arch: x64
-            target: nsis
           - os: ubuntu-latest
             arch: x64
-            target: AppImage
           - os: ubuntu-latest
             arch: arm64
-            target: AppImage
 
     steps:
       - name: Checkout repository
@@ -44,82 +41,20 @@ jobs:
       - name: Build application
         run: npm run build
 
-      - name: Build Electron app (macOS)
+      - name: Build and Publish (macOS)
         if: matrix.os == 'macos-latest'
-        run: npx electron-builder --mac --${{ matrix.arch }} --publish=never
-
-      - name: Build Electron app (Windows)
-        if: matrix.os == 'windows-latest'
-        run: npx electron-builder --win --${{ matrix.arch }} --publish=never
-
-      - name: Build Electron app (Linux)
-        if: matrix.os == 'ubuntu-latest'
-        run: npx electron-builder --linux --${{ matrix.arch }} --publish=never
-
-      - name: Find and list build outputs
-        id: find_outputs
-        run: |
-          echo "=== Listing dist directory ==="
-          ls -la dist/
-          echo "=== Finding .dmg files ==="
-          find dist/ -name "*.dmg" 2>/dev/null || echo "No .dmg files"
-          echo "=== Finding .exe files ==="
-          find dist/ -name "*.exe" 2>/dev/null || echo "No .exe files"
-          echo "=== Finding .AppImage files ==="
-          find dist/ -name "*.AppImage" 2>/dev/null || echo "No .AppImage files"
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.os }}-${{ matrix.arch }}-app
-          path: |
-            dist/*.dmg
-            dist/*.exe
-            dist/*.AppImage
-          retention-days: 1
-
-  create-release:
-    needs: release
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: release-files
-          pattern: '*-app'
-          merge-multiple: true
-
-      - name: List downloaded files
-        run: ls -la release-files/
-
-      - name: Get version from tag
-        id: get_version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
-        with:
-          name: Chat2API v${{ steps.get_version.outputs.VERSION }}
-          body: |
-            ## Chat2API v${{ steps.get_version.outputs.VERSION }}
-
-            ### Downloads
-            | Platform | Architecture | Download |
-            |----------|--------------|----------|
-            | macOS | Apple Silicon (M1/M2) | `Chat2API-${{ steps.get_version.outputs.VERSION }}-mac-arm64.dmg` |
-            | macOS | Intel | `Chat2API-${{ steps.get_version.outputs.VERSION }}-mac-x64.dmg` |
-            | Windows | x64 | `Chat2API-${{ steps.get_version.outputs.VERSION }}-x64-setup.exe` |
-            | Linux | x64 | `Chat2API-${{ steps.get_version.outputs.VERSION }}-x64.AppImage` |
-            | Linux | ARM64 | `Chat2API-${{ steps.get_version.outputs.VERSION }}-arm64.AppImage` |
-          files: |
-            release-files/*
-          draft: false
-          prerelease: false
+        run: npx electron-builder --mac --${{ matrix.arch }} --publish=onTag
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and Publish (Windows)
+        if: matrix.os == 'windows-latest'
+        run: npx electron-builder --win --${{ matrix.arch }} --publish=onTag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and Publish (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: npx electron-builder --linux --${{ matrix.arch }} --publish=onTag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
