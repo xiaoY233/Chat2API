@@ -1,0 +1,47 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+out/
+dist/
+build/entitlements.mac.plist
+
+# TypeScript
+*.tsbuildinfo
+
+# Vite temp files
+*.mjs.tmp
+electron.vite.config.*.mjs
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+.trae/
+*.swp
+*.swo
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Test
+coverage/
+
+# Misc
+*.pem
+*.p12
+
+# Backup
+backup/

@@ -1,0 +1,118 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  release:
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            arch: arm64
+            target: dmg
+          - os: macos-latest
+            arch: x64
+            target: dmg
+          - os: windows-latest
+            arch: x64
+            target: nsis
+          - os: ubuntu-latest
+            arch: x64
+            target: AppImage
+          - os: ubuntu-latest
+            arch: arm64
+            target: AppImage
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build application
+        run: npm run build
+
+      - name: Build Electron app (macOS)
+        if: matrix.os == 'macos-latest'
+        run: npx electron-builder --mac --${{ matrix.arch }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build Electron app (Windows)
+        if: matrix.os == 'windows-latest'
+        run: npx electron-builder --win --${{ matrix.arch }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build Electron app (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: npx electron-builder --linux --${{ matrix.arch }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.os }}-${{ matrix.arch }}
+          path: |
+            dist/*.dmg
+            dist/*.exe
+            dist/*.AppImage
+            dist/*.deb
+            dist/*.tar.gz
+            dist/*.blockmap
+            dist/latest*.yml
+          retention-days: 1
+
+  create-release:
+    needs: release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Get version from tag
+        id: get_version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: Chat2API Manager v${{ steps.get_version.outputs.VERSION }}
+          body: |
+            ## Chat2API Manager v${{ steps.get_version.outputs.VERSION }}
+            
+            ### Downloads
+            | Platform | Architecture | Download |
+            |----------|--------------|----------|
+            | macOS | Apple Silicon (M1/M2) | `Chat2API Manager-${{ steps.get_version.outputs.VERSION }}-mac-arm64.dmg` |
+            | macOS | Intel | `Chat2API Manager-${{ steps.get_version.outputs.VERSION }}-mac-x64.dmg` |
+            | Windows | x64 | `Chat2API Manager-${{ steps.get_version.outputs.VERSION }}-x64-setup.exe` |
+            | Linux | x64 | `Chat2API Manager-${{ steps.get_version.outputs.VERSION }}-x64.AppImage` |
+            | Linux | ARM64 | `Chat2API Manager-${{ steps.get_version.outputs.VERSION }}-arm64.AppImage` |
+            
+            For detailed changes, see [CHANGELOG.md](./CHANGELOG.md).
+          files: |
+            dist/**/*
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
