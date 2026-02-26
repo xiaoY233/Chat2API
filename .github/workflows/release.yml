@@ -44,7 +44,7 @@ jobs:
       - name: Generate Windows icon from PNG
         if: matrix.os == 'windows-latest'
         run: |
-          npx icon-gen -i build/icon.png -o build/icon.ico --sizes 16,32,48,256
+          npx icon-gen -i build/icon.png -o build/icon.ico --size 16,32,48,256
 
       - name: Build and Publish (macOS)
         if: matrix.os == 'macos-latest'
