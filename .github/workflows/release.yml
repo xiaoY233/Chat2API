@@ -59,9 +59,11 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.os }}-${{ matrix.arch }}
+          name: ${{ matrix.os }}-${{ matrix.arch }}-app
           path: |
-            dist/*
+            dist/mac/
+            dist/win-unpacked/
+            dist/linux-unpacked/
           retention-days: 1
 
   create-release:
@@ -77,8 +79,21 @@ jobs:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
-          path: dist
+          path: release-files
+          pattern: '*-app'
           merge-multiple: true
+
+      - name: List downloaded files
+        run: ls -la release-files/
+
+      - name: Flatten directory structure
+        run: |
+          mkdir -p dist
+          mv release-files/*/Chat2API*.dmg release-files/ 2>/dev/null || true
+          mv release-files/*/Chat2API*.exe release-files/ 2>/dev/null || true
+          mv release-files/*/Chat2API*.AppImage release-files/ 2>/dev/null || true
+          rm -rf release-files/mac release-files/win-unpacked release-files/linux-unpacked 2>/dev/null || true
+          ls -la release-files/
 
       - name: Get version from tag
         id: get_version
