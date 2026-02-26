@@ -46,24 +46,36 @@ jobs:
 
       - name: Build Electron app (macOS)
         if: matrix.os == 'macos-latest'
-        run: npx electron-builder --mac --${{ matrix.arch }} --dir
+        run: npx electron-builder --mac --${{ matrix.arch }}
 
       - name: Build Electron app (Windows)
         if: matrix.os == 'windows-latest'
-        run: npx electron-builder --win --${{ matrix.arch }} --dir
+        run: npx electron-builder --win --${{ matrix.arch }}
 
       - name: Build Electron app (Linux)
         if: matrix.os == 'ubuntu-latest'
-        run: npx electron-builder --linux --${{ matrix.arch }} --dir
+        run: npx electron-builder --linux --${{ matrix.arch }}
+
+      - name: Find and list build outputs
+        id: find_outputs
+        run: |
+          echo "=== Listing dist directory ==="
+          ls -la dist/
+          echo "=== Finding .dmg files ==="
+          find dist/ -name "*.dmg" 2>/dev/null || echo "No .dmg files"
+          echo "=== Finding .exe files ==="
+          find dist/ -name "*.exe" 2>/dev/null || echo "No .exe files"
+          echo "=== Finding .AppImage files ==="
+          find dist/ -name "*.AppImage" 2>/dev/null || echo "No .AppImage files"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.os }}-${{ matrix.arch }}-app
           path: |
-            dist/mac/
-            dist/win-unpacked/
-            dist/linux-unpacked/
+            dist/*.dmg
+            dist/*.exe
+            dist/*.AppImage
           retention-days: 1
 
   create-release:
@@ -86,15 +98,6 @@ jobs:
       - name: List downloaded files
         run: ls -la release-files/
 
-      - name: Flatten directory structure
-        run: |
-          mkdir -p dist
-          mv release-files/*/Chat2API*.dmg release-files/ 2>/dev/null || true
-          mv release-files/*/Chat2API*.exe release-files/ 2>/dev/null || true
-          mv release-files/*/Chat2API*.AppImage release-files/ 2>/dev/null || true
-          rm -rf release-files/mac release-files/win-unpacked release-files/linux-unpacked 2>/dev/null || true
-          ls -la release-files/
-
       - name: Get version from tag
         id: get_version
         run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
@@ -115,7 +118,7 @@ jobs:
             | Linux | x64 | `Chat2API-${{ steps.get_version.outputs.VERSION }}-x64.AppImage` |
             | Linux | ARM64 | `Chat2API-${{ steps.get_version.outputs.VERSION }}-arm64.AppImage` |
           files: |
-            dist/*
+            release-files/*
           draft: false
           prerelease: false
         env:
