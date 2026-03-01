@@ -678,6 +678,7 @@
     "description": "查看和管理可用模型及模型映射配置",
     "modelList": "模型列表",
     "modelMapping": "模型映射",
+    "prompts": "工具调用",
     "modelName": "模型名称",
     "provider": "供应商",
     "account": "账户",
@@ -708,5 +709,20 @@
     "appUpdates": "应用更新",
     "credits": "由开源社区 ❤️ 制作",
     "builtWith": "基于 Electron、React、TypeScript、Tailwind CSS、Zustand、Koa 等优秀的开源项目构建。"
+  },
+  "prompts": {
+    "title": "工具调用模拟",
+    "description": "为不支持原生 Function Calling 的模型提供工具调用能力",
+    "toolUseTitle": "Function Calling 功能介绍",
+    "toolUseDescription": "通过 Prompt Engineering 实现完整的 Function Calling 功能",
+    "toolUseIntro": "Function Calling（工具调用）功能允许 AI 模型在对话过程中调用外部工具和 API。系统通过 Prompt Engineering 和流式解析技术，在不依赖原生 Function Calling API 的情况下，为所有支持的模型实现了完整的工具调用功能。",
+    "howItWorks": "工作原理",
+    "howItWorksDesc": "1. 协议定义：设计模型易于理解的文本协议 [function_calls][call:name]{args}[/call][/function_calls]。2. Prompt 注入：将 OpenAI 格式的 tools 定义转换为 System Prompt。3. 输出拦截：在流式传输中实时拦截协议文本。4. 格式还原：提取协议内容，封装为 OpenAI 格式的 tool_calls 返回。",
+    "supportedModels": "支持的模型",
+    "supportedModelsDesc": "DeepSeek、GLM、Kimi、Qwen、MiniMax、Z.ai 等所有内置服务商均已支持工具调用功能。",
+    "protocolFormat": "协议格式",
+    "protocolFormatDesc": "模型会输出 [function_calls] 块，包含 [call:name]{json}[/call] 格式的调用。系统会自动解析并转换为 OpenAI 兼容的 tool_calls 格式。",
+    "exampleOutput": "示例输出",
+    "systemPromptPreview": "系统提示词预览"
   }
 }

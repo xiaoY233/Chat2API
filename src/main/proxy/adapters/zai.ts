@@ -9,6 +9,7 @@ import { PassThrough } from 'stream'
 import { createParser } from 'eventsource-parser'
 import FormData from 'form-data'
 import { Account, Provider } from '../../store/types'
+import { hasToolUse, parseToolUse, ToolCall } from '../promptToolUse'
 
 const ZAI_API_BASE = 'https://chat.z.ai'
 const X_FE_VERSION = 'prod-fe-1.0.241'
@@ -262,7 +263,37 @@ export class ZaiAdapter {
     
     console.log('[Z.ai] Original model:', request.model, '-> Mapped model:', mappedModel)
     
-    const signaturePrompt = this.extractLastUserMessage(request.messages)
+    // Extract system message and merge with user message
+    let systemContent = ''
+    let processedMessages = []
+    
+    for (const msg of request.messages) {
+      if (msg.role === 'system') {
+        systemContent += (systemContent ? '\n\n' : '') + (typeof msg.content === 'string' ? msg.content : '')
+      } else {
+        processedMessages.push(msg)
+      }
+    }
+    
+    // If system prompt exists, prepend it to the first user message
+    if (systemContent && processedMessages.length > 0) {
+      const firstUserIdx = processedMessages.findIndex(m => m.role === 'user')
+      if (firstUserIdx !== -1) {
+        const firstUserMsg = processedMessages[firstUserIdx]
+        const originalContent = typeof firstUserMsg.content === 'string' 
+          ? firstUserMsg.content 
+          : (Array.isArray(firstUserMsg.content) 
+              ? firstUserMsg.content.find((p: any) => p.type === 'text')?.text || '' 
+              : '')
+        
+        processedMessages[firstUserIdx] = {
+          ...firstUserMsg,
+          content: `${systemContent}\n\nUser: ${originalContent}`
+        }
+      }
+    }
+    
+    const signaturePrompt = this.extractLastUserMessage(processedMessages)
     const { chatId, messageId } = await this.createChat(mappedModel, signaturePrompt)
     const requestId = uuid()
     const timestamp = Date.now()
@@ -280,7 +311,7 @@ export class ZaiAdapter {
     const requestBody = {
       stream: request.stream !== false,
       model: mappedModel,
-      messages: request.messages,
+      messages: processedMessages,
       signature_prompt: signaturePrompt,
       params: {},
       extra: {},
@@ -415,6 +446,8 @@ export class ZaiStreamHandler {
   private model: string
   private created: number
   private onEnd?: (chatId: string) => void
+  private content: string = ''
+  private toolCallsSent: boolean = false
 
   constructor(model: string, onEnd?: (chatId: string) => void) {
     this.model = model
@@ -422,9 +455,69 @@ export class ZaiStreamHandler {
     this.onEnd = onEnd
   }
 
+  setChatId(chatId: string) {
+    this.chatId = chatId
+  }
+
+  private sendToolCalls(transStream: PassThrough): void {
+    if (this.toolCallsSent) return
+    
+    const toolCalls = parseToolUse(this.content)
+    if (toolCalls && toolCalls.length > 0) {
+      this.toolCallsSent = true
+      
+      // Send tool_calls delta
+      for (let i = 0; i < toolCalls.length; i++) {
+        const tc = toolCalls[i]
+        transStream.write(
+          `data: ${JSON.stringify({
+            id: this.chatId,
+            model: this.model,
+            object: 'chat.completion.chunk',
+            choices: [{
+              index: 0,
+              delta: {
+                tool_calls: [{
+                  index: i,
+                  id: tc.id,
+                  type: 'function',
+                  function: {
+                    name: tc.function.name,
+                    arguments: tc.function.arguments,
+                  },
+                }],
+              },
+              finish_reason: null,
+            }],
+            created: this.created,
+          })}\n\n`
+        )
+      }
+      
+      // Send finish with tool_calls
+      transStream.write(
+        `data: ${JSON.stringify({
+          id: this.chatId,
+          model: this.model,
+          object: 'chat.completion.chunk',
+          choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }],
+          usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+          created: this.created,
+        })}\n\n`
+      )
+      transStream.end('data: [DONE]\n\n')
+      if (this.onEnd) {
+        try {
+          this.onEnd(this.chatId)
+        } catch (e) {
+          console.error('[Z.ai] onEnd callback error:', e)
+        }
+      }
+    }
+  }
+
   async handleStream(stream: any): Promise<PassThrough> {
     const transStream = new PassThrough()
-    let content = ''
 
     console.log('[Z.ai] Starting stream handler...')
 
@@ -451,7 +544,7 @@ export class ZaiStreamHandler {
           if (!result) return
 
           if (result.phase === 'answer' && result.delta_content) {
-            content += result.delta_content
+            this.content += result.delta_content
             transStream.write(
               `data: ${JSON.stringify({
                 id: this.chatId,
@@ -462,7 +555,14 @@ export class ZaiStreamHandler {
               })}\n\n`
             )
           } else if (result.phase === 'done' && result.done) {
-            console.log('[Z.ai] Stream finished, content length:', content.length)
+            console.log('[Z.ai] Stream finished, content length:', this.content.length)
+            
+            // Check for tool calls before sending stop
+            if (hasToolUse(this.content)) {
+              console.log('[Z.ai] Found tool_use in stream, sending tool_calls')
+              this.sendToolCalls(transStream)
+              return
+            }
             
             const usage = result.usage || { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 }
             
@@ -536,46 +636,89 @@ export class ZaiStreamHandler {
         created: this.created,
       }
 
-      const parser = createParser({
-        onEvent: (event: any) => {
-          try {
-            if (event.data === '[DONE]') return
+      // Check if response.data is a stream or JSON
+      if (response.data && typeof response.data.on === 'function') {
+        // Stream response
+        const parser = createParser({
+          onEvent: (event: any) => {
+            try {
+              if (event.data === '[DONE]') return
 
-            const eventData = JSON.parse(event.data)
-            
-            if (eventData.type !== 'chat:completion') return
-            
-            const result = eventData.data
-            if (!result) return
+              const eventData = JSON.parse(event.data)
+              
+              if (eventData.type !== 'chat:completion') return
+              
+              const result = eventData.data
+              if (!result) return
 
-            if (result.phase === 'answer' && result.delta_content) {
-              data.choices[0].message.content += result.delta_content
-            } else if (result.phase === 'done' && result.done) {
-              console.log('[Z.ai] Non-stream finished, content length:', data.choices[0].message.content.length)
-              if (result.usage) {
-                data.usage = result.usage
+              if (result.phase === 'answer' && result.delta_content) {
+                data.choices[0].message.content += result.delta_content
+              } else if (result.phase === 'done' && result.done) {
+                console.log('[Z.ai] Non-stream finished, content length:', data.choices[0].message.content.length)
+                if (result.usage) {
+                  data.usage = result.usage
+                }
+                resolve(data)
+              } else if (result.error || eventData.error) {
+                const error = result.error || eventData.error
+                data.choices[0].message.content += `\nError: ${error.detail || JSON.stringify(error)}`
+                resolve(data)
               }
-              resolve(data)
-            } else if (result.error || eventData.error) {
-              const error = result.error || eventData.error
-              data.choices[0].message.content += `\nError: ${error.detail || JSON.stringify(error)}`
-              resolve(data)
+            } catch (err) {
+              console.error('[Z.ai] Non-stream parse error:', err)
+              reject(err)
             }
-          } catch (err) {
-            console.error('[Z.ai] Non-stream parse error:', err)
-            reject(err)
+          },
+        })
+
+        response.data.on('data', (buffer: Buffer) => parser.feed(buffer.toString()))
+        response.data.once('error', reject)
+        response.data.once('close', () => resolve(data))
+      } else if (response.data) {
+        // JSON response - parse directly
+        try {
+          const responseData = response.data
+          
+          // Handle SSE format in JSON response
+          if (typeof responseData === 'string') {
+            let content = ''
+            const lines = responseData.split('\n')
+            for (const line of lines) {
+              if (line.startsWith('data:')) {
+                const jsonStr = line.substring(5).trim()
+                if (jsonStr === '[DONE]') continue
+                try {
+                  const event = JSON.parse(jsonStr)
+                  if (event.type === 'chat:completion' && event.data) {
+                    if (event.data.phase === 'answer' && event.data.delta_content) {
+                      content += event.data.delta_content
+                    } else if (event.data.phase === 'done' && event.data.done) {
+                      if (event.data.usage) {
+                        data.usage = event.data.usage
+                      }
+                    }
+                  }
+                } catch (e) {
+                  // Ignore parse errors for individual lines
+                }
+              }
+            }
+            data.choices[0].message.content = content
+          } else {
+            // Direct JSON object
+            data.choices[0].message.content = responseData.choices?.[0]?.message?.content || ''
           }
-        },
-      })
-
-      response.data.on('data', (buffer: Buffer) => parser.feed(buffer.toString()))
-      response.data.once('error', reject)
-      response.data.once('close', () => resolve(data))
+          
+          console.log('[Z.ai] Non-stream JSON finished, content length:', data.choices[0].message.content.length)
+          resolve(data)
+        } catch (err) {
+          console.error('[Z.ai] Non-stream JSON parse error:', err)
+          reject(err)
+        }
+      } else {
+        resolve(data)
+      }
     })
-  }
-
-  setChatId(chatId: string) {
-    this.chatId = chatId
   }
 
   getChatId(): string {

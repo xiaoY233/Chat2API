@@ -678,6 +678,7 @@
     "description": "View and manage available models and model mapping configuration",
     "modelList": "Model List",
     "modelMapping": "Model Mapping",
+    "prompts": "Tool Use",
     "modelName": "Model Name",
     "provider": "Provider",
     "account": "Account",
@@ -708,5 +709,20 @@
     "appUpdates": "Application Updates",
     "credits": "Made with ❤️ by the Open Source Community",
     "builtWith": "Built with Electron, React, TypeScript, Tailwind CSS, Zustand, Koa and other amazing open source projects."
+  },
+  "prompts": {
+    "title": "Function Calling Simulation",
+    "description": "Enables tool calling for models without native Function Calling support",
+    "toolUseTitle": "Function Calling Feature Introduction",
+    "toolUseDescription": "Full Function Calling capability via Prompt Engineering",
+    "toolUseIntro": "Function Calling allows AI models to invoke external tools and APIs during conversations. Through Prompt Engineering and stream parsing, the system provides complete tool calling functionality for all supported models without relying on native Function Calling APIs.",
+    "howItWorks": "How It Works",
+    "howItWorksDesc": "1. Protocol Definition: Design a text protocol [function_calls][call:name]{args}[/call][/function_calls] that models can easily understand. 2. Prompt Injection: Convert OpenAI-format tools definitions into System Prompt. 3. Output Interception: Real-time interception of protocol text during streaming. 4. Format Restoration: Extract protocol content and wrap as OpenAI-format tool_calls.",
+    "supportedModels": "Supported Models",
+    "supportedModelsDesc": "DeepSeek, GLM, Kimi, Qwen, MiniMax, Z.ai and all built-in providers now support Function Calling.",
+    "protocolFormat": "Protocol Format",
+    "protocolFormatDesc": "Models output [function_calls] blocks containing [call:name]{json}[/call] format calls. The system automatically parses and converts them to OpenAI-compatible tool_calls format.",
+    "exampleOutput": "Example Output",
+    "systemPromptPreview": "System Prompt Preview"
   }
 }

@@ -10,6 +10,7 @@ import { createGunzip, createInflate, createBrotliDecompress } from 'zlib'
 import * as ZstdCodec from 'zstd-codec'
 import { createParser } from 'eventsource-parser'
 import { Account, Provider } from '../../store/types'
+import { hasToolUse, parseToolUse, ToolCall } from '../promptToolUse'
 
 const QWEN_API_BASE = 'https://chat2.qianwen.com'
 
@@ -125,8 +126,22 @@ export class QwenAdapter {
     
     console.log('[Qwen] Using model:', actualModel)
 
-    const lastMessage = request.messages[request.messages.length - 1]
-    const userContent = extractTextContent(lastMessage.content)
+    // Find system message and user message
+    let systemPrompt = ''
+    let userContent = ''
+    
+    for (const msg of request.messages) {
+      if (msg.role === 'system') {
+        systemPrompt = extractTextContent(msg.content)
+      } else if (msg.role === 'user') {
+        userContent = extractTextContent(msg.content)
+      }
+    }
+
+    // If system prompt exists, prepend it to user content
+    const finalContent = systemPrompt 
+      ? `${systemPrompt}\n\nUser: ${userContent}`
+      : userContent
 
     const timestamp = Date.now()
     const nonce = generateNonce()
@@ -141,10 +156,10 @@ export class QwenAdapter {
       temporary: false,
       messages: [
         {
-          content: userContent,
+          content: finalContent,
           mime_type: 'text/plain',
           meta_data: {
-            ori_query: userContent
+            ori_query: finalContent
           }
         }
       ],
@@ -243,11 +258,63 @@ export class QwenStreamHandler {
   private content: string = ''
   private responseId: string = ''
   private stopSent: boolean = false
+  private toolCallsSent: boolean = false
 
   constructor(model: string, onEnd?: (sessionId: string) => void) {
     this.model = model
     this.created = Math.floor(Date.now() / 1000)
     this.onEnd = onEnd
+  }
+
+  private sendToolCalls(transStream: PassThrough): void {
+    if (this.toolCallsSent) return
+    
+    const toolCalls = parseToolUse(this.content)
+    if (toolCalls && toolCalls.length > 0) {
+      this.toolCallsSent = true
+      
+      // Send tool_calls delta
+      for (let i = 0; i < toolCalls.length; i++) {
+        const tc = toolCalls[i]
+        transStream.write(
+          `data: ${JSON.stringify({
+            id: this.responseId || this.sessionId,
+            model: this.model,
+            object: 'chat.completion.chunk',
+            choices: [{
+              index: 0,
+              delta: {
+                tool_calls: [{
+                  index: i,
+                  id: tc.id,
+                  type: 'function',
+                  function: {
+                    name: tc.function.name,
+                    arguments: tc.function.arguments,
+                  },
+                }],
+              },
+              finish_reason: null,
+            }],
+            created: this.created,
+          })}\n\n`
+        )
+      }
+      
+      // Send finish with tool_calls
+      transStream.write(
+        `data: ${JSON.stringify({
+          id: this.responseId || this.sessionId,
+          model: this.model,
+          object: 'chat.completion.chunk',
+          choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }],
+          usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+          created: this.created,
+        })}\n\n`
+      )
+      transStream.end('data: [DONE]\n\n')
+      this.onEnd?.(this.sessionId)
+    }
   }
 
   handleStream(stream: any, response?: AxiosResponse): PassThrough {
@@ -341,6 +408,14 @@ export class QwenStreamHandler {
                   if (msg.mime_type === 'multi_load/iframe' && !this.stopSent) {
                     this.stopSent = true
                     console.log('[Qwen] Sending stop for multi_load/iframe, content so far:', this.content.length)
+                    
+                    // Check for tool calls before sending stop
+                    if (hasToolUse(this.content)) {
+                      console.log('[Qwen] Found tool_use in stream, sending tool_calls')
+                      this.sendToolCalls(transStream)
+                      return
+                    }
+                    
                     transStream.write(
                       `data: ${JSON.stringify({
                         id: this.responseId || this.sessionId,
@@ -380,6 +455,14 @@ export class QwenStreamHandler {
           console.log('[Qwen] Received complete event')
           if (!transStream.closed && !this.stopSent) {
             this.stopSent = true
+            
+            // Check for tool calls before sending stop
+            if (hasToolUse(this.content)) {
+              console.log('[Qwen] Found tool_use in complete event, sending tool_calls')
+              this.sendToolCalls(transStream)
+              return
+            }
+            
             transStream.write(
               `data: ${JSON.stringify({
                 id: this.responseId || this.sessionId,
@@ -470,41 +553,85 @@ export class QwenStreamHandler {
         created: this.created,
       }
 
-      const parser = createParser({
-        onEvent: (event: any) => {
-          try {
-            if (event.data === '[DONE]') return
+      let contentAccumulator = ''
+      let buffer = ''
+      let resolved = false
 
-            const result = JSON.parse(event.data)
+      const processBuffer = () => {
+        while (true) {
+          const doubleNewlineIndex = buffer.indexOf('\n\n')
+          if (doubleNewlineIndex === -1) break
 
-            if (result.communication) {
-              if (!data.id && result.communication.sessionid) {
-                data.id = result.communication.sessionid
-                this.sessionId = result.communication.sessionid
-              }
+          const eventBlock = buffer.substring(0, doubleNewlineIndex)
+          buffer = buffer.substring(doubleNewlineIndex + 2)
+
+          const lines = eventBlock.split('\n')
+          let eventType = 'message'
+          let eventData = ''
+
+          for (const line of lines) {
+            if (line.startsWith('event:')) {
+              eventType = line.substring(6).trim()
+            } else if (line.startsWith('data:')) {
+              eventData = line.substring(5)
             }
+          }
 
-            if (result.data?.messages) {
-              for (const msg of result.data.messages) {
-                if (msg.mime_type === 'text/plain' && msg.content) {
-                  if (msg.content.length > data.choices[0].message.content.length) {
-                    data.choices[0].message.content = msg.content
+          if (eventData && eventData !== '[DONE]') {
+            try {
+              const result = JSON.parse(eventData)
+              console.log('[Qwen] Non-stream parsed event:', eventType, 'data keys:', Object.keys(result))
+
+              if (result.communication) {
+                if (!data.id && result.communication.sessionid) {
+                  data.id = result.communication.sessionid
+                  this.sessionId = result.communication.sessionid
+                }
+              }
+
+              if (result.data?.messages) {
+                for (const msg of result.data.messages) {
+                  // Handle multi_load/iframe content (actual response content)
+                  if (msg.mime_type === 'multi_load/iframe' && msg.content) {
+                    contentAccumulator = msg.content
+                    console.log('[Qwen] Non-stream multi_load/iframe content length:', contentAccumulator.length)
+                  }
+                  
+                  // Also handle text/plain content
+                  if (msg.mime_type === 'text/plain' && msg.content) {
+                    if (msg.content.length > contentAccumulator.length) {
+                      contentAccumulator = msg.content
+                    }
+                  }
+
+                  if (msg.status === 'complete' || msg.status === 'finished') {
+                    if (msg.mime_type === 'multi_load/iframe') {
+                      console.log('[Qwen] Non-stream finished, content length:', contentAccumulator.length)
+                      data.choices[0].message.content = contentAccumulator
+                      this.content = contentAccumulator
+                      this.onEnd?.(this.sessionId)
+                      resolved = true
+                      resolve(data)
+                      return
+                    }
                   }
                 }
-
-                if (msg.status === 'complete' || msg.status === 'finished') {
-                  console.log('[Qwen] Non-stream finished, content length:', data.choices[0].message.content.length)
-                  this.onEnd?.(this.sessionId)
-                  resolve(data)
-                }
               }
+            } catch (err) {
+              console.error('[Qwen] Non-stream parse error:', err)
             }
-          } catch (err) {
-            console.error('[Qwen] Non-stream parse error:', err)
-            reject(err)
           }
-        },
-      })
+
+          if (eventType === 'complete' && !resolved) {
+            console.log('[Qwen] Non-stream complete event, content length:', contentAccumulator.length)
+            data.choices[0].message.content = contentAccumulator
+            this.content = contentAccumulator
+            resolved = true
+            resolve(data)
+            return
+          }
+        }
+      }
 
       let decompressStream: any = stream
       
@@ -529,11 +656,11 @@ export class QwenStreamHandler {
               const simple = new zstd.Simple()
               const decompressed = simple.decompress(compressedData)
               const decompressedStr = Buffer.from(decompressed).toString('utf8')
-              decompressedStr.split('\n').forEach((line) => {
-                if (line.trim()) {
-                  parser.feed(line + '\n')
-                }
-              })
+              buffer = decompressedStr
+              processBuffer()
+              console.log('[Qwen] Zstd non-stream finished, content length:', contentAccumulator.length)
+              data.choices[0].message.content = contentAccumulator
+              this.content = contentAccumulator
               resolve(data)
             })
           } catch (err) {
@@ -548,14 +675,31 @@ export class QwenStreamHandler {
         return
       }
 
-      decompressStream.on('data', (buffer: Buffer) => parser.feed(buffer.toString()))
+      decompressStream.on('data', (chunk: Buffer) => {
+        buffer += chunk.toString()
+        processBuffer()
+      })
       decompressStream.once('error', (err: Error) => {
         console.error('[Qwen] Non-stream error:', err)
         reject(err)
       })
       decompressStream.once('close', () => {
-        console.log('[Qwen] Non-stream closed, resolving with current data')
-        resolve(data)
+        console.log('[Qwen] Non-stream closed, content length:', contentAccumulator.length)
+        if (!resolved) {
+          processBuffer()
+          data.choices[0].message.content = contentAccumulator
+          this.content = contentAccumulator
+          resolve(data)
+        }
+      })
+      decompressStream.once('end', () => {
+        console.log('[Qwen] Non-stream ended, content length:', contentAccumulator.length)
+        if (!resolved) {
+          processBuffer()
+          data.choices[0].message.content = contentAccumulator
+          this.content = contentAccumulator
+          resolve(data)
+        }
       })
     })
   }

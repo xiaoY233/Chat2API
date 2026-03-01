@@ -63,6 +63,15 @@ export const IpcChannels = {
   APP_SHOW_WINDOW: 'app:showWindow',
   APP_HIDE_WINDOW: 'app:hideWindow',
   APP_OPEN_EXTERNAL: 'app:openExternal',
+
+  PROMPTS_GET_ALL: 'prompts:getAll',
+  PROMPTS_GET_BUILTIN: 'prompts:getBuiltin',
+  PROMPTS_GET_CUSTOM: 'prompts:getCustom',
+  PROMPTS_GET_BY_ID: 'prompts:getById',
+  PROMPTS_ADD: 'prompts:add',
+  PROMPTS_UPDATE: 'prompts:update',
+  PROMPTS_DELETE: 'prompts:delete',
+  PROMPTS_GET_BY_TYPE: 'prompts:getByType',
 } as const
 
 export type IpcChannel = (typeof IpcChannels)[keyof typeof IpcChannels]

@@ -17,6 +17,8 @@ import type {
   ProviderVendor,
   ProviderStatus,
   ApiKey,
+  SystemPrompt,
+  PromptType,
 } from '../../../shared/types'
 
 export type { 
@@ -38,6 +40,8 @@ export type {
   ProviderVendor,
   ProviderStatus,
   ApiKey,
+  SystemPrompt,
+  PromptType,
 }
 
 export interface CustomProviderFormData {
@@ -209,6 +213,17 @@ interface ConfigAPI {
   update: (updates: Partial<AppConfig>) => Promise<boolean>
 }
 
+interface PromptsAPI {
+  getAll: () => Promise<SystemPrompt[]>
+  getBuiltin: () => Promise<SystemPrompt[]>
+  getCustom: () => Promise<SystemPrompt[]>
+  getById: (id: string) => Promise<SystemPrompt | undefined>
+  add: (prompt: Omit<SystemPrompt, 'id' | 'createdAt' | 'updatedAt'>) => Promise<SystemPrompt>
+  update: (id: string, updates: Partial<SystemPrompt>) => Promise<SystemPrompt | null>
+  delete: (id: string) => Promise<boolean>
+  getByType: (type: PromptType) => Promise<SystemPrompt[]>
+}
+
 interface ElectronAPI {
   proxy: ProxyAPI
   store: StoreAPI
@@ -218,6 +233,7 @@ interface ElectronAPI {
   logs: LogsAPI
   app: AppAPI
   config: ConfigAPI
+  prompts: PromptsAPI
   on: (channel: string, callback: (...args: unknown[]) => void) => () => void
   send: (channel: string, ...args: unknown[]) => void
   invoke: (channel: string, ...args: unknown[]) => Promise<unknown>

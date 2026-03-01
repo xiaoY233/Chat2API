@@ -16,7 +16,9 @@ import {
   DEFAULT_CONFIG,
   BUILTIN_PROVIDERS,
   LogLevel,
+  SystemPrompt,
 } from './types'
+import { BUILTIN_PROMPTS } from '../data/builtin-prompts'
 import { IpcChannels } from '../ipc/channels'
 
 // Dynamically import electron-store (ESM module)
@@ -102,6 +104,7 @@ class StoreManager {
       accounts: [],
       config: DEFAULT_CONFIG,
       logs: [],
+      systemPrompts: [],
     }
   }
 
@@ -743,6 +746,124 @@ class StoreManager {
     this.store!.set('logs', filtered)
   }
 
+  // ==================== System Prompts Operations ====================
+
+  /**
+   * Get All System Prompts
+   * Merges built-in prompts with custom prompts
+   */
+  getSystemPrompts(): SystemPrompt[] {
+    this.ensureInitialized()
+    const customPrompts = this.store!.get('systemPrompts') || []
+    return [...BUILTIN_PROMPTS, ...customPrompts]
+  }
+
+  /**
+   * Get Built-in System Prompts
+   */
+  getBuiltinPrompts(): SystemPrompt[] {
+    return BUILTIN_PROMPTS
+  }
+
+  /**
+   * Get Custom System Prompts
+   */
+  getCustomPrompts(): SystemPrompt[] {
+    this.ensureInitialized()
+    return this.store!.get('systemPrompts') || []
+  }
+
+  /**
+   * Get System Prompt By ID
+   */
+  getSystemPromptById(id: string): SystemPrompt | undefined {
+    return this.getSystemPrompts().find(p => p.id === id)
+  }
+
+  /**
+   * Add Custom System Prompt
+   */
+  addSystemPrompt(prompt: Omit<SystemPrompt, 'id' | 'createdAt' | 'updatedAt'>): SystemPrompt {
+    this.ensureInitialized()
+    const prompts = this.store!.get('systemPrompts') || []
+    
+    const newPrompt: SystemPrompt = {
+      ...prompt,
+      id: this.generateId(),
+      isBuiltin: false,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    }
+    
+    prompts.push(newPrompt)
+    this.store!.set('systemPrompts', prompts)
+    
+    return newPrompt
+  }
+
+  /**
+   * Update Custom System Prompt
+   * Cannot update built-in prompts
+   */
+  updateSystemPrompt(id: string, updates: Partial<SystemPrompt>): SystemPrompt | null {
+    this.ensureInitialized()
+    
+    // Check if it's a built-in prompt
+    if (BUILTIN_PROMPTS.some(p => p.id === id)) {
+      console.warn('Cannot update built-in prompt:', id)
+      return null
+    }
+    
+    const prompts = this.store!.get('systemPrompts') || []
+    const index = prompts.findIndex((p: SystemPrompt) => p.id === id)
+    
+    if (index === -1) {
+      return null
+    }
+    
+    prompts[index] = {
+      ...prompts[index],
+      ...updates,
+      updatedAt: Date.now(),
+    }
+    
+    this.store!.set('systemPrompts', prompts)
+    return prompts[index]
+  }
+
+  /**
+   * Delete Custom System Prompt
+   * Cannot delete built-in prompts
+   */
+  deleteSystemPrompt(id: string): boolean {
+    this.ensureInitialized()
+    
+    // Check if it's a built-in prompt
+    if (BUILTIN_PROMPTS.some(p => p.id === id)) {
+      console.warn('Cannot delete built-in prompt:', id)
+      return false
+    }
+    
+    const prompts = this.store!.get('systemPrompts') || []
+    const index = prompts.findIndex((p: SystemPrompt) => p.id === id)
+    
+    if (index === -1) {
+      return false
+    }
+    
+    prompts.splice(index, 1)
+    this.store!.set('systemPrompts', prompts)
+    
+    return true
+  }
+
+  /**
+   * Get System Prompts By Type
+   */
+  getSystemPromptsByType(type: SystemPrompt['type']): SystemPrompt[] {
+    return this.getSystemPrompts().filter(p => p.type === type)
+  }
+
   // ==================== Utility Methods ====================
 
   /**
@@ -780,12 +901,14 @@ class StoreManager {
     })
     const config = this.store!.get('config') || DEFAULT_CONFIG
     const logs = this.store!.get('logs') || []
+    const systemPrompts = this.store!.get('systemPrompts') || []
     
     return {
       providers,
       accounts,
       config,
       logs,
+      systemPrompts,
     }
   }
 

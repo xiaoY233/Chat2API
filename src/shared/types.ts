@@ -166,3 +166,18 @@ export interface ValidationResult {
     expiresAt?: number
   }
 }
+
+export type PromptType = 'general' | 'tool-use' | 'agent' | 'translation' | 'search'
+
+export interface SystemPrompt {
+  id: string
+  name: string
+  description: string
+  prompt: string
+  type: PromptType
+  isBuiltin: boolean
+  emoji?: string
+  groups?: string[]
+  createdAt: number
+  updatedAt: number
+}

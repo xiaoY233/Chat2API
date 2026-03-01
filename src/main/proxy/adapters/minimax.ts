@@ -11,6 +11,15 @@ import crypto from 'crypto'
 import { createParser, EventSourceMessage } from 'eventsource-parser'
 import FormData from 'form-data'
 import { Account, Provider } from '../../store/types'
+import { toolsToSystemPrompt, TOOL_WRAP_HINT } from '../utils/tools'
+import { parseToolCallsFromText } from '../utils/toolParser'
+import { 
+  createToolCallState, 
+  processStreamContent, 
+  flushToolCallBuffer,
+  createBaseChunk,
+  ToolCallState 
+} from '../utils/streamToolHandler'
 
 const AGENT_BASE_URL = 'https://agent.minimaxi.com'
 
@@ -52,8 +61,10 @@ const FAKE_USER_DATA: Record<string, any> = {
 }
 
 interface MiniMaxMessage {
-  role: 'user' | 'assistant' | 'system'
-  content: string | any[]
+  role: 'user' | 'assistant' | 'system' | 'tool'
+  content: string | any[] | null
+  tool_call_id?: string
+  tool_calls?: any[]
 }
 
 interface ChatCompletionRequest {
@@ -61,6 +72,8 @@ interface ChatCompletionRequest {
   messages: MiniMaxMessage[]
   stream?: boolean
   temperature?: number
+  tools?: any[]
+  tool_choice?: any
 }
 
 interface DeviceInfo {
@@ -400,16 +413,52 @@ export class MiniMaxAdapter {
     return { session, stream }
   }
 
-  private messagesPrepare(messages: MiniMaxMessage[]): any {
+  private messagesPrepare(messages: MiniMaxMessage[], toolsPrompt?: string): any {
+    // Process messages including tool calls and tool responses
+    const processedMessages = messages.map(msg => {
+      // Handle tool calls in assistant message
+      if (msg.role === 'assistant' && msg.tool_calls && msg.tool_calls.length > 0) {
+        const toolCallsText = msg.tool_calls.map(tc => {
+          return `[call:${tc.function.name}]${tc.function.arguments}[/call]`
+        }).join('\n')
+        return { ...msg, content: `[function_calls]\n${toolCallsText}\n[/function_calls]` }
+      }
+      // Handle tool response message
+      if (msg.role === 'tool' && msg.tool_call_id) {
+        return { 
+          ...msg, 
+          role: 'user' as const,
+          content: `[TOOL_RESULT for ${msg.tool_call_id}] ${msg.content || ''}` 
+        }
+      }
+      return msg
+    })
+
+    // Extract system message first
+    let systemContent = ''
+    const otherMessages = processedMessages.filter(msg => {
+      if (msg.role === 'system') {
+        const text = typeof msg.content === 'string' ? msg.content : ''
+        systemContent = text
+        return false
+      }
+      return true
+    })
+    
     let content = ''
     
-    if (messages.length < 2) {
-      content = messages.reduce((acc, msg) => {
+    // Prepend system message if exists
+    if (systemContent) {
+      content = `system:${systemContent}\n`
+    }
+    
+    if (otherMessages.length < 2) {
+      content += otherMessages.reduce((acc, msg) => {
         const text = typeof msg.content === 'string' ? msg.content : ''
-        return acc + `${text}\n`
+        return acc + `${msg.role}:${text}\n`
       }, '')
     } else {
-      const latestMessage = messages[messages.length - 1]
+      const latestMessage = otherMessages[otherMessages.length - 1]
       const hasFileOrImage = Array.isArray(latestMessage.content) &&
         latestMessage.content.some((v: any) => typeof v === 'object' && ['file', 'image_url'].includes(v.type))
       
@@ -418,15 +467,20 @@ export class MiniMaxAdapter {
           content: '关注用户最新发送文件和消息',
           role: 'system',
         }
-        messages = [...messages.slice(0, -1), newFileMessage, messages[messages.length - 1]]
+        otherMessages.push(newFileMessage)
       }
       
-      content = messages.reduce((acc, msg) => {
+      content += otherMessages.reduce((acc, msg) => {
         const text = typeof msg.content === 'string' ? msg.content : ''
         return acc + `${msg.role}:${text}\n`
       }, '') + 'assistant:\n'
       
       content = content.trim().replace(/\!\[.+\]\(.+\)/g, '')
+    }
+
+    // Append tools prompt at the end if provided
+    if (toolsPrompt) {
+      content = content.trim() + '\n\n' + toolsPrompt
     }
 
     return {
@@ -448,7 +502,28 @@ export class MiniMaxAdapter {
     this.created = unixTimestamp()
     
     const deviceInfo = await this.requestDeviceInfo()
-    const requestBody = this.messagesPrepare(request.messages)
+    
+    // Clone messages to avoid modifying original request
+    const messages = [...request.messages]
+    
+    // Inject tools definition into prompt if tools are provided
+    let toolsPrompt = ''
+    if (request.tools && request.tools.length > 0) {
+      toolsPrompt = toolsToSystemPrompt(request.tools)
+      
+      // Append tool hint to the last user message
+      for (let i = messages.length - 1; i >= 0; i--) {
+        if (messages[i].role === 'user') {
+          const currentContent = messages[i].content
+          if (typeof currentContent === 'string') {
+            messages[i] = { ...messages[i], content: currentContent + TOOL_WRAP_HINT }
+          }
+          break
+        }
+      }
+    }
+    
+    const requestBody = this.messagesPrepare(messages, toolsPrompt)
     
     // Step 1: Send message
     const sendResponse = await this.request('POST', '/matrix/api/v1/chat/send_msg', requestBody, deviceInfo)
@@ -482,6 +557,10 @@ export class MiniMaxAdapter {
     // For non-streaming, poll until complete
     const aiMessage = await this.pollForResponse(chat_id, deviceInfo)
     
+    // Parse tool calls from content
+    const content = aiMessage?.msg_content || ''
+    const { content: cleanContent, toolCalls } = parseToolCallsFromText(content, 'minimax')
+    
     // Construct OpenAI-compatible response
     const response = {
       status: 200,
@@ -496,9 +575,10 @@ export class MiniMaxAdapter {
           index: 0,
           message: {
             role: 'assistant',
-            content: aiMessage?.msg_content || '',
+            content: toolCalls.length > 0 ? null : cleanContent,
+            ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {})
           },
-          finish_reason: 'stop',
+          finish_reason: toolCalls.length > 0 ? 'tool_calls' : 'stop',
         }],
         usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
         created: this.created,
@@ -508,7 +588,7 @@ export class MiniMaxAdapter {
     return { response, stream: null, chatId: chat_id }
   }
 
-  private async pollForResponse(chatId: string, deviceInfo: DeviceInfo, maxPolls = 60, pollInterval = 1000): Promise<any> {
+  private async pollForResponse(chatId: string, deviceInfo: DeviceInfo, maxPolls = 120, pollInterval = 1000): Promise<any> {
     let pollCount = 0
     
     while (pollCount < maxPolls) {

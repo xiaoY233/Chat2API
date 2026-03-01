@@ -251,6 +251,37 @@ export interface LogEntry {
 }
 
 /**
+ * System Prompt Type Enum
+ */
+export type PromptType = 'general' | 'tool-use' | 'agent' | 'translation' | 'search'
+
+/**
+ * System Prompt Interface
+ */
+export interface SystemPrompt {
+  /** Unique identifier */
+  id: string
+  /** Prompt name */
+  name: string
+  /** Prompt description */
+  description: string
+  /** Prompt content */
+  prompt: string
+  /** Prompt type */
+  type: PromptType
+  /** Whether built-in (built-in prompts cannot be edited/deleted) */
+  isBuiltin: boolean
+  /** Emoji icon */
+  emoji?: string
+  /** Group tags */
+  groups?: string[]
+  /** Creation time */
+  createdAt: number
+  /** Update time */
+  updatedAt: number
+}
+
+/**
  * Credential Validation Result Interface
  */
 export interface ValidationResult {
@@ -282,6 +313,8 @@ export interface StoreSchema {
   config: AppConfig
   /** Log entries */
   logs: LogEntry[]
+  /** System prompts */
+  systemPrompts: SystemPrompt[]
 }
 
 /**

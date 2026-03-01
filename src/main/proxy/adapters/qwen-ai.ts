@@ -8,6 +8,7 @@ import axios, { AxiosResponse } from 'axios'
 import { PassThrough } from 'stream'
 import { createParser } from 'eventsource-parser'
 import { Account, Provider } from '../../store/types'
+import { hasToolUse, parseToolUse, ToolCall } from '../promptToolUse'
 
 const QWEN_AI_BASE = 'https://chat.qwen.ai'
 
@@ -195,17 +196,22 @@ export class QwenAiAdapter {
     const chatId = await this.createChat(modelId, 'OpenAI_API_Chat')
 
     const messages = request.messages
+    
+    // Extract system message and user message
+    let systemContent = ''
     let userContent = ''
-
-    if (messages.length > 0) {
-      const lastMessage = messages[messages.length - 1]
-      if (lastMessage.role === 'user') {
-        userContent = lastMessage.content
+    
+    for (const msg of messages) {
+      if (msg.role === 'system') {
+        systemContent += (systemContent ? '\n\n' : '') + msg.content
+      } else if (msg.role === 'user') {
+        userContent = msg.content
       }
     }
-
-    if (!userContent && messages.length > 0) {
-      userContent = messages.map((m) => `${m.role}: ${m.content}`).join('\n\n')
+    
+    // If system prompt exists, prepend it to user content
+    if (systemContent) {
+      userContent = `${systemContent}\n\nUser: ${userContent}`
     }
 
     const fid = uuid()
@@ -291,6 +297,8 @@ export class QwenAiStreamHandler {
   private created: number
   private onEnd?: (chatId: string) => void
   private responseId: string = ''
+  private content: string = ''
+  private toolCallsSent: boolean = false
 
   constructor(model: string, onEnd?: (chatId: string) => void) {
     this.model = model
@@ -300,6 +308,59 @@ export class QwenAiStreamHandler {
 
   setChatId(chatId: string) {
     this.chatId = chatId
+  }
+
+  private sendToolCalls(transStream: PassThrough): void {
+    if (this.toolCallsSent) return
+    
+    const toolCalls = parseToolUse(this.content)
+    if (toolCalls && toolCalls.length > 0) {
+      this.toolCallsSent = true
+      
+      // Send tool_calls delta
+      for (let i = 0; i < toolCalls.length; i++) {
+        const tc = toolCalls[i]
+        transStream.write(
+          `data: ${JSON.stringify({
+            id: this.responseId || this.chatId,
+            model: this.model,
+            object: 'chat.completion.chunk',
+            choices: [{
+              index: 0,
+              delta: {
+                tool_calls: [{
+                  index: i,
+                  id: tc.id,
+                  type: 'function',
+                  function: {
+                    name: tc.function.name,
+                    arguments: tc.function.arguments,
+                  },
+                }],
+              },
+              finish_reason: null,
+            }],
+            created: this.created,
+          })}\n\n`
+        )
+      }
+      
+      // Send finish with tool_calls
+      transStream.write(
+        `data: ${JSON.stringify({
+          id: this.responseId || this.chatId,
+          model: this.model,
+          object: 'chat.completion.chunk',
+          choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }],
+          usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+          created: this.created,
+        })}\n\n`
+      )
+      transStream.end('data: [DONE]\n\n')
+      if (this.onEnd && this.chatId) {
+        this.onEnd(this.chatId)
+      }
+    }
   }
 
   async handleStream(stream: any): Promise<PassThrough> {
@@ -372,6 +433,9 @@ export class QwenAiStreamHandler {
               console.log('[QwenAI] Entering answer branch, content:', content)
               console.log('[QwenAI] hasSentReasoning:', hasSentReasoning, 'reasoningText:', reasoningText.length, 'summaryText:', summaryText.length)
               
+              // Accumulate content for tool call detection
+              this.content += content
+              
               const reasoningContent = reasoningText || summaryText
               if (!hasSentReasoning && reasoningContent) {
                 console.log('[QwenAI] Sending first chunk with reasoning, reasoning length:', reasoningContent.length)
@@ -413,6 +477,9 @@ export class QwenAiStreamHandler {
                 }
               }
             } else if (phase === null && content) {
+              // Accumulate content for tool call detection
+              this.content += content
+              
               const chunk = {
                 id: this.responseId || this.chatId,
                 model: this.model,
@@ -424,6 +491,13 @@ export class QwenAiStreamHandler {
             }
 
             if (status === 'finished' && (phase === 'answer' || phase === null)) {
+              // Check for tool calls before sending stop
+              if (hasToolUse(this.content)) {
+                console.log('[QwenAI] Found tool_use in stream, sending tool_calls')
+                this.sendToolCalls(transStream)
+                return
+              }
+              
               const finishReason = delta.finish_reason || 'stop'
               const finalChunk = {
                 id: this.responseId || this.chatId,

@@ -10,6 +10,7 @@ import { oauthManager } from '../oauth/manager'
 import { ProxyServer } from '../proxy/server'
 import { proxyStatusManager } from '../proxy/status'
 import type { Provider, Account, ProxyStatus, ProviderCheckResult, OAuthResult, AuthType, CredentialField, LogLevel, LogEntry, ProviderVendor, AppConfig } from '../../shared/types'
+import type { SystemPrompt } from '../store/types'
 
 let proxyServer: ProxyServer | null = null
 let proxyStartTime: number | null = null
@@ -464,6 +465,40 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow | null): Pro
       console.error('[APP_OPEN_EXTERNAL] Error:', error)
       throw error
     }
+  })
+
+  // ==================== System Prompts Handlers ====================
+
+  ipcMain.handle(IpcChannels.PROMPTS_GET_ALL, async (): Promise<SystemPrompt[]> => {
+    return storeManager.getSystemPrompts()
+  })
+
+  ipcMain.handle(IpcChannels.PROMPTS_GET_BUILTIN, async (): Promise<SystemPrompt[]> => {
+    return storeManager.getBuiltinPrompts()
+  })
+
+  ipcMain.handle(IpcChannels.PROMPTS_GET_CUSTOM, async (): Promise<SystemPrompt[]> => {
+    return storeManager.getCustomPrompts()
+  })
+
+  ipcMain.handle(IpcChannels.PROMPTS_GET_BY_ID, async (_, id: string): Promise<SystemPrompt | undefined> => {
+    return storeManager.getSystemPromptById(id)
+  })
+
+  ipcMain.handle(IpcChannels.PROMPTS_ADD, async (_, prompt: Omit<SystemPrompt, 'id' | 'createdAt' | 'updatedAt'>): Promise<SystemPrompt> => {
+    return storeManager.addSystemPrompt(prompt)
+  })
+
+  ipcMain.handle(IpcChannels.PROMPTS_UPDATE, async (_, id: string, updates: Partial<SystemPrompt>): Promise<SystemPrompt | null> => {
+    return storeManager.updateSystemPrompt(id, updates)
+  })
+
+  ipcMain.handle(IpcChannels.PROMPTS_DELETE, async (_, id: string): Promise<boolean> => {
+    return storeManager.deleteSystemPrompt(id)
+  })
+
+  ipcMain.handle(IpcChannels.PROMPTS_GET_BY_TYPE, async (_, type: SystemPrompt['type']): Promise<SystemPrompt[]> => {
+    return storeManager.getSystemPromptsByType(type)
   })
   
   oauthManager.on('progress', (event) => {

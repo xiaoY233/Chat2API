@@ -7,9 +7,43 @@
  * OpenAI Message Format
  */
 export interface ChatMessage {
-  role: 'system' | 'user' | 'assistant'
-  content: string | ChatMessageContent[]
+  role: 'system' | 'user' | 'assistant' | 'tool'
+  content: string | ChatMessageContent[] | null
   name?: string
+  tool_call_id?: string
+  tool_calls?: ChatCompletionMessageToolCall[]
+}
+
+/**
+ * Tool Call in Message
+ */
+export interface ChatCompletionMessageToolCall {
+  id: string
+  type: 'function'
+  function: {
+    name: string
+    arguments: string
+  }
+}
+
+/**
+ * Tool Definition for Function Calling (OpenAI compatible)
+ */
+export interface ChatCompletionTool {
+  type: 'function'
+  function: {
+    name: string
+    description?: string
+    parameters?: Record<string, any>
+  }
+}
+
+/**
+ * Tool Choice Strategy
+ */
+export type ChatCompletionToolChoice = 'none' | 'auto' | 'required' | {
+  type: 'function'
+  function: { name: string }
 }
 
 /**
@@ -58,6 +92,30 @@ export interface ChatCompletionRequest {
   reasoning_effort?: 'low' | 'medium' | 'high'
   /** Enable deep research mode (GLM specific) */
   deep_research?: boolean
+  /** Tools for function calling */
+  tools?: ChatCompletionTool[]
+  /** Tool choice strategy */
+  tool_choice?: ChatCompletionToolChoice
+}
+
+/**
+ * Tool Definition for Function Calling
+ */
+export interface ToolDefinition {
+  type: 'function'
+  function: {
+    name: string
+    description: string
+    parameters?: {
+      type: 'object'
+      properties: Record<string, {
+        type: string
+        description?: string
+        enum?: string[]
+      }>
+      required?: string[]
+    }
+  }
 }
 
 /**
@@ -83,15 +141,30 @@ export interface ChatCompletionChoice {
   index: number
   message?: {
     role: 'assistant'
-    content: string
+    content: string | null
     reasoning_content?: string
+    tool_calls?: ToolCall[]
   }
   delta?: {
     role?: 'assistant'
     content?: string
     reasoning_content?: string
+    tool_calls?: ToolCall[]
   }
-  finish_reason: 'stop' | 'length' | 'content_filter' | null
+  finish_reason: 'stop' | 'length' | 'content_filter' | 'tool_calls' | null
+}
+
+/**
+ * Tool Call in Response
+ */
+export interface ToolCall {
+  index?: number
+  id: string
+  type: 'function'
+  function: {
+    name: string
+    arguments: string
+  }
 }
 
 /**

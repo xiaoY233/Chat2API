@@ -7,7 +7,7 @@ import axios, { AxiosRequestConfig, AxiosResponse, AxiosError } from 'axios'
 import http2 from 'http2'
 import { PassThrough } from 'stream'
 import { Account, Provider } from '../store/types'
-import { ForwardResult, ChatCompletionRequest, ProxyContext } from './types'
+import { ForwardResult, ChatCompletionRequest, ProxyContext, ChatCompletionTool, ToolCall } from './types'
 import { proxyStatusManager } from './status'
 import { storeManager } from '../store/store'
 import { DeepSeekAdapter } from './adapters/deepseek'
@@ -18,6 +18,15 @@ import { QwenAdapter, QwenStreamHandler } from './adapters/qwen'
 import { QwenAiAdapter, QwenAiStreamHandler } from './adapters/qwen-ai'
 import { ZaiAdapter, ZaiStreamHandler } from './adapters/zai'
 import { MiniMaxAdapter, MiniMaxStreamHandler } from './adapters/minimax'
+import {
+  isNativeFunctionCallingModel,
+  buildSystemPromptWithTools,
+  parseToolUse,
+  formatToolResult,
+  hasToolUse,
+} from './promptToolUse'
+import { toolsToSystemPrompt, TOOL_WRAP_HINT } from './utils/tools'
+import { parseToolCallsFromText } from './utils/toolParser'
 
 /**
  * Request Forwarder
@@ -28,6 +37,60 @@ export class RequestForwarder {
     maxBodyLength: Infinity,
     maxContentLength: Infinity,
   })
+
+  /**
+   * Transform request for prompt-based tool calling
+   * For models that don't support native function calling
+   */
+  private transformRequestForPromptToolUse(
+    request: ChatCompletionRequest
+  ): { messages: any[]; tools: undefined } | { messages: any[]; tools: ChatCompletionTool[] } {
+    const { messages, tools, model } = request
+
+    // If no tools or model supports native FC, return as is
+    if (!tools || tools.length === 0) {
+      return { messages, tools: undefined }
+    }
+
+    if (isNativeFunctionCallingModel(model)) {
+      return { messages, tools }
+    }
+
+    // Transform tools to prompt format
+    // Find existing system message or create one
+    let systemPrompt = 'You are a helpful AI assistant.'
+    const otherMessages: any[] = []
+
+    for (const msg of messages) {
+      if (msg.role === 'system') {
+        systemPrompt = msg.content as string
+      } else {
+        otherMessages.push(msg)
+      }
+    }
+
+    // Build enhanced system prompt with tools
+    const enhancedSystemPrompt = buildSystemPromptWithTools(systemPrompt, tools as any[])
+
+    // Return transformed messages with enhanced system prompt
+    return {
+      messages: [
+        { role: 'system', content: enhancedSystemPrompt },
+        ...otherMessages,
+      ],
+      tools: undefined,
+    }
+  }
+
+  /**
+   * Parse tool calls from response content
+   */
+  private parseToolCallsFromContent(content: string): ToolCall[] | null {
+    if (!hasToolUse(content)) {
+      return null
+    }
+    return parseToolUse(content)
+  }
 
   /**
    * Forward Chat Completions Request
@@ -197,12 +260,20 @@ export class RequestForwarder {
     startTime: number
   ): Promise<ForwardResult> {
     try {
+      // Transform request for prompt-based tool calling if needed
+      const transformed = this.transformRequestForPromptToolUse(request)
+      const transformedRequest = {
+        ...request,
+        messages: transformed.messages,
+        tools: transformed.tools,
+      }
+
       const adapter = new DeepSeekAdapter(provider, account)
       const { response, sessionId } = await adapter.chatCompletion({
         model: actualModel,
-        messages: request.messages as any,
-        stream: request.stream,
-        temperature: request.temperature,
+        messages: transformedRequest.messages as any,
+        stream: transformedRequest.stream,
+        temperature: transformedRequest.temperature,
       })
 
       const latency = Date.now() - startTime
@@ -254,7 +325,20 @@ export class RequestForwarder {
       }
 
       // Non-streaming requests need to collect stream data and convert
-      const result = await handler.handleNonStream(response.data, response)
+      const result = await handler.handleNonStream(response.data)
+      
+      // Parse tool calls from response content if using prompt-based tool calling
+      if (request.tools && request.tools.length > 0 && !isNativeFunctionCallingModel(request.model)) {
+        const content = result?.choices?.[0]?.message?.content || ''
+        const toolCalls = this.parseToolCallsFromContent(content)
+        
+        if (toolCalls && toolCalls.length > 0) {
+          // Found tool calls in response, add them to the response
+          result.choices[0].message.tool_calls = toolCalls
+          result.choices[0].message.content = null
+          result.choices[0].finish_reason = 'tool_calls'
+        }
+      }
       
       // Delete session after non-streaming request ends
       if (deleteSessionCallback) {
@@ -289,15 +373,23 @@ export class RequestForwarder {
     startTime: number
   ): Promise<ForwardResult> {
     try {
+      // Transform request for prompt-based tool calling if needed
+      const transformed = this.transformRequestForPromptToolUse(request)
+      const transformedRequest = {
+        ...request,
+        messages: transformed.messages,
+        tools: transformed.tools,
+      }
+
       const adapter = new GLMAdapter(provider, account)
       const { response, conversationId } = await adapter.chatCompletion({
         model: actualModel,
-        messages: request.messages,
-        stream: request.stream,
-        temperature: request.temperature,
-        web_search: request.web_search,
-        reasoning_effort: request.reasoning_effort,
-        deep_research: request.deep_research,
+        messages: transformedRequest.messages,
+        stream: transformedRequest.stream,
+        temperature: transformedRequest.temperature,
+        web_search: transformedRequest.web_search,
+        reasoning_effort: transformedRequest.reasoning_effort,
+        deep_research: transformedRequest.deep_research,
       })
 
       const latency = Date.now() - startTime
@@ -354,6 +446,18 @@ export class RequestForwarder {
 
       const result = await handler.handleNonStream(response.data)
       
+      // Parse tool calls from response content if using prompt-based tool calling
+      if (request.tools && request.tools.length > 0 && !isNativeFunctionCallingModel(request.model)) {
+        const content = result?.choices?.[0]?.message?.content || ''
+        const toolCalls = this.parseToolCallsFromContent(content)
+        
+        if (toolCalls && toolCalls.length > 0) {
+          result.choices[0].message.tool_calls = toolCalls
+          result.choices[0].message.content = null
+          result.choices[0].finish_reason = 'tool_calls'
+        }
+      }
+      
       // Delete session after non-stream response
       if (account.deleteSessionAfterChat) {
         const convId = handler.getConversationId()
@@ -387,10 +491,13 @@ export class RequestForwarder {
     startTime: number
   ): Promise<ForwardResult> {
     try {
+      // Transform request for prompt-based tool calling if needed
+      const transformed = this.transformRequestForPromptToolUse(request)
+      
       const adapter = new KimiAdapter(provider, account)
       const { response, conversationId } = await adapter.chatCompletion({
         model: actualModel,
-        messages: request.messages,
+        messages: transformed.messages,
         stream: request.stream,
         temperature: request.temperature,
         enableThinking: !!request.reasoning_effort,
@@ -426,6 +533,18 @@ export class RequestForwarder {
 
       const result = await handler.handleNonStream(response.data)
 
+      // Parse tool calls from response content if using prompt-based tool calling
+      if (request.tools && request.tools.length > 0 && !isNativeFunctionCallingModel(request.model)) {
+        const content = result?.choices?.[0]?.message?.content || ''
+        const toolCalls = this.parseToolCallsFromContent(content)
+        
+        if (toolCalls && toolCalls.length > 0) {
+          result.choices[0].message.tool_calls = toolCalls
+          result.choices[0].message.content = null
+          result.choices[0].finish_reason = 'tool_calls'
+        }
+      }
+
       return {
         success: true,
         status: response.status,
@@ -454,10 +573,18 @@ export class RequestForwarder {
     startTime: number
   ): Promise<ForwardResult> {
     try {
+      // Transform request for prompt-based tool calling if needed
+      const transformed = this.transformRequestForPromptToolUse(request)
+      const transformedRequest = {
+        ...request,
+        messages: transformed.messages,
+        tools: transformed.tools,
+      }
+
       const adapter = new QwenAdapter(provider, account)
-      const { response, session: h2Session } = await adapter.chatCompletion({
+      const { response, sessionId } = await adapter.chatCompletion({
         model: actualModel,
-        messages: request.messages as any,
+        messages: transformedRequest.messages as any,
         stream: request.stream,
         temperature: request.temperature,
       })
@@ -501,6 +628,18 @@ export class RequestForwarder {
 
       const result = await handler.handleNonStream(response.data, response)
 
+      // Parse tool calls from response content if using prompt-based tool calling
+      if (request.tools && request.tools.length > 0 && !isNativeFunctionCallingModel(request.model)) {
+        const content = result?.choices?.[0]?.message?.content || ''
+        const toolCalls = this.parseToolCallsFromContent(content)
+        
+        if (toolCalls && toolCalls.length > 0) {
+          result.choices[0].message.tool_calls = toolCalls
+          result.choices[0].message.content = null
+          result.choices[0].finish_reason = 'tool_calls'
+        }
+      }
+
       const sid = handler.getSessionId()
       if (deleteSessionCallback && sid) {
         await deleteSessionCallback(sid)
@@ -534,10 +673,13 @@ export class RequestForwarder {
     startTime: number
   ): Promise<ForwardResult> {
     try {
+      // Transform request for prompt-based tool calling if needed
+      const transformed = this.transformRequestForPromptToolUse(request)
+      
       const adapter = new QwenAiAdapter(provider, account)
       const { response, chatId } = await adapter.chatCompletion({
         model: actualModel,
-        messages: request.messages as any,
+        messages: transformed.messages as any,
         stream: request.stream,
         temperature: request.temperature,
         enable_thinking: !!request.reasoning_effort,
@@ -583,6 +725,18 @@ export class RequestForwarder {
 
       const result = await handler.handleNonStream(response.data)
 
+      // Parse tool calls from response content if using prompt-based tool calling
+      if (request.tools && request.tools.length > 0 && !isNativeFunctionCallingModel(request.model)) {
+        const content = result?.choices?.[0]?.message?.content || ''
+        const toolCalls = this.parseToolCallsFromContent(content)
+        
+        if (toolCalls && toolCalls.length > 0) {
+          result.choices[0].message.tool_calls = toolCalls
+          result.choices[0].message.content = null
+          result.choices[0].finish_reason = 'tool_calls'
+        }
+      }
+
       if (deleteChatCallback) {
         await deleteChatCallback(chatId)
       }
@@ -617,10 +771,13 @@ export class RequestForwarder {
     console.log('[forwardZai] actualModel:', actualModel)
     console.log('[forwardZai] provider.modelMappings:', provider.modelMappings)
     try {
+      // Transform request for prompt-based tool calling if needed
+      const transformed = this.transformRequestForPromptToolUse(request)
+      
       const adapter = new ZaiAdapter(provider, account)
       const { response, chatId } = await adapter.chatCompletion({
         model: actualModel,
-        messages: request.messages as any,
+        messages: transformed.messages as any,
         stream: request.stream,
         temperature: request.temperature,
         web_search: request.web_search,
@@ -666,6 +823,18 @@ export class RequestForwarder {
       }
 
       const result = await handler.handleNonStream(response)
+
+      // Parse tool calls from response content if using prompt-based tool calling
+      if (request.tools && request.tools.length > 0 && !isNativeFunctionCallingModel(request.model)) {
+        const content = result?.choices?.[0]?.message?.content || ''
+        const toolCalls = this.parseToolCallsFromContent(content)
+        
+        if (toolCalls && toolCalls.length > 0) {
+          result.choices[0].message.tool_calls = toolCalls
+          result.choices[0].message.content = null
+          result.choices[0].finish_reason = 'tool_calls'
+        }
+      }
       
       if (deleteChatCallback) {
         await deleteChatCallback(chatId)
@@ -701,10 +870,13 @@ export class RequestForwarder {
     console.log('[forwardMiniMax] actualModel:', actualModel)
     console.log('[forwardMiniMax] provider.modelMappings:', provider.modelMappings)
     try {
+      // Transform request for prompt-based tool calling if needed
+      const transformed = this.transformRequestForPromptToolUse(request)
+      
       const adapter = new MiniMaxAdapter(provider, account)
       const { response, stream, chatId } = await adapter.chatCompletion({
         model: actualModel,
-        messages: request.messages as any,
+        messages: transformed.messages as any,
         stream: request.stream,
         temperature: request.temperature,
       })
@@ -745,6 +917,18 @@ export class RequestForwarder {
       }
 
       if (response) {
+        // Parse tool calls from response content if using prompt-based tool calling
+        if (request.tools && request.tools.length > 0 && !isNativeFunctionCallingModel(request.model)) {
+          const content = response.data?.choices?.[0]?.message?.content || ''
+          const toolCalls = this.parseToolCallsFromContent(content)
+          
+          if (toolCalls && toolCalls.length > 0) {
+            response.data.choices[0].message.tool_calls = toolCalls
+            response.data.choices[0].message.content = null
+            response.data.choices[0].finish_reason = 'tool_calls'
+          }
+        }
+        
         // Response is already formatted as OpenAI-compatible format
         if (deleteChatCallback) {
           await deleteChatCallback(chatId)

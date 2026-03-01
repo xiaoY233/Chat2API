@@ -29,6 +29,7 @@
 ## ✨ 功能特性
 
 - OpenAI 兼容 API：提供标准 OpenAI 兼容接口，无缝对接现有工具
+- 🔧 **工具调用支持**：通过 Prompt Engineering 实现完整的 Function Calling 功能，支持所有服务商
 - 多服务商支持：支持 DeepSeek、GLM、Kimi、MiniMax、Qwen、Z.ai 等
 - 仪表盘监控：实时请求流量、Token 使用量和成功率统计
 - API Key 管理：为本地代理生成和管理密钥
@@ -38,6 +39,65 @@
 - 系统托盘集成：从菜单栏快速访问状态
 - 多语言支持：支持英文和简体中文
 - 现代界面：简洁响应式界面，支持深色/浅色主题
+
+## 🔧 工具调用 (Function Calling)
+
+Chat2API 通过 **Prompt Engineering** 和 **流式解析** 技术，在不依赖原生 Function Calling API 的情况下，为所有支持的模型实现了完整的工具调用功能。
+
+### 工作原理
+
+1. **协议定义**：设计模型易于理解和解析的文本协议
+   ```
+   [function_calls]
+   [call:tool_name]{"argument": "value"}[/call]
+   [/function_calls]
+   ```
+
+2. **Prompt 注入**：将 OpenAI 格式的 `tools` 定义转换为 System Prompt
+
+3. **输出拦截**：在流式传输中实时拦截协议文本，阻止原始格式暴露给用户
+
+4. **格式还原**：提取协议内容，封装为 OpenAI 格式的 `tool_calls` 返回
+
+### 使用方式
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    api_key="your-api-key",
+    base_url="http://localhost:8080/v1"
+)
+
+# 定义工具
+tools = [{
+    "type": "function",
+    "function": {
+        "name": "get_weather",
+        "description": "Get current weather",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "location": {"type": "string", "description": "City name"}
+            },
+            "required": ["location"]
+        }
+    }
+}]
+
+# 调用模型
+response = client.chat.completions.create(
+    model="deepseek-chat",
+    messages=[{"role": "user", "content": "What's the weather in Beijing?"}],
+    tools=tools
+)
+
+# 处理工具调用
+if response.choices[0].message.tool_calls:
+    for tool_call in response.choices[0].message.tool_calls:
+        print(f"Tool: {tool_call.function.name}")
+        print(f"Args: {tool_call.function.arguments}")
+```
 
 ## 🤖 支持的服务商
 

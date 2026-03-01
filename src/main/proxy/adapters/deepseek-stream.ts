@@ -4,6 +4,14 @@
  */
 
 import { PassThrough } from 'stream'
+import { parseToolCallsFromText } from '../utils/toolParser'
+import { 
+  createToolCallState, 
+  processStreamContent, 
+  flushToolCallBuffer,
+  createBaseChunk,
+  ToolCallState 
+} from '../utils/streamToolHandler'
 
 const MODEL_NAME = 'deepseek-chat'
 
@@ -25,12 +33,14 @@ export class DeepSeekStreamHandler {
   private accumulatedTokenUsage: number = 2
   private created: number
   private onEnd?: () => void
+  private toolCallState: ToolCallState
 
   constructor(model: string, sessionId: string, onEnd?: () => void) {
     this.model = model
     this.sessionId = sessionId
     this.created = Math.floor(Date.now() / 1000)
     this.onEnd = onEnd
+    this.toolCallState = createToolCallState()
   }
 
   private parseSSE(data: string): StreamChunk | null {
@@ -41,7 +51,7 @@ export class DeepSeekStreamHandler {
     }
   }
 
-  private createChunk(delta: { role?: string; content?: string; reasoning_content?: string }, finishReason?: string): string {
+  private createChunk(delta: { role?: string; content?: string; reasoning_content?: string; tool_calls?: any[] }, finishReason?: string): string {
     return `data: ${JSON.stringify({
       id: `${this.sessionId}@${this.messageId}`,
       model: this.model,
@@ -157,16 +167,39 @@ export class DeepSeekStreamHandler {
 
     if (!content) return
 
+    const cleanedValue = content.replace(/FINISHED/g, '')
+    const processedContent = isSearchSilentModel
+      ? cleanedValue.replace(/\[citation:(\d+)\]/g, '')
+      : cleanedValue.replace(/\[citation:(\d+)\]/g, '[$1]')
+
+    // Process tool call interception for content
+    if (this.currentPath === 'content' || !this.currentPath) {
+      const baseChunk = createBaseChunk(`${this.sessionId}@${this.messageId}`, this.model, this.created)
+      const { chunks: outputChunks, shouldFlush } = processStreamContent(
+        processedContent, 
+        this.toolCallState, 
+        baseChunk, 
+        this.isFirstChunk
+      )
+
+      for (const outChunk of outputChunks) {
+        transStream.write(`data: ${JSON.stringify(outChunk)}\n\n`)
+        this.isFirstChunk = false
+      }
+
+      // Only return if we emitted tool calls (shouldFlush=true and we have chunks with tool_calls)
+      // This prevents duplicate output for regular content while allowing thinking to proceed
+      const hasToolCalls = outputChunks.some(chunk => 
+        chunk.choices?.[0]?.delta?.tool_calls
+      )
+      if (hasToolCalls) return
+    }
+
     const delta: { role?: string; content?: string; reasoning_content?: string } = {}
     if (this.isFirstChunk) {
       delta.role = 'assistant'
       this.isFirstChunk = false
     }
-
-    const cleanedValue = content.replace(/FINISHED/g, '')
-    const processedContent = isSearchSilentModel
-      ? cleanedValue.replace(/\[citation:(\d+)\]/g, '')
-      : cleanedValue.replace(/\[citation:(\d+)\]/g, '[$1]')
 
     if (this.currentPath === 'thinking') {
       if (isSilentModel) return
@@ -195,6 +228,13 @@ export class DeepSeekStreamHandler {
   }
 
   private handleDone(transStream: PassThrough, isFoldModel: boolean, isSearchSilentModel: boolean): void {
+    // Flush tool call buffer before finishing
+    const baseChunk = createBaseChunk(`${this.sessionId}@${this.messageId}`, this.model, this.created)
+    const flushChunks = flushToolCallBuffer(this.toolCallState, baseChunk)
+    for (const outChunk of flushChunks) {
+      transStream.write(`data: ${JSON.stringify(outChunk)}\n\n`)
+    }
+
     if (isFoldModel && this.thinkingStarted) {
       transStream.write(this.createChunk({ content: '</pre></details>' }))
     }
@@ -211,7 +251,10 @@ export class DeepSeekStreamHandler {
       }
     }
 
-    transStream.write(this.createChunk({}, 'stop'))
+    // Determine finish_reason based on whether we had tool calls
+    const finishReason = this.toolCallState.hasEmittedToolCall ? 'tool_calls' : 'stop'
+
+    transStream.write(this.createChunk({}, finishReason))
     transStream.write('data: [DONE]\n\n')
     transStream.end()
     
@@ -284,18 +327,27 @@ export class DeepSeekStreamHandler {
       })
 
       stream.on('end', () => {
+        // Parse tool calls from accumulated content
+        const { content: cleanContent, toolCalls } = parseToolCallsFromText(accumulatedContent)
+
+        const message: any = {
+          role: 'assistant',
+          content: toolCalls.length > 0 ? null : cleanContent.trim(),
+          reasoning_content: accumulatedThinkingContent.trim(),
+        }
+
+        if (toolCalls.length > 0) {
+          message.tool_calls = toolCalls
+        }
+
         resolve({
           id: `${this.sessionId}@${messageId}`,
           model: this.model,
           object: 'chat.completion',
           choices: [{
             index: 0,
-            message: {
-              role: 'assistant',
-              content: accumulatedContent.trim(),
-              reasoning_content: accumulatedThinkingContent.trim(),
-            },
-            finish_reason: 'stop',
+            message,
+            finish_reason: toolCalls.length > 0 ? 'tool_calls' : 'stop',
           }],
           usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: accumulatedTokenUsage },
           created: this.created,

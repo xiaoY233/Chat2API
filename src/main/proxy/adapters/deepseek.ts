@@ -7,6 +7,7 @@ import axios, { AxiosResponse } from 'axios'
 import { getDeepSeekHash } from '../../lib/challenge'
 import { Account, Provider } from '../store/types'
 import { storeManager } from '../store/store'
+import { toolsToSystemPrompt, TOOL_WRAP_HINT } from '../utils/tools'
 
 const DEEPSEEK_API_BASE = 'https://chat.deepseek.com/api'
 
@@ -45,8 +46,10 @@ interface ChallengeResponse {
 }
 
 interface DeepSeekMessage {
-  role: 'user' | 'assistant' | 'system'
-  content: string
+  role: 'user' | 'assistant' | 'system' | 'tool'
+  content: string | null
+  tool_call_id?: string
+  tool_calls?: any[]
 }
 
 interface ChatCompletionRequest {
@@ -56,6 +59,8 @@ interface ChatCompletionRequest {
   temperature?: number
   web_search?: boolean
   reasoning_effort?: 'low' | 'medium' | 'high'
+  tools?: any[]
+  tool_choice?: any
 }
 
 const tokenCache = new Map<string, TokenInfo>()
@@ -279,13 +284,30 @@ export class DeepSeekAdapter {
   private messagesToPrompt(messages: DeepSeekMessage[]): string {
     const processedMessages = messages.map(message => {
       let text: string
-      if (Array.isArray(message.content)) {
+
+      // Handle tool calls in assistant message
+      if (message.role === 'assistant' && message.tool_calls && message.tool_calls.length > 0) {
+        const toolCallsText = message.tool_calls.map(tc => {
+          return `<tool_calling>
+<name>${tc.function.name}</name>
+<arguments>${tc.function.arguments}</arguments>
+</tool_calling>`
+        }).join('\n')
+        text = toolCallsText
+      }
+      // Handle tool response message
+      else if (message.role === 'tool' && message.tool_call_id) {
+        text = `<tool_response tool_call_id="${message.tool_call_id}">
+${message.content || ''}
+</tool_response>`
+      }
+      else if (Array.isArray(message.content)) {
         const texts = message.content
           .filter((item: any) => item.type === 'text')
           .map((item: any) => item.text)
         text = texts.join('\n')
       } else {
-        text = String(message.content)
+        text = String(message.content || '')
       }
       return { role: message.role, text }
     })
@@ -314,6 +336,9 @@ export class DeepSeekAdapter {
         if (block.role === 'user' || block.role === 'system') {
           return index > 0 ? `<｜User｜>${block.text}` : block.text
         }
+        if (block.role === 'tool') {
+          return `<｜User｜>${block.text}`
+        }
         return block.text
       })
       .join('')
@@ -325,7 +350,37 @@ export class DeepSeekAdapter {
     const sessionId = await this.createSession()
     const challenge = await this.getChallenge('/api/v0/chat/completion')
     const challengeAnswer = await this.calculateChallengeAnswer(challenge)
-    const prompt = this.messagesToPrompt(request.messages)
+
+    // Clone messages to avoid modifying original request
+    const messages = [...request.messages]
+
+    // Append tool hint to the last user message if tools are provided
+    if (request.tools && request.tools.length > 0) {
+      for (let i = messages.length - 1; i >= 0; i--) {
+        if (messages[i].role === 'user') {
+          const currentContent = messages[i].content
+          messages[i] = {
+            ...messages[i],
+            content: (currentContent || '') + TOOL_WRAP_HINT
+          }
+          break
+        }
+      }
+    }
+
+    let prompt = this.messagesToPrompt(messages)
+
+    // Inject tools definition into prompt if tools are provided
+    if (request.tools && request.tools.length > 0) {
+      // Use simple prompt for DeepSeek
+      const toolsPrompt = toolsToSystemPrompt(request.tools, true)
+      // Insert tools prompt at the beginning of the conversation
+      if (prompt.startsWith('<｜User｜>')) {
+        prompt = prompt.replace('<｜User｜>', `<｜User｜>${toolsPrompt}\n\n`)
+      } else {
+        prompt = `${toolsPrompt}\n\n${prompt}`
+      }
+    }
 
     // Use request parameters for mode control (OpenAI compatible)
     let searchEnabled = false

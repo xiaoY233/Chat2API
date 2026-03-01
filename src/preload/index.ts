@@ -12,6 +12,8 @@ import type {
   LogEntry,
   ProviderVendor,
   AppConfig,
+  SystemPrompt,
+  PromptType,
 } from '../shared/types'
 
 const proxyAPI = {
@@ -287,6 +289,32 @@ const configAPI = {
     ipcRenderer.invoke(IpcChannels.CONFIG_UPDATE, updates),
 }
 
+const promptsAPI = {
+  getAll: (): Promise<SystemPrompt[]> => 
+    ipcRenderer.invoke(IpcChannels.PROMPTS_GET_ALL),
+  
+  getBuiltin: (): Promise<SystemPrompt[]> => 
+    ipcRenderer.invoke(IpcChannels.PROMPTS_GET_BUILTIN),
+  
+  getCustom: (): Promise<SystemPrompt[]> => 
+    ipcRenderer.invoke(IpcChannels.PROMPTS_GET_CUSTOM),
+  
+  getById: (id: string): Promise<SystemPrompt | undefined> => 
+    ipcRenderer.invoke(IpcChannels.PROMPTS_GET_BY_ID, id),
+  
+  add: (prompt: Omit<SystemPrompt, 'id' | 'createdAt' | 'updatedAt'>): Promise<SystemPrompt> => 
+    ipcRenderer.invoke(IpcChannels.PROMPTS_ADD, prompt),
+  
+  update: (id: string, updates: Partial<SystemPrompt>): Promise<SystemPrompt | null> => 
+    ipcRenderer.invoke(IpcChannels.PROMPTS_UPDATE, id, updates),
+  
+  delete: (id: string): Promise<boolean> => 
+    ipcRenderer.invoke(IpcChannels.PROMPTS_DELETE, id),
+  
+  getByType: (type: PromptType): Promise<SystemPrompt[]> => 
+    ipcRenderer.invoke(IpcChannels.PROMPTS_GET_BY_TYPE, type),
+}
+
 const electronAPI = {
   proxy: proxyAPI,
   store: storeAPI,
@@ -296,6 +324,7 @@ const electronAPI = {
   logs: logsAPI,
   app: appAPI,
   config: configAPI,
+  prompts: promptsAPI,
   
   on: (channel: string, callback: (...args: unknown[]) => void) => {
     const subscription = (_event: Electron.IpcRendererEvent, ...args: unknown[]) => callback(...args)
