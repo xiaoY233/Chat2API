@@ -86,6 +86,33 @@ class SessionManagerClass {
     const existingSession = storeManager.getActiveSessionByProviderAccount(providerId, accountId)
     
     if (existingSession) {
+      // Check if max messages per session reached
+      if (existingSession.messages.length >= config.maxMessagesPerSession) {
+        console.log('[SessionManager] Max messages per session reached, creating new session:', {
+          currentCount: existingSession.messages.length,
+          maxMessages: config.maxMessagesPerSession,
+        })
+        // Mark old session as expired and create new one
+        storeManager.updateSession(existingSession.id, { status: 'expired' })
+        
+        const newSession = this.createSession({
+          providerId,
+          accountId,
+          model,
+          sessionType,
+        })
+        
+        console.log('[SessionManager] Created new session after max messages:', newSession.id)
+        
+        return {
+          sessionId: newSession.id,
+          providerSessionId: undefined,
+          parentMessageId: undefined,
+          messages: [],
+          isNew: true,
+        }
+      }
+      
       console.log('[SessionManager] Found existing session:', {
         sessionId: existingSession.id,
         providerSessionId: existingSession.providerSessionId,
@@ -161,6 +188,19 @@ class SessionManagerClass {
       console.log('[SessionManager] Updated provider session ID:', {
         sessionId,
         providerSessionId,
+        parentMessageId,
+      })
+    }
+    return session
+  }
+
+  updateParentMessageId(sessionId: string, parentMessageId: string): SessionRecord | null {
+    if (!sessionId) return null
+    
+    const session = storeManager.updateParentMessageId(sessionId, parentMessageId)
+    if (session) {
+      console.log('[SessionManager] Updated parent message ID:', {
+        sessionId,
         parentMessageId,
       })
     }

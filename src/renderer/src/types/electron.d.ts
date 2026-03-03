@@ -19,6 +19,7 @@ import type {
   ApiKey,
   SystemPrompt,
   PromptType,
+  ToolPromptConfig,
 } from '../../../shared/types'
 
 export type { 
@@ -42,6 +43,7 @@ export type {
   ApiKey,
   SystemPrompt,
   PromptType,
+  ToolPromptConfig,
 }
 
 export interface CustomProviderFormData {
@@ -232,14 +234,6 @@ interface SessionConfig {
   maxSessionsPerAccount: number
 }
 
-interface ChatMessage {
-  role: 'user' | 'assistant' | 'system' | 'tool'
-  content: string | any[]
-  timestamp: number
-  providerMessageId?: string
-  toolCallId?: string
-}
-
 interface SessionRecord {
   id: string
   providerId: string
@@ -247,20 +241,16 @@ interface SessionRecord {
   providerSessionId: string
   parentMessageId?: string
   sessionType: 'chat' | 'agent'
-  messages: ChatMessage[]
+  messages: any[]
   createdAt: number
   lastActiveAt: number
   status: 'active' | 'expired' | 'deleted'
   model?: string
-  metadata?: {
-    title?: string
-    tokenCount?: number
-  }
 }
 
 interface SessionAPI {
   getConfig: () => Promise<SessionConfig>
-  updateConfig: (updates: Partial<SessionConfig>) => Promise<SessionConfig>
+  updateConfig: (config: Partial<SessionConfig>) => Promise<void>
   getAll: () => Promise<SessionRecord[]>
   getActive: () => Promise<SessionRecord[]>
   getById: (id: string) => Promise<SessionRecord | undefined>

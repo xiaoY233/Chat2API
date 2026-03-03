@@ -1031,6 +1031,28 @@ class StoreManager {
   }
 
   /**
+   * Update Session Parent Message ID
+   */
+  updateParentMessageId(sessionId: string, parentMessageId: string): SessionRecord | null {
+    this.ensureInitialized()
+    const sessions = this.store!.get('sessions') || []
+    const index = sessions.findIndex((s: SessionRecord) => s.id === sessionId)
+    
+    if (index === -1) {
+      return null
+    }
+    
+    sessions[index] = {
+      ...sessions[index],
+      parentMessageId,
+      lastActiveAt: Date.now(),
+    }
+    
+    this.store!.set('sessions', sessions)
+    return sessions[index]
+  }
+
+  /**
    * Delete Session
    */
   deleteSession(id: string): boolean {
@@ -1064,24 +1086,21 @@ class StoreManager {
     const timeoutMs = config.sessionTimeout * 60 * 1000
     const now = Date.now()
     
-    const activeSessions = sessions.filter((s: SessionRecord) => {
-      if (s.status !== 'active') return false
-      return (now - s.lastActiveAt) < timeoutMs
+    let removedCount = 0
+    
+    const remainingSessions = sessions.filter((s: SessionRecord) => {
+      if (s.status === 'expired') {
+        removedCount++
+        return false
+      }
+      if (s.status === 'active' && (now - s.lastActiveAt) >= timeoutMs) {
+        removedCount++
+        return false
+      }
+      return true
     })
     
-    const removedCount = sessions.length - activeSessions.length
-    
-    if (config.deleteAfterTimeout) {
-      this.store!.set('sessions', activeSessions)
-    } else {
-      const updatedSessions = sessions.map((s: SessionRecord) => {
-        if (s.status === 'active' && (now - s.lastActiveAt) >= timeoutMs) {
-          return { ...s, status: 'expired' as const }
-        }
-        return s
-      })
-      this.store!.set('sessions', updatedSessions)
-    }
+    this.store!.set('sessions', remainingSessions)
     
     return removedCount
   }

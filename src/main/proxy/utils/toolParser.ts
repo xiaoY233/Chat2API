@@ -1,8 +1,11 @@
 /**
  * Tool Parser Module - Parse tool calls from text content
- * Format: [function_calls][call:name]{args}[/call][/function_calls]
- * Also handles malformed output where [call:name] is used as delimiter
- * Also handles multiline JSON in arguments
+ * 
+ * Supported formats:
+ * 1. Bracket format: [function_calls][call:name]{args}[/call][/function_calls]
+ * 2. XML format (MiniMax): <tool_use><name>...</name><arguments>...</arguments></tool_use>
+ * 
+ * All formats are normalized to the standard OpenAI tool_calls format
  */
 
 export interface ParsedToolCall {
@@ -17,12 +20,52 @@ export interface ParsedToolCall {
 }
 
 /**
+ * Normalize XML format to bracket format for consistent parsing
+ * This handles MiniMax's XML output format
+ */
+export function normalizeToolCallFormat(text: string, modelType: string): string {
+  if (modelType !== 'minimax') return text
+  
+  // Convert <tool_use> XML format to [function_calls] bracket format
+  let normalized = text
+  
+  // Pattern 1: Standard XML format
+  // <tool_use><name>func</name><arguments>{"arg": "value"}</arguments></tool_use>
+  const xmlPattern1 = /<tool_use>\s*<name>\s*([^<]+)\s*<\/name>\s*<arguments>\s*([\s\S]*?)\s*<\/arguments>\s*<\/tool_use>/gi
+  normalized = normalized.replace(xmlPattern1, (match, name, args) => {
+    return `[function_calls]\n[call:${name.trim()}]${args.trim()}[/call]\n[/function_calls]`
+  })
+  
+  // Pattern 2: Parameter format
+  // <tool_use><name>func</name><parameter name="arguments">{"arg": "value"}</parameter></tool_use>
+  const xmlPattern2 = /<tool_use>\s*<name>\s*([^<]+)\s*<\/name>\s*<parameter\s+name="arguments">\s*([\s\S]*?)\s*<\/parameter>\s*<\/tool_use>/gi
+  normalized = normalized.replace(xmlPattern2, (match, name, args) => {
+    return `[function_calls]\n[call:${name.trim()}]${args.trim()}[/call]\n[/function_calls]`
+  })
+  
+  // Pattern 3: Simple value format (no JSON)
+  // <tool_use><name>func</name>simple_value</tool_use>
+  const xmlPattern3 = /<tool_use>\s*<name>\s*([^<]+)\s*<\/name>([\s\S]*?)<\/tool_use>/gi
+  normalized = normalized.replace(xmlPattern3, (match, name, value) => {
+    const trimmedValue = value.trim()
+    // If it's not already JSON, wrap it
+    if (trimmedValue && !trimmedValue.startsWith('{') && !trimmedValue.startsWith('[')) {
+      return `[function_calls]\n[call:${name.trim()}]{"value":"${trimmedValue}"}[/call]\n[/function_calls]`
+    }
+    return match
+  })
+  
+  return normalized
+}
+
+/**
  * Parse tool calls from text content
  */
 export function parseToolCallsFromText(text: string, modelType: string = 'default'): { 
   content: string
   toolCalls: ParsedToolCall[] 
 } {
+  console.log('[ToolParser] parseToolCallsFromText called, modelType:', modelType, 'text length:', text?.length || 0)
   if (!text) {
     return { content: '', toolCalls: [] }
   }
@@ -30,57 +73,26 @@ export function parseToolCallsFromText(text: string, modelType: string = 'defaul
   const toolCalls: ParsedToolCall[] = []
   let cleanContent = text
 
-  // Handle MiniMax XML format first
-  if (modelType === 'minimax' && text.includes('<tool_use>')) {
-    // Try multiple XML patterns for MiniMax's inconsistent format
-    const patterns = [
-      // Standard format
-      /<tool_use>\s*<name>\s*([^<]+)\s*<\/name>\s*(?:<parameter\s+name="arguments">([^<]+)<\/parameter>|<arguments>\s*([^<]+)\s*<\/arguments>)?\s*<\/tool_use>/gi,
-      // Format with parameter name
-      /<tool_use>\s*<name>\s*([^<]+)<\/parameter>\s*<parameter\s+name="[^"]+">\s*([^<]+)\s*<\/parameter>/gi,
-      // Format with invoke
-      /<tool_use>\s*<name>\s*([^<]+)<\/\w+>\s*<parameter\s+name="[^"]+">\s*([^<]+)\s*<\/\w+>\s*<\/\w+>/gi,
-    ]
-    
-    for (const xmlRegex of patterns) {
-      let match
-      xmlRegex.lastIndex = 0 // Reset regex state
-      while ((match = xmlRegex.exec(text)) !== null) {
-        const functionName = match[1].trim()
-        const argumentsStr = (match[2] || match[3] || '{}').trim()
-        
-        // Try to parse as JSON, or construct a simple object
-        let parsed = tryParseJSON(argumentsStr)
-        if (!parsed && argumentsStr) {
-          // If not valid JSON, treat as a simple value
-          parsed = { city: argumentsStr }
-        }
-        
-        if (parsed && toolCalls.length === 0) {
-          toolCalls.push({
-            index: toolCalls.length,
-            id: `call_${Date.now()}_${toolCalls.length}`,
-            type: 'function',
-            function: { name: functionName, arguments: JSON.stringify(parsed) },
-            rawText: match[0]
-          })
-        }
-      }
-      if (toolCalls.length > 0) break
-    }
-    
-    // Remove parsed tool calls from content
-    for (const tc of toolCalls) {
-      if (tc.rawText) {
-        cleanContent = cleanContent.replace(tc.rawText, '')
-      }
-    }
-    
-    return { content: cleanContent.trim(), toolCalls }
+  // Normalize XML format to bracket format for MiniMax and DeepSeek (both use XML format)
+  const normalizedText = normalizeToolCallFormat(text, modelType === 'default' ? 'deepseek' : modelType)
+  console.log('[ToolParser] normalizedText:', normalizedText.substring(0, 200))
+  
+  // Support both [function_calls] and function_calls] (missing opening bracket)
+  const hasFunctionCalls = normalizedText.includes('[function_calls]') || 
+                           normalizedText.includes('function_calls]') ||
+                           /\[call[:=]/.test(normalizedText)
+  
+  console.log('[ToolParser] hasFunctionCalls:', hasFunctionCalls)
+  
+  if (!hasFunctionCalls) {
+    return { content: text, toolCalls: [] }
   }
 
-  if (!text.includes('[function_calls]')) {
-    return { content: text, toolCalls: [] }
+  // Prepend missing opening bracket if needed
+  let processedText = normalizedText
+  if (!processedText.includes('[function_calls]') && processedText.includes('function_calls]')) {
+    processedText = '[' + processedText
+    console.log('[ToolParser] Prepended opening bracket, processedText:', processedText.substring(0, 100))
   }
 
   // Extract the content inside [function_calls]...[/function_calls]
@@ -88,16 +100,17 @@ export function parseToolCallsFromText(text: string, modelType: string = 'defaul
   const blockRegex = /\[function_calls\]([\s\S]*?)(?:\[\/function_calls\]|$)/g
   let blockMatch
 
-  while ((blockMatch = blockRegex.exec(text)) !== null) {
+  while ((blockMatch = blockRegex.exec(processedText)) !== null) {
     const blockContent = blockMatch[1]
-    const fullBlock = blockMatch[0]
+    console.log('[ToolParser] blockContent:', blockContent?.substring(0, 200))
 
     // Parse individual [call:name]...[/call] inside the block
     if (modelType === 'kimi' || modelType === 'glm' || modelType === 'minimax' || modelType === 'zai') {
       // Legacy Regex-based Logic (Proven to work for these models)
+      // Support [call:name], [call:=name], [call := name] formats
       const callRegex = modelType === 'minimax' 
         ? /\[(?:call\s*[:=]\s*([a-zA-Z0-9_:-]+)|invoke\s+name\s*=\s*"([a-zA-Z0-9_:-]+)")\]([\s\S]*?)\[\/call\]/g
-        : /\[call\s*[:=]\s*([a-zA-Z0-9_:-]+)\]([\s\S]*?)\[\/call\]/g
+        : /\[call\s*[:=]?\s*([a-zA-Z0-9_:-]+)\]([\s\S]*?)\[\/call\]/g
 
       let match
       while ((match = callRegex.exec(blockContent)) !== null) {
@@ -127,7 +140,8 @@ export function parseToolCallsFromText(text: string, modelType: string = 'defaul
       }
     } else {
       // Modern Balanced-Braces Logic (Specifically for Qwen to handle nested tags)
-      const callStartRegex = /\[call[:=]([a-zA-Z0-9_:-]+)\]/g
+      // Support both [call:name] and [call:=name] formats
+      const callStartRegex = /\[call[:=]?([a-zA-Z0-9_:-]+)\]/g
       let callStartMatch
 
       while ((callStartMatch = callStartRegex.exec(blockContent)) !== null) {

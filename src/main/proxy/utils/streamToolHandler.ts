@@ -33,7 +33,9 @@ export function processStreamContent(
   modelType: string = 'default'
 ): { chunks: any[], shouldFlush: boolean } {
   const result: any[] = []
+  // Support both [function_calls] and <tool_use> formats
   const marker = '[function_calls]'
+  const xmlMarker = '<tool_use>'
 
   if (!content) {
     return { chunks: result, shouldFlush: false }
@@ -43,12 +45,29 @@ export function processStreamContent(
 
   // If we are not buffering, check if we should start
   if (!state.isBufferingToolCall) {
-    const markerIdx = state.contentBuffer.indexOf('[function_calls]')
-
-    if (markerIdx !== -1) {
-      // We found the full marker!
+    // Check for both [function_calls] and <tool_use> formats anywhere in the buffer
+    // Also support missing opening bracket: function_calls]
+    const hasBracketMarker = state.contentBuffer.includes('[function_calls]')
+    const hasMissingBracket = state.contentBuffer.includes('function_calls]')
+    const hasXmlMarker = state.contentBuffer.includes('<tool_use>')
+    const hasCallPattern = /\[call[:=]?/.test(state.contentBuffer)
+    
+    if (hasBracketMarker || hasMissingBracket || hasXmlMarker || hasCallPattern) {
+      // Found marker in buffer - start buffering
       state.isBufferingToolCall = true
-      // If we have text before the marker, send it first
+      // Find the marker position
+      let markerIdx = -1
+      if (hasBracketMarker) {
+        markerIdx = state.contentBuffer.indexOf('[function_calls]')
+      } else if (hasMissingBracket) {
+        markerIdx = state.contentBuffer.indexOf('function_calls]')
+      } else if (hasXmlMarker) {
+        markerIdx = state.contentBuffer.indexOf('<tool_use>')
+      } else if (hasCallPattern) {
+        const match = state.contentBuffer.match(/\[call[:=]?/)
+        if (match) markerIdx = match.index || 0
+      }
+      
       if (markerIdx > 0) {
         const textBefore = state.contentBuffer.substring(0, markerIdx)
         if (!state.hasEmittedToolCall) {
@@ -64,45 +83,47 @@ export function processStreamContent(
         state.contentBuffer = state.contentBuffer.substring(markerIdx)
       }
     } else {
-      // Check if the buffer ends with a partial marker
-      let foundPartial = false
-      for (let i = 0; i < state.contentBuffer.length; i++) {
-        if (state.contentBuffer[i] === '[') {
-          const potentialMarker = state.contentBuffer.substring(i)
-          if (marker.startsWith(potentialMarker)) {
-            state.isBufferingToolCall = true
-            foundPartial = true
-            if (i > 0) {
-              const textBefore = state.contentBuffer.substring(0, i)
-              if (!state.hasEmittedToolCall) {
-                result.push({
-                  ...baseChunk,
-                  choices: [{
-                    index: 0,
-                    delta: { content: textBefore },
-                    finish_reason: null
-                  }]
-                })
-              }
-              state.contentBuffer = potentialMarker
-            }
-            break
-          }
+      // No marker found - check if it starts with potential marker chars
+      const firstChar = state.contentBuffer.charAt(0)
+      if (firstChar === '<' || firstChar === '[' || firstChar === 'f') {
+        // Starts with potential marker - start buffering
+        state.isBufferingToolCall = true
+      } else {
+        // Not a tool call marker - send as normal content
+        const content = state.contentBuffer
+        state.contentBuffer = ''
+        if (!state.hasEmittedToolCall && content) {
+          result.push({
+            ...baseChunk,
+            choices: [{
+              index: 0,
+              delta: { content: content },
+              finish_reason: null
+            }]
+          })
         }
       }
-
-      if (foundPartial) {
-        return { chunks: result, shouldFlush: false }
-      }
     }
-  }
+  } else if (state.isBufferingToolCall) {
+    // Check if the buffer contains the full marker (both formats)
+    // Also support missing opening bracket: function_calls]
+    const hasBracketMarker = state.contentBuffer.includes(marker)
+    const hasMissingBracket = state.contentBuffer.includes('function_calls]')
+    const hasXmlMarker = state.contentBuffer.includes(xmlMarker)
+    const hasCallPattern = /\[call[:=]?/.test(state.contentBuffer)
+      const hasFullMarker = hasBracketMarker || hasXmlMarker || hasMissingBracket || hasCallPattern
+    
+    // Check if buffer starts with potential marker prefix
+    const isPrefix = state.contentBuffer.startsWith(marker) || 
+                     state.contentBuffer.startsWith(xmlMarker) ||
+                     state.contentBuffer.startsWith('function_calls]') ||
+                     /\[call[:=]?/.test(state.contentBuffer.substring(0, 50))
+    
+    // Check if buffer could be a prefix of function_calls]
+    const couldBeFunctionCallsPrefix = 'function_calls]'.startsWith(state.contentBuffer) ||
+                                        state.contentBuffer.startsWith('function')
 
-  if (state.isBufferingToolCall) {
-    // Check if the buffer is still a valid prefix or contains the full marker
-    const hasFullMarker = state.contentBuffer.includes(marker)
-    const isPrefix = marker.startsWith(state.contentBuffer)
-
-    if (!hasFullMarker && !isPrefix) {
+    if (!hasFullMarker && !isPrefix && !couldBeFunctionCallsPrefix) {
       // False alarm, it's not a tool call. Flush buffer and stop buffering.
       state.isBufferingToolCall = false
       // Send the buffered content as normal text
@@ -121,7 +142,9 @@ export function processStreamContent(
     }
 
     // Try to parse tool calls from buffer
+    console.log('[StreamToolHandler] Parsing buffer:', state.contentBuffer.substring(0, 200))
     const { content: cleanContent, toolCalls } = parseToolCallsFromText(state.contentBuffer, modelType)
+    console.log('[StreamToolHandler] Parsed toolCalls:', toolCalls.length, toolCalls.map(t => t.function.name))
 
     if (toolCalls.length > 0) {
       // We found complete tool calls!
@@ -152,13 +175,16 @@ export function processStreamContent(
       }
       state.hasEmittedToolCall = true
 
-      // Check if we still have [function_calls] in the buffer
-      if (state.contentBuffer.includes('[/function_calls]')) {
+      // Check if we still have tool call markers in the buffer (both formats)
+      if (state.contentBuffer.includes('[/function_calls]') || state.contentBuffer.includes('</tool_use>')) {
         state.isBufferingToolCall = false
         // Remove the block markers
-        state.contentBuffer = state.contentBuffer.replace(/\[\/?function_calls\]/g, '').trim()
+        state.contentBuffer = state.contentBuffer
+          .replace(/\[\/?function_calls\]/g, '')
+          .replace(/<\/?tool_use>/g, '')
+          .trim()
       } else {
-        state.isBufferingToolCall = state.contentBuffer.includes('[function_calls]')
+        state.isBufferingToolCall = state.contentBuffer.includes('[function_calls]') || state.contentBuffer.includes('<tool_use>')
       }
 
       // If we emitted a tool call, we should NOT send any remaining text content
@@ -221,12 +247,16 @@ export function flushToolCallBuffer(
 ): any[] {
   const result: any[] = []
 
+  console.log('[StreamToolHandler] flushToolCallBuffer called, buffer length:', state.contentBuffer?.length || 0)
+  
   if (!state.contentBuffer) {
     return result
   }
 
   // Final check for tool calls in buffer
+  console.log('[StreamToolHandler] flushToolCallBuffer parsing:', state.contentBuffer.substring(0, 300))
   const { content: cleanContent, toolCalls } = parseToolCallsFromText(state.contentBuffer, modelType)
+  console.log('[StreamToolHandler] flushToolCallBuffer parsed toolCalls:', toolCalls.length)
 
   if (toolCalls.length > 0) {
     for (const tc of toolCalls) {

@@ -4,6 +4,14 @@ import { createWindow, getMainWindow, loadUrl, loadFile, openDevTools } from './
 import { createTray, updateTrayIcon, destroyTray } from './tray'
 import { registerIpcHandlers } from './ipc/handlers'
 
+// Workaround for V8 JIT compiler crash on macOS ARM64 (Electron 33 bug)
+// Completely disable JIT compilation to prevent EXC_BAD_ACCESS crashes
+// This trades some performance for stability
+if (process.platform === 'darwin' && process.arch === 'arm64') {
+  app.commandLine.appendSwitch('js-flags', '--jitless --no-opt')
+  app.commandLine.appendSwitch('disable-gpu-sandbox')
+}
+
 // Automatically add --no-sandbox flag when running as root user
 if (process.getuid && process.getuid() === 0) {
   console.log('Detected running as root user, sandbox settings have been automatically handled')

@@ -63,6 +63,7 @@ interface ChatCompletionRequest {
   enable_thinking?: boolean
   thinking_budget?: number
   chatId?: string
+  isMultiTurn?: boolean
 }
 
 function uuid(): string {
@@ -193,12 +194,14 @@ export class QwenAiAdapter {
 
     const modelId = this.mapModel(request.model)
     console.log('[QwenAI] Using model:', modelId)
+    console.log('[QwenAI] isMultiTurn:', request.isMultiTurn, 'chatId:', request.chatId)
 
-    let chatId = request.chatId
-    if (!chatId) {
-      chatId = await this.createChat(modelId, 'OpenAI_API_Chat')
+    // Reuse existing chat or create new one
+    let chatId = request.chatId || ''
+    if (request.isMultiTurn && chatId) {
+      console.log('[QwenAI] Reusing existing chat:', chatId)
     } else {
-      console.log('[QwenAI] Using existing chat:', chatId)
+      chatId = await this.createChat(modelId, 'OpenAI_API_Chat')
     }
 
     const messages = request.messages
@@ -207,11 +210,23 @@ export class QwenAiAdapter {
     let systemContent = ''
     let userContent = ''
     
-    for (const msg of messages) {
-      if (msg.role === 'system') {
-        systemContent += (systemContent ? '\n\n' : '') + msg.content
-      } else if (msg.role === 'user') {
-        userContent = msg.content
+    // For multi-turn mode, only use the last user message
+    if (request.isMultiTurn && chatId) {
+      // Find last user message
+      for (let i = messages.length - 1; i >= 0; i--) {
+        if (messages[i].role === 'user') {
+          userContent = messages[i].content
+          break
+        }
+      }
+    } else {
+      // Single-turn mode: extract all messages
+      for (const msg of messages) {
+        if (msg.role === 'system') {
+          systemContent += (systemContent ? '\n\n' : '') + msg.content
+        } else if (msg.role === 'user') {
+          userContent = msg.content
+        }
       }
     }
     
@@ -628,10 +643,6 @@ export class QwenAiStreamHandler {
   }
 
   getResponseId(): string {
-    return this.responseId
-  }
-
-  getMessageId(): string {
     return this.responseId
   }
 }

@@ -21,7 +21,7 @@ import {
 } from '@/components/ui/table'
 import { useProvidersStore } from '@/stores/providersStore'
 import { useToast } from '@/hooks/use-toast'
-import { Search, Copy, CheckCircle2, XCircle, Cpu, Check, Square } from 'lucide-react'
+import { Search, Copy, CheckCircle2, XCircle, Cpu, Check, Square, Database } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { Account } from '@/types/electron'
 
@@ -187,10 +187,6 @@ export function ModelList() {
       ...enabledProviders.map(p => ({ value: p.id, label: p.name })),
     ]
   }, [providers, t])
-  
-  const enabledProviderIds = useMemo(() => {
-    return providers.filter(p => p.enabled).map(p => p.id)
-  }, [providers])
   
   const handleSelectAll = useCallback(() => {
     const newSelectAll = !selectAll

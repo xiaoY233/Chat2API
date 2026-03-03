@@ -11,6 +11,15 @@ import * as ZstdCodec from 'zstd-codec'
 import { createParser } from 'eventsource-parser'
 import { Account, Provider } from '../../store/types'
 import { hasToolUse, parseToolUse, ToolCall } from '../promptToolUse'
+import { toolsToSystemPrompt, TOOL_WRAP_HINT, hasToolPromptInjected, shouldInjectToolPrompt } from '../utils/tools'
+import { parseToolCallsFromText } from '../utils/toolParser'
+
+/**
+ * Check if content contains tool calls (both bracket and XML formats)
+ */
+function hasToolCalls(content: string): boolean {
+  return content.includes('[function_calls]') || hasToolUse(content)
+}
 
 const QWEN_API_BASE = 'https://chat2.qianwen.com'
 
@@ -48,9 +57,11 @@ interface QwenMessage {
 interface ChatCompletionRequest {
   model: string
   messages: QwenMessage[]
+  tools?: any[]
   stream?: boolean
   temperature?: number
   session_id?: string
+  isMultiTurn?: boolean
 }
 
 function uuid(separator: boolean = true): string {
@@ -138,6 +149,16 @@ export class QwenAdapter {
       }
     }
 
+    // Inject tools prompt if tools are provided and not already injected by client
+    if (request.tools && request.tools.length > 0 && !hasToolPromptInjected(request.messages)) {
+      const toolsPrompt = toolsToSystemPrompt(request.tools)
+      systemPrompt = systemPrompt 
+        ? systemPrompt + '\n\n' + toolsPrompt 
+        : toolsPrompt
+      // Add tool wrap hint to user content
+      userContent = userContent + TOOL_WRAP_HINT
+    }
+
     // If system prompt exists, prepend it to user content
     const finalContent = systemPrompt 
       ? `${systemPrompt}\n\nUser: ${userContent}`
@@ -203,8 +224,8 @@ export class QwenAdapter {
       }
 
       const response = await axios.post(
-        `${QWEN_API_BASE}/api/v2/session/delete`,
-        { session_id: sessionId },
+        'https://chat2-api.qianwen.com/api/v1/session/delete/batch',
+        { session_ids: [sessionId] },
         {
           headers: {
             Cookie: `tongyi_sso_ticket=${ticket}`,
@@ -230,9 +251,9 @@ export class QwenAdapter {
         return false
       }
 
-      const { success, errorMsg } = response.data
-      if (success === false) {
-        console.warn(`[Qwen] Failed to delete session ${sessionId}: ${errorMsg}`)
+      const { success, code, msg } = response.data
+      if (success === false || code !== 0) {
+        console.warn(`[Qwen] Failed to delete session ${sessionId}: ${msg || 'Unknown error'}`)
         return false
       }
 
@@ -259,6 +280,7 @@ export class QwenStreamHandler {
   private responseId: string = ''
   private stopSent: boolean = false
   private toolCallsSent: boolean = false
+  private hasError: boolean = false
 
   constructor(model: string, onEnd?: (sessionId: string) => void) {
     this.model = model
@@ -266,10 +288,16 @@ export class QwenStreamHandler {
     this.onEnd = onEnd
   }
 
+  hasSessionError(): boolean {
+    return this.hasError
+  }
+
   private sendToolCalls(transStream: PassThrough): void {
     if (this.toolCallsSent) return
     
-    const toolCalls = parseToolUse(this.content)
+    // Use the new parser that supports both bracket and XML formats
+    const { toolCalls } = parseToolCallsFromText(this.content, 'default')
+    
     if (toolCalls && toolCalls.length > 0) {
       this.toolCallsSent = true
       
@@ -410,7 +438,7 @@ export class QwenStreamHandler {
                     console.log('[Qwen] Sending stop for multi_load/iframe, content so far:', this.content.length)
                     
                     // Check for tool calls before sending stop
-                    if (hasToolUse(this.content)) {
+                    if (hasToolCalls(this.content)) {
                       console.log('[Qwen] Found tool_use in stream, sending tool_calls')
                       this.sendToolCalls(transStream)
                       return
@@ -435,6 +463,7 @@ export class QwenStreamHandler {
 
             if (result.error_code && result.error_code !== 0) {
               console.error('[Qwen] API error:', result.error_code, result.error_msg)
+              this.hasError = true
               transStream.write(
                 `data: ${JSON.stringify({
                   id: this.responseId || this.sessionId,
@@ -457,7 +486,7 @@ export class QwenStreamHandler {
             this.stopSent = true
             
             // Check for tool calls before sending stop
-            if (hasToolUse(this.content)) {
+            if (hasToolCalls(this.content)) {
               console.log('[Qwen] Found tool_use in complete event, sending tool_calls')
               this.sendToolCalls(transStream)
               return

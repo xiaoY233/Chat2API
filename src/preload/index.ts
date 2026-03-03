@@ -15,7 +15,6 @@ import type {
   SystemPrompt,
   PromptType,
 } from '../shared/types'
-import type { SessionConfig, SessionRecord } from '../main/store/types'
 
 const proxyAPI = {
   start: (port?: number): Promise<boolean> => 
@@ -316,12 +315,34 @@ const promptsAPI = {
     ipcRenderer.invoke(IpcChannels.PROMPTS_GET_BY_TYPE, type),
 }
 
+interface SessionConfig {
+  mode: 'single' | 'multi'
+  sessionTimeout: number
+  maxMessagesPerSession: number
+  deleteAfterTimeout: boolean
+  maxSessionsPerAccount: number
+}
+
+interface SessionRecord {
+  id: string
+  providerId: string
+  accountId: string
+  providerSessionId: string
+  parentMessageId?: string
+  sessionType: 'chat' | 'agent'
+  messages: any[]
+  createdAt: number
+  lastActiveAt: number
+  status: 'active' | 'expired' | 'deleted'
+  model?: string
+}
+
 const sessionAPI = {
   getConfig: (): Promise<SessionConfig> => 
     ipcRenderer.invoke(IpcChannels.SESSION_GET_CONFIG),
   
-  updateConfig: (updates: Partial<SessionConfig>): Promise<SessionConfig> => 
-    ipcRenderer.invoke(IpcChannels.SESSION_UPDATE_CONFIG, updates),
+  updateConfig: (config: Partial<SessionConfig>): Promise<void> => 
+    ipcRenderer.invoke(IpcChannels.SESSION_UPDATE_CONFIG, config),
   
   getAll: (): Promise<SessionRecord[]> => 
     ipcRenderer.invoke(IpcChannels.SESSION_GET_ALL),

@@ -6,8 +6,8 @@ import {
   LoadBalanceConfig,
   ProxyStatus,
   AdvancedConfig,
+  SessionManagement,
 } from '@/components/proxy'
-import { SessionManagement } from '@/components/proxy/SessionManagement'
 import { useProxyStore } from '@/stores/proxyStore'
 import { Settings, Scale, Activity, Settings2, MessageSquare } from 'lucide-react'
 
@@ -48,7 +48,7 @@ export function ProxySettings() {
           </TabsTrigger>
           <TabsTrigger value="session" className="flex items-center gap-2 py-2">
             <MessageSquare className="h-4 w-4" />
-            <span className="hidden sm:inline">{t('proxy.sessionManagement')}</span>
+            <span className="hidden sm:inline">{t('session.title')}</span>
           </TabsTrigger>
           <TabsTrigger value="advanced" className="flex items-center gap-2 py-2">
             <Settings2 className="h-4 w-4" />

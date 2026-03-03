@@ -44,7 +44,6 @@ export interface Account {
   requestCount?: number
   dailyLimit?: number
   todayUsed?: number
-  deleteSessionAfterChat?: boolean
 }
 
 export interface Provider {
@@ -99,6 +98,8 @@ export interface AppConfig {
   apiKeys: ApiKey[]
   enableApiKey: boolean
   oauthProxyMode: 'system' | 'none'
+  sessionConfig: SessionConfig
+  toolPromptConfig: ToolPromptConfig
 }
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error'
@@ -180,4 +181,37 @@ export interface SystemPrompt {
   groups?: string[]
   createdAt: number
   updatedAt: number
+}
+
+export interface ToolPromptConfig {
+  mode: 'always' | 'smart' | 'never'
+  smartThreshold: number
+  keywords: string[]
+}
+
+export interface SessionConfig {
+  mode: 'single' | 'multi'
+  sessionTimeout: number
+  maxMessagesPerSession: number
+  deleteAfterTimeout: boolean
+  maxSessionsPerAccount: number
+}
+
+export interface AppConfig {
+  proxyPort: number
+  loadBalanceStrategy: LoadBalanceStrategy
+  modelMappings: Record<string, ModelMapping>
+  theme: Theme
+  autoStart: boolean
+  autoStartProxy: boolean
+  minimizeToTray: boolean
+  logLevel: 'debug' | 'info' | 'warn' | 'error'
+  logRetentionDays: number
+  requestTimeout: number
+  retryCount: number
+  apiKeys: ApiKey[]
+  enableApiKey: boolean
+  oauthProxyMode: 'system' | 'none'
+  sessionConfig: SessionConfig
+  toolPromptConfig: ToolPromptConfig
 }

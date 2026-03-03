@@ -12,7 +12,7 @@ import { createParser } from 'eventsource-parser'
 import FormData from 'form-data'
 import mime from 'mime-types'
 import path from 'path'
-import { toolsToSystemPrompt, TOOL_WRAP_HINT } from '../utils/tools'
+import { toolsToSystemPrompt, TOOL_WRAP_HINT, hasToolPromptInjected } from '../utils/tools'
 import { parseToolCallsFromText } from '../utils/toolParser'
 import { 
   createToolCallState, 
@@ -77,6 +77,7 @@ interface ChatCompletionRequest {
   tools?: any[]
   tool_choice?: any
   conversationId?: string
+  isMultiTurn?: boolean
 }
 
 const tokenCache = new Map<string, TokenInfo>()
@@ -278,7 +279,7 @@ export class GLMAdapter {
     return { fileUrls, imageUrls }
   }
 
-  private messagesToPrompt(messages: GLMMessage[], refs: any[] = [], toolsPrompt?: string): { role: string; content: any[] }[] {
+  private messagesToPrompt(messages: GLMMessage[], refs: any[] = [], toolsPrompt?: string, isMultiTurn: boolean = false): { role: string; content: any[] }[] {
     // Separate image refs and file refs
     const imageRefs = refs.filter((ref) => ref.width !== undefined || ref.height !== undefined || ref.image_url)
     const fileRefs = refs.filter((ref) => !ref.width && !ref.height && !ref.image_url)
@@ -326,6 +327,44 @@ export class GLMAdapter {
       }
       return msg
     })
+
+    // For multi-turn mode, only send the last user message
+    if (isMultiTurn) {
+      let lastUserIdx = -1
+      for (let i = processedMessages.length - 1; i >= 0; i--) {
+        if (processedMessages[i].role === 'user') {
+          lastUserIdx = i
+          break
+        }
+      }
+      
+      if (lastUserIdx !== -1) {
+        const lastUserMsg = processedMessages[lastUserIdx]
+        let textContent = ''
+        if (typeof lastUserMsg.content === 'string') {
+          textContent = lastUserMsg.content
+        } else if (Array.isArray(lastUserMsg.content)) {
+          textContent = lastUserMsg.content.filter((c) => c.type === 'text').map((c) => c.text).join('')
+        }
+        
+        // Include any tool results after the last user message
+        for (let i = lastUserIdx + 1; i < processedMessages.length; i++) {
+          if (processedMessages[i].role === 'user') {
+            const toolText = typeof processedMessages[i].content === 'string' 
+              ? processedMessages[i].content 
+              : ''
+            textContent += '\n' + toolText
+          }
+        }
+        
+        if (toolsPrompt) {
+          textContent = textContent.trim() + "\n\n" + toolsPrompt
+        }
+        
+        content.push({ type: 'text', text: textContent })
+        return [{ role: 'user', content }]
+      }
+    }
 
     // Extract text from messages
     if (processedMessages.length < 2) {
@@ -379,9 +418,12 @@ export class GLMAdapter {
     // Clone messages to avoid modifying original request
     const messages = [...request.messages]
 
-    // Inject tools definition into prompt if tools are provided
+    // Check if tool prompt has already been injected by client
+    const toolPromptExists = hasToolPromptInjected(messages)
+
+    // Inject tools definition into prompt if tools are provided and not already injected
     let toolsPrompt = ''
-    if (request.tools && request.tools.length > 0) {
+    if (request.tools && request.tools.length > 0 && !toolPromptExists) {
       const glmStrictHint = `
 
 GLM STRICT RULES:
@@ -438,7 +480,13 @@ GLM STRICT RULES:
       }
     }
 
-    const preparedMessages = this.messagesToPrompt(messages, refs, toolsPrompt)
+    // Determine multi-turn mode before preparing messages
+    const existingConversationId = request.conversationId || ''
+    const isMultiTurnMode = request.isMultiTurn && !!existingConversationId
+    
+    console.log('[GLM] conversationId:', existingConversationId || '(new)', 'isMultiTurn:', isMultiTurnMode)
+
+    const preparedMessages = this.messagesToPrompt(messages, refs, toolsPrompt, isMultiTurnMode)
 
     let assistantId = DEFAULT_ASSISTANT_ID
     let chatMode = ''
@@ -477,18 +525,12 @@ GLM STRICT RULES:
     }
 
     console.log('[GLM] Sending chat request...')
-    const conversationId = request.conversationId || ''
-    console.log('[GLM] Using conversation ID:', conversationId || '(new)')
-    console.log('[GLM] Assistant ID:', assistantId)
-    console.log('[GLM] Chat mode:', chatMode || 'default')
-    console.log('[GLM] Web search enabled:', isNetworking)
-    console.log('[GLM] Messages count:', messages.length)
     
     const response = await axios.post(
       `${GLM_API_BASE}/backend-api/assistant/stream`,
       {
         assistant_id: assistantId,
-        conversation_id: conversationId,
+        conversation_id: existingConversationId,
         project_id: '',
         chat_type: 'user_chat',
         messages: preparedMessages,
@@ -523,7 +565,7 @@ GLM STRICT RULES:
       }
     )
 
-    return { response, conversationId }
+    return { response, conversationId: '' }
   }
 
   async deleteConversation(conversationId: string): Promise<boolean> {
@@ -571,11 +613,14 @@ export class GLMStreamHandler {
   private onEnd?: () => void
   private toolCallState: ToolCallState
 
-  constructor(model: string, onEnd?: () => void) {
+  constructor(model: string, onEnd?: () => void, initialConversationId?: string) {
     this.model = model
     this.created = Math.floor(Date.now() / 1000)
     this.onEnd = onEnd
     this.toolCallState = createToolCallState()
+    if (initialConversationId) {
+      this.conversationId = initialConversationId
+    }
   }
 
   async handleStream(stream: any): Promise<PassThrough> {
@@ -825,7 +870,6 @@ export class GLMStreamHandler {
 
             if (!conversationId && result.conversation_id) {
               conversationId = result.conversation_id
-              this.conversationId = conversationId
             }
 
             if (result.status !== 'finish') {

@@ -6,7 +6,7 @@
 import axios, { AxiosResponse } from 'axios'
 import { Account, Provider } from '../../store/types'
 import { PassThrough } from 'stream'
-import { toolsToSystemPrompt, TOOL_WRAP_HINT } from '../utils/tools'
+import { toolsToSystemPrompt, TOOL_WRAP_HINT, hasToolPromptInjected } from '../utils/tools'
 import { parseToolCallsFromText } from '../utils/toolParser'
 import { 
   createToolCallState, 
@@ -59,6 +59,8 @@ interface ChatCompletionRequest {
   tools?: any[]
   tool_choice?: any
   conversationId?: string
+  parentId?: string
+  isMultiTurn?: boolean
 }
 
 const accessTokenMap = new Map<string, TokenInfo>()
@@ -155,7 +157,7 @@ export class KimiAdapter {
     return { accessToken: this.token, userId: '' }
   }
 
-  private messagesPrepare(messages: KimiMessage[], toolsPrompt?: string): string {
+  private messagesPrepare(messages: KimiMessage[], toolsPrompt?: string, isMultiTurn: boolean = false): string {
     // Process messages including tool calls and tool responses
     const processedMessages = messages.map(msg => {
       // Handle tool calls in assistant message
@@ -192,6 +194,37 @@ export class KimiAdapter {
     // Prepend system message if exists
     if (systemContent) {
       content = `system:${systemContent}\n`
+    }
+
+    // For multi-turn with existing session, only send the last user message
+    if (isMultiTurn) {
+      // Find last user message index manually (ES2021 compatible)
+      let lastUserIdx = -1
+      for (let i = otherMessages.length - 1; i >= 0; i--) {
+        if (otherMessages[i].role === 'user') {
+          lastUserIdx = i
+          break
+        }
+      }
+      
+      if (lastUserIdx !== -1) {
+        const lastUserMsg = otherMessages[lastUserIdx]
+        const text = typeof lastUserMsg.content === 'string' ? lastUserMsg.content : ''
+        content += `user:${this.wrapUrlsToTags(text)}\n`
+        
+        // Include any tool results after the last user message
+        for (let i = lastUserIdx + 1; i < otherMessages.length; i++) {
+          if (otherMessages[i].role === 'user') {
+            const toolText = typeof otherMessages[i].content === 'string' ? otherMessages[i].content : ''
+            content += `user:${toolText}\n`
+          }
+        }
+        
+        if (toolsPrompt) {
+          content = content.trim() + "\n\n" + toolsPrompt
+        }
+        return content
+      }
     }
 
     if (otherMessages.length < 2) {
@@ -242,8 +275,11 @@ export class KimiAdapter {
 
     const messages = [...request.messages]
 
+    // Check if tool prompt has already been injected by client
+    const toolPromptExists = hasToolPromptInjected(messages)
+
     let toolsPrompt = ''
-    if (request.tools && request.tools.length > 0) {
+    if (request.tools && request.tools.length > 0 && !toolPromptExists) {
       toolsPrompt = toolsToSystemPrompt(request.tools, true)
 
       for (let i = messages.length - 1; i >= 0; i--) {
@@ -262,19 +298,21 @@ export class KimiAdapter {
       }
     }
 
-    const content = this.messagesPrepare(messages, toolsPrompt)
+    const content = this.messagesPrepare(messages, toolsPrompt, request.isMultiTurn)
 
     const enableThinking = request.enableThinking ?? false
     const enableWebSearch = request.enableWebSearch ?? false
-    const conversationId = request.conversationId || ''
+    const chatId = request.conversationId || ''
+    const parentId = request.parentId || ''
 
-    console.log(`[Kimi] Model: ${request.model}, thinking: ${enableThinking}, webSearch: ${enableWebSearch}, conversationId: ${conversationId || '(new)'}`)
+    console.log(`[Kimi] Model: ${request.model}, thinking: ${enableThinking}, webSearch: ${enableWebSearch}, chatId: ${chatId || '(new)'}, parentId: ${parentId || '(none)'}`)
 
     const jsonBody = JSON.stringify({
       scenario: 'SCENARIO_K2D5',
-      conversation_id: conversationId,
+      chat_id: chatId,
       tools: enableWebSearch ? [{ type: 'TOOL_TYPE_SEARCH', search: {} }] : [],
       message: {
+        parent_id: parentId,
         role: 'user',
         blocks: [{
           message_id: '',
@@ -322,12 +360,33 @@ export class KimiAdapter {
       throw new Error(`Completion request failed: HTTP ${response.status}`)
     }
 
-    return { response, conversationId: `kimi-${Date.now()}` }
+    return { response, conversationId: chatId || `kimi-${Date.now()}` }
   }
 
   async deleteConversation(conversationId: string): Promise<boolean> {
-    console.log('[Kimi] Delete conversation not supported, conversationId:', conversationId)
-    return true
+    try {
+      const { accessToken } = await this.acquireToken()
+      
+      const response = await axios.post(
+        `${KIMI_API_BASE}/apiv2/kimi.chat.v1.ChatService/DeleteChat`,
+        { chat_id: conversationId },
+        {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+            ...FAKE_HEADERS,
+          },
+          timeout: 15000,
+          validateStatus: () => true,
+        }
+      )
+
+      console.log('[Kimi] Chat deleted:', conversationId, 'Status:', response.status)
+      return response.status === 200
+    } catch (error) {
+      console.error('[Kimi] Failed to delete conversation:', error)
+      return false
+    }
   }
 
   static isKimiProvider(provider: Provider): boolean {
@@ -340,6 +399,9 @@ export class KimiStreamHandler {
   private conversationId: string
   private enableThinking: boolean
   private toolCallState: ToolCallState
+  private realChatId: string | null = null
+  private lastMessageId: string | null = null
+  private hasError: boolean = false
 
   constructor(model: string, conversationId: string, enableThinking: boolean = false) {
     this.model = model
@@ -349,7 +411,15 @@ export class KimiStreamHandler {
   }
 
   getConversationId(): string {
-    return this.conversationId
+    return this.realChatId || this.conversationId
+  }
+
+  getLastMessageId(): string | null {
+    return this.lastMessageId
+  }
+
+  hasSessionError(): boolean {
+    return this.hasError
   }
 
   async handleStream(stream: any): Promise<PassThrough> {
@@ -404,6 +474,7 @@ export class KimiStreamHandler {
           // Check for error response
           if (data.error) {
             console.error('[Kimi] API Error:', data.error)
+            this.hasError = true
             transStream.write(`data: ${JSON.stringify({
               id: this.conversationId,
               model: this.model,
@@ -443,10 +514,22 @@ export class KimiStreamHandler {
   ) {
     if (data.heartbeat) return
 
+    // Extract real chat_id from data.chat.id (this is the correct chat_id for deletion)
+    if (data.chat?.id && !this.realChatId) {
+      this.realChatId = data.chat.id
+      console.log('[Kimi] Extracted real chat_id from chat.id:', this.realChatId)
+    }
+
+    // Extract message ID from assistant message (for parent_id in next request)
+    if (data.message?.id && data.message?.role === 'assistant' && !this.lastMessageId) {
+      this.lastMessageId = data.message.id
+      console.log('[Kimi] Extracted assistant message id:', this.lastMessageId)
+    }
+
     // Send role on first content
     if (!getSentRole() && (data.op === 'set' || data.op === 'append') && data.block?.text?.content) {
       transStream.write(`data: ${JSON.stringify({
-        id: this.conversationId,
+        id: this.getConversationId(),
         model: this.model,
         object: 'chat.completion.chunk',
         choices: [{ index: 0, delta: { role: 'assistant' }, finish_reason: null }],
@@ -469,7 +552,7 @@ export class KimiStreamHandler {
     // Handle completion
     if (data.done !== undefined) {
       transStream.write(`data: ${JSON.stringify({
-        id: this.conversationId,
+        id: this.getConversationId(),
         model: this.model,
         object: 'chat.completion.chunk',
         choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],

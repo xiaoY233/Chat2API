@@ -44,7 +44,6 @@ interface AccountDetailProps {
   onEdit: () => void
   onDelete: () => void
   onValidate: () => Promise<void>
-  onStatusChange: (status: AccountStatus) => Promise<void>
 }
 
 export function AccountDetail({
@@ -54,7 +53,6 @@ export function AccountDetail({
   onEdit,
   onDelete,
   onValidate,
-  onStatusChange,
 }: AccountDetailProps) {
   const { t, i18n } = useTranslation()
   const [isValidating, setIsValidating] = useState(false)
@@ -153,10 +151,6 @@ export function AccountDetail({
     } finally {
       setIsValidating(false)
     }
-  }
-
-  const handleStatusChange = async (status: AccountStatus) => {
-    await onStatusChange(status)
   }
 
   const handleDelete = async () => {

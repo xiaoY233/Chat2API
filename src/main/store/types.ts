@@ -109,8 +109,6 @@ export interface Account {
   dailyLimit?: number
   /** Today used count */
   todayUsed?: number
-  /** Delete session after chat (only supported by some providers) */
-  deleteSessionAfterChat?: boolean
 }
 
 /**
@@ -201,6 +199,8 @@ export interface AppConfig {
   oauthProxyMode: 'system' | 'none'
   /** Session management configuration */
   sessionConfig: SessionConfig
+  /** Tool prompt injection configuration */
+  toolPromptConfig: ToolPromptConfig
 }
 
 /**
@@ -250,7 +250,7 @@ export interface SessionRecord {
   accountId: string
   /** Provider-specific session ID (e.g., conversation_id, chat_id) */
   providerSessionId: string
-  /** Parent message ID (for DeepSeek) */
+  /** Parent message ID (for multi-turn conversations) */
   parentMessageId?: string
   /** Session type */
   sessionType: 'chat' | 'agent'
@@ -286,6 +286,19 @@ export interface SessionConfig {
   deleteAfterTimeout: boolean
   /** Max active sessions per account, default 3 */
   maxSessionsPerAccount: number
+}
+
+/**
+ * Tool Prompt Configuration Interface
+ * Controls how tool prompts are injected for models without native function calling
+ */
+export interface ToolPromptConfig {
+  /** Injection mode: 'always' injects for all requests, 'smart' only for complex queries, 'never' disables injection */
+  mode: 'always' | 'smart' | 'never'
+  /** Message length threshold for smart mode (default 50) */
+  smartThreshold: number
+  /** Keywords that trigger injection in smart mode */
+  keywords: string[]
 }
 
 /**
@@ -413,6 +426,15 @@ export const DEFAULT_SESSION_CONFIG: SessionConfig = {
 }
 
 /**
+ * Default Tool Prompt Configuration
+ */
+export const DEFAULT_TOOL_PROMPT_CONFIG: ToolPromptConfig = {
+  mode: 'smart',
+  smartThreshold: 50,
+  keywords: ['search', 'find', 'get', 'call', 'use', 'tool', 'query', 'fetch', 'read', 'write', 'list', 'delete', 'update', 'create'],
+}
+
+/**
  * Default Application Configuration
  */
 export const DEFAULT_CONFIG: AppConfig = {
@@ -431,6 +453,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   enableApiKey: false,
   oauthProxyMode: 'system',
   sessionConfig: DEFAULT_SESSION_CONFIG,
+  toolPromptConfig: DEFAULT_TOOL_PROMPT_CONFIG,
 }
 
 /**

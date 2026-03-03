@@ -7,7 +7,7 @@ import axios, { AxiosResponse } from 'axios'
 import { getDeepSeekHash } from '../../lib/challenge'
 import { Account, Provider } from '../store/types'
 import { storeManager } from '../store/store'
-import { toolsToSystemPrompt, TOOL_WRAP_HINT } from '../utils/tools'
+import { toolsToSystemPrompt, TOOL_WRAP_HINT, hasToolPromptInjected } from '../utils/tools'
 
 const DEEPSEEK_API_BASE = 'https://chat.deepseek.com/api'
 
@@ -63,6 +63,7 @@ interface ChatCompletionRequest {
   tool_choice?: any
   sessionId?: string
   parentMessageId?: string
+  isMultiTurn?: boolean
 }
 
 const tokenCache = new Map<string, TokenInfo>()
@@ -283,7 +284,7 @@ export class DeepSeekAdapter {
     })).toString('base64')
   }
 
-  private messagesToPrompt(messages: DeepSeekMessage[]): string {
+  private messagesToPrompt(messages: DeepSeekMessage[], isMultiTurn: boolean = false): string {
     const processedMessages = messages.map(message => {
       let text: string
 
@@ -316,6 +317,28 @@ ${message.content || ''}
 
     if (processedMessages.length === 0) return ''
 
+    // For multi-turn mode, only send the last user message
+    if (isMultiTurn) {
+      let lastUserIdx = -1
+      for (let i = processedMessages.length - 1; i >= 0; i--) {
+        if (processedMessages[i].role === 'user') {
+          lastUserIdx = i
+          break
+        }
+      }
+      
+      if (lastUserIdx !== -1) {
+        const lastUserMsg = processedMessages[lastUserIdx]
+        let text = lastUserMsg.text
+        for (let i = lastUserIdx + 1; i < processedMessages.length; i++) {
+          if (processedMessages[i].role === 'tool') {
+            text += `\n\n${processedMessages[i].text}`
+          }
+        }
+        return `<｜User｜>${text}`
+      }
+    }
+
     const mergedBlocks: { role: string; text: string }[] = []
     let currentBlock = { ...processedMessages[0] }
 
@@ -347,22 +370,36 @@ ${message.content || ''}
       .replace(/!\[.+\]\(.+\)/g, '')
   }
 
-  async chatCompletion(request: ChatCompletionRequest): Promise<{ response: AxiosResponse; sessionId: string; messageId: string }> {
+  async chatCompletion(request: ChatCompletionRequest): Promise<{ response: AxiosResponse; sessionId: string }> {
     const token = await this.acquireToken()
     
-    let sessionId = request.sessionId
-    let parentMessageId = request.parentMessageId || null
+    const isMultiTurn = !!(request.isMultiTurn && request.sessionId)
+    let sessionId = request.sessionId || ''
     
-    if (!sessionId) {
+    if (isMultiTurn && sessionId) {
+      console.log('[DeepSeek] Reusing session:', sessionId)
+    } else {
+      // Clear session cache when starting a new session
+      // This ensures we don't reuse a cached session when SessionManager created a new session
+      const cacheKey = this.account.id
+      sessionCache.delete(cacheKey)
+      console.log('[DeepSeek] Cleared session cache for new session')
+      
       sessionId = await this.createSession()
+      console.log('[DeepSeek] Created new session:', sessionId)
     }
     
     const challenge = await this.getChallenge('/api/v0/chat/completion')
     const challengeAnswer = await this.calculateChallengeAnswer(challenge)
 
+    // Clone messages to avoid modifying original request
     const messages = [...request.messages]
 
-    if (request.tools && request.tools.length > 0) {
+    // Check if tool prompt has already been injected by client
+    const toolPromptExists = hasToolPromptInjected(messages)
+
+    // Append tool hint to the last user message if tools are provided and not already injected
+    if (request.tools && request.tools.length > 0 && !toolPromptExists) {
       for (let i = messages.length - 1; i >= 0; i--) {
         if (messages[i].role === 'user') {
           const currentContent = messages[i].content
@@ -375,10 +412,13 @@ ${message.content || ''}
       }
     }
 
-    let prompt = this.messagesToPrompt(messages)
+    let prompt = this.messagesToPrompt(messages, isMultiTurn)
 
-    if (request.tools && request.tools.length > 0) {
+    // Inject tools definition into prompt if tools are provided and not already injected
+    if (request.tools && request.tools.length > 0 && !toolPromptExists) {
+      // Use simple prompt for DeepSeek
       const toolsPrompt = toolsToSystemPrompt(request.tools, true)
+      // Insert tools prompt at the beginning of the conversation
       if (prompt.startsWith('<｜User｜>')) {
         prompt = prompt.replace('<｜User｜>', `<｜User｜>${toolsPrompt}\n\n`)
       } else {
@@ -386,6 +426,7 @@ ${message.content || ''}
       }
     }
 
+    // Use request parameters for mode control (OpenAI compatible)
     let searchEnabled = false
     let thinkingEnabled = false
 
@@ -399,6 +440,7 @@ ${message.content || ''}
       console.log('[DeepSeek] Reasoning mode enabled, effort:', request.reasoning_effort)
     }
 
+    // Fallback: check model name for backward compatibility
     const modelLower = request.model.toLowerCase()
     if (!searchEnabled && modelLower.includes('search')) {
       searchEnabled = true
@@ -408,19 +450,17 @@ ${message.content || ''}
       thinkingEnabled = true
       console.log('[DeepSeek] Reasoning mode enabled (from model name)')
     }
+    // Also check prompt for deep thinking keyword
     if (!thinkingEnabled && prompt.includes('deep thinking')) {
       thinkingEnabled = true
       console.log('[DeepSeek] Reasoning mode enabled (from prompt)')
     }
 
-    console.log('[DeepSeek] Using session:', { sessionId, parentMessageId })
-    console.log('[DeepSeek] Prompt length:', prompt.length, 'chars')
-
     const response = await axios.post(
       `${DEEPSEEK_API_BASE}/v0/chat/completion`,
       {
         chat_session_id: sessionId,
-        parent_message_id: parentMessageId,
+        parent_message_id: request.parentMessageId || null,
         prompt,
         ref_file_ids: [],
         search_enabled: searchEnabled,
@@ -439,11 +479,20 @@ ${message.content || ''}
       }
     )
 
-    return { response, sessionId, messageId: '' }
+    return { response, sessionId }
   }
 
   static isDeepSeekProvider(provider: Provider): boolean {
     return provider.id === 'deepseek' || provider.apiEndpoint.includes('deepseek.com')
+  }
+
+  /**
+   * Clear session cache for a specific account
+   * This should be called when a session is deleted externally (e.g., from web)
+   */
+  static clearSessionCache(accountId: string): void {
+    sessionCache.delete(accountId)
+    console.log('[DeepSeek] Cleared session cache for account:', accountId)
   }
 }
 

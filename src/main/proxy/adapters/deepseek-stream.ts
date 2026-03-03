@@ -34,6 +34,9 @@ export class DeepSeekStreamHandler {
   private created: number
   private onEnd?: () => void
   private toolCallState: ToolCallState
+  private hasError: boolean = false
+  private errorMessage: string = ''
+  private receivedContent: boolean = false
 
   constructor(model: string, sessionId: string, onEnd?: () => void) {
     this.model = model
@@ -47,8 +50,30 @@ export class DeepSeekStreamHandler {
     return this.messageId
   }
 
-  getSessionId(): string {
-    return this.sessionId
+  hasSessionError(): boolean {
+    return this.hasError
+  }
+  
+  hasReceivedContent(): boolean {
+    return this.receivedContent
+  }
+
+  getErrorMessage(): string {
+    return this.errorMessage
+  }
+
+  private emitErrorChunk(transStream: PassThrough): void {
+    transStream.write(`data: ${JSON.stringify({
+      id: `${this.sessionId}@error`,
+      model: this.model,
+      object: 'chat.completion.chunk',
+      choices: [{
+        index: 0,
+        delta: { content: `\n[Error: ${this.errorMessage}]` },
+        finish_reason: 'stop',
+      }],
+      created: this.created,
+    })}\n\n`)
   }
 
   private parseSSE(data: string): StreamChunk | null {
@@ -74,44 +99,75 @@ export class DeepSeekStreamHandler {
   }
 
   async handleStream(stream: NodeJS.ReadableStream): Promise<NodeJS.ReadableStream> {
-    const transStream = new PassThrough()
-    const isThinkingModel = this.model.includes('think') || this.model.includes('r1')
-    const isSilentModel = this.model.includes('silent')
-    const isFoldModel = (this.model.includes('fold') || this.model.includes('search')) && !isThinkingModel
-    const isSearchSilentModel = this.model.includes('search-silent')
+    return new Promise((resolve, reject) => {
+      const transStream = new PassThrough()
+      const isThinkingModel = this.model.includes('think') || this.model.includes('r1')
+      const isSilentModel = this.model.includes('silent')
+      const isFoldModel = (this.model.includes('fold') || this.model.includes('search')) && !isThinkingModel
+      const isSearchSilentModel = this.model.includes('search-silent')
 
-    let buffer = ''
+      let buffer = ''
+      let hasEmittedError = false
+      let hasResolved = false
 
-    stream.on('data', (chunk: Buffer) => {
-      buffer += chunk.toString()
-      const lines = buffer.split('\n')
-      buffer = lines.pop() || ''
+      stream.on('data', (chunk: Buffer) => {
+        if (hasEmittedError) return
+        
+        buffer += chunk.toString()
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
 
-      for (const line of lines) {
-        if (!line.trim() || !line.startsWith('data:')) continue
+        for (const line of lines) {
+          if (!line.trim() || !line.startsWith('data:')) continue
 
-        const data = line.slice(5).trim()
-        if (data === '[DONE]') {
-          this.handleDone(transStream, isFoldModel, isSearchSilentModel)
+          const data = line.slice(5).trim()
+          if (data === '[DONE]') {
+            this.handleDone(transStream, isFoldModel, isSearchSilentModel)
+            if (!hasResolved) {
+              hasResolved = true
+              resolve(transStream)
+            }
+            return
+          }
+
+          const parsed = this.parseSSE(data)
+          if (!parsed) continue
+
+          this.processChunk(parsed, transStream, isThinkingModel, isSilentModel, isFoldModel, isSearchSilentModel)
+          
+          // If error detected, reject immediately to trigger retry
+          if (this.hasError && !hasEmittedError) {
+            hasEmittedError = true
+            console.log('[DeepSeek] Error detected, rejecting to trigger retry:', this.errorMessage)
+            reject(new Error(this.errorMessage || 'Session error'))
+            return
+          }
+        }
+      })
+
+      stream.on('end', () => {
+        if (hasEmittedError) return
+        
+        // Check if we received any content - if not, reject to trigger retry
+        if (!this.hasReceivedContent() && !this.messageId) {
+          console.log('[DeepSeek] No content received, rejecting to trigger retry')
+          hasEmittedError = true
+          reject(new Error('No content received - session may be invalid'))
           return
         }
+        
+        this.handleDone(transStream, isFoldModel, isSearchSilentModel)
+        if (!hasResolved) {
+          hasResolved = true
+          resolve(transStream)
+        }
+      })
 
-        const parsed = this.parseSSE(data)
-        if (!parsed) continue
-
-        this.processChunk(parsed, transStream, isThinkingModel, isSilentModel, isFoldModel, isSearchSilentModel)
-      }
+      stream.on('error', (err) => {
+        hasEmittedError = true
+        reject(err)
+      })
     })
-
-    stream.on('end', () => {
-      this.handleDone(transStream, isFoldModel, isSearchSilentModel)
-    })
-
-    stream.on('error', (err) => {
-      transStream.emit('error', err)
-    })
-
-    return transStream
   }
 
   private processChunk(
@@ -122,9 +178,46 @@ export class DeepSeekStreamHandler {
     isFoldModel: boolean,
     isSearchSilentModel: boolean
   ): void {
+    // Check for error response (e.g., session not found)
+    // DeepSeek error format: { v: { error: {...} } } or { error: {...} } or { v: "error message" }
+    if (chunk.v && typeof chunk.v === 'object' && chunk.v.error) {
+      this.hasError = true
+      this.errorMessage = chunk.v.error.message || chunk.v.error.msg || JSON.stringify(chunk.v.error)
+      console.error('[DeepSeek] Stream error (v.error):', this.errorMessage)
+      this.emitErrorChunk(transStream)
+      return
+    }
+    
+    // Check for direct error field
+    if ((chunk as any).error) {
+      this.hasError = true
+      const error = (chunk as any).error
+      this.errorMessage = error.message || error.msg || JSON.stringify(error)
+      console.error('[DeepSeek] Stream error (error):', this.errorMessage)
+      this.emitErrorChunk(transStream)
+      return
+    }
+    
+    // Check for string error in v field
+    if (chunk.v && typeof chunk.v === 'string' && (chunk.v.includes('error') || chunk.v.includes('Error') || chunk.v.includes('not found') || chunk.v.includes('不存在') || chunk.v.includes('未找到'))) {
+      this.hasError = true
+      this.errorMessage = chunk.v
+      console.error('[DeepSeek] Stream error (v string):', this.errorMessage)
+      this.emitErrorChunk(transStream)
+      return
+    }
+    
+    // Check for error in p (path) field - sometimes errors come as { p: "error", v: "message" }
+    if (chunk.p === 'error' || chunk.p === 'Error') {
+      this.hasError = true
+      this.errorMessage = typeof chunk.v === 'string' ? chunk.v : JSON.stringify(chunk.v)
+      console.error('[DeepSeek] Stream error (p=error):', this.errorMessage)
+      this.emitErrorChunk(transStream)
+      return
+    }
+
     if (chunk.response_message_id && !this.messageId) {
       this.messageId = chunk.response_message_id
-      console.log('[DeepSeek] Stream received messageId:', chunk.response_message_id)
     }
 
     if (chunk.v && typeof chunk.v === 'object' && chunk.v.response) {
@@ -188,26 +281,43 @@ export class DeepSeekStreamHandler {
         processedContent, 
         this.toolCallState, 
         baseChunk, 
-        this.isFirstChunk
+        this.isFirstChunk,
+        'deepseek'
       )
 
       for (const outChunk of outputChunks) {
         transStream.write(`data: ${JSON.stringify(outChunk)}\n\n`)
         this.isFirstChunk = false
+        // Mark that we received some content
+        this.receivedContent = true
       }
 
-      // Only return if we emitted tool calls (shouldFlush=true and we have chunks with tool_calls)
-      // This prevents duplicate output for regular content while allowing thinking to proceed
-      const hasToolCalls = outputChunks.some(chunk => 
-        chunk.choices?.[0]?.delta?.tool_calls
-      )
-      if (hasToolCalls) return
+      // If we are buffering a potential tool call, don't send any content
+      // Return to wait for more content
+      if (this.toolCallState.isBufferingToolCall) {
+        return
+      }
+      
+      // If we already emitted tool calls, don't send any more content
+      if (this.toolCallState.hasEmittedToolCall) {
+        return
+      }
+      
+      // If processStreamContent already sent content, don't send again
+      if (outputChunks.length > 0) {
+        return
+      }
     }
 
     const delta: { role?: string; content?: string; reasoning_content?: string } = {}
     if (this.isFirstChunk) {
       delta.role = 'assistant'
       this.isFirstChunk = false
+    }
+
+    // Mark that we received some content
+    if (processedContent) {
+      this.receivedContent = true
     }
 
     if (this.currentPath === 'thinking') {
@@ -239,7 +349,7 @@ export class DeepSeekStreamHandler {
   private handleDone(transStream: PassThrough, isFoldModel: boolean, isSearchSilentModel: boolean): void {
     // Flush tool call buffer before finishing
     const baseChunk = createBaseChunk(`${this.sessionId}@${this.messageId}`, this.model, this.created)
-    const flushChunks = flushToolCallBuffer(this.toolCallState, baseChunk)
+    const flushChunks = flushToolCallBuffer(this.toolCallState, baseChunk, 'deepseek')
     for (const outChunk of flushChunks) {
       transStream.write(`data: ${JSON.stringify(outChunk)}\n\n`)
     }
@@ -336,10 +446,6 @@ export class DeepSeekStreamHandler {
       })
 
       stream.on('end', () => {
-        // Set the message ID for external retrieval
-        this.messageId = messageId
-        console.log('[DeepSeek] Non-stream finished, messageId:', messageId, 'content length:', accumulatedContent.length)
-
         // Parse tool calls from accumulated content
         const { content: cleanContent, toolCalls } = parseToolCallsFromText(accumulatedContent)
 

@@ -6,7 +6,6 @@
 import { Account, Provider, LoadBalanceStrategy } from '../store/types'
 import { AccountSelection } from './types'
 import { storeManager } from '../store/store'
-import { sessionManager } from './sessionManager'
 
 /**
  * Load Balancer
@@ -73,17 +72,6 @@ export class LoadBalancer {
       const preferred = candidates.find(c => c.account.id === preferredAccountId)
       if (preferred && !this.isAccountInFailure(preferredAccountId)) {
         return preferred
-      }
-    }
-
-    // In multi-turn mode, try to find an existing session and use the same account
-    if (sessionManager.isMultiTurnEnabled()) {
-      for (const candidate of candidates) {
-        const existingSession = sessionManager.getActiveSession(candidate.provider.id, candidate.account.id)
-        if (existingSession && !this.isAccountInFailure(candidate.account.id)) {
-          console.log(`[LoadBalancer] Found existing session for multi-turn: provider=${candidate.provider.id}, account=${candidate.account.id}`)
-          return candidate
-        }
       }
     }
 

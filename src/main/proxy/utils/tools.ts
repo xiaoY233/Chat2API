@@ -3,7 +3,128 @@
  * Enables tool calling for models without native function calling support
  */
 
-import { ChatCompletionTool } from '../types'
+import { ChatCompletionTool, ChatMessage } from '../types'
+
+/**
+ * Signatures that indicate tool prompt has been injected
+ */
+export const TOOL_PROMPT_SIGNATURES = [
+  '## Available Tools',
+  '## Tool Call Protocol',
+  '[function_calls]',
+  '<tool_use>',
+  'TOOL_WRAP_HINT',
+  'You can invoke the following developer tools',
+  'Tool Call Formatting',
+]
+
+/**
+ * Check if tool prompt has already been injected by client (e.g., Cherry Studio)
+ */
+export function hasToolPromptInjected(messages: ChatMessage[]): boolean {
+  for (const msg of messages) {
+    if (msg.role === 'system' || msg.role === 'user') {
+      const content = typeof msg.content === 'string' ? msg.content : ''
+      for (const sig of TOOL_PROMPT_SIGNATURES) {
+        if (content.includes(sig)) {
+          console.log('[Tools] Detected existing tool prompt injection, skipping')
+          return true
+        }
+      }
+    }
+  }
+  return false
+}
+
+/**
+ * Configuration for tool prompt injection
+ */
+export interface ToolPromptConfig {
+  mode: 'always' | 'smart' | 'never'
+  smartThreshold: number
+  keywords: string[]
+}
+
+export const DEFAULT_TOOL_PROMPT_CONFIG: ToolPromptConfig = {
+  mode: 'smart',
+  smartThreshold: 50,
+  keywords: ['search', 'find', 'get', 'call', 'use', 'tool', 'query', 'fetch', 'read', 'write', 'list', 'delete', 'update', 'create']
+}
+
+/**
+ * Determine if tool prompt should be injected
+ */
+export function shouldInjectToolPrompt(
+  messages: ChatMessage[],
+  tools: ChatCompletionTool[] | undefined,
+  config: ToolPromptConfig = DEFAULT_TOOL_PROMPT_CONFIG
+): boolean {
+  if (!tools || tools.length === 0) return false
+  
+  // Check if already injected by client
+  if (hasToolPromptInjected(messages)) return false
+  
+  switch (config.mode) {
+    case 'always':
+      return true
+    case 'never':
+      return false
+    case 'smart':
+      return isComplexQuery(messages, config)
+    default:
+      return true
+  }
+}
+
+/**
+ * Check if the query is complex enough to warrant tool prompt injection
+ */
+function isComplexQuery(messages: ChatMessage[], config: ToolPromptConfig): boolean {
+  const lastUserMsg = [...messages].reverse().find(m => m.role === 'user')
+  if (!lastUserMsg) return false
+  
+  const content = typeof lastUserMsg.content === 'string' ? lastUserMsg.content : ''
+  
+  // Check message length
+  if (content.length > config.smartThreshold) {
+    return true
+  }
+  
+  // Check for keywords
+  const lowerContent = content.toLowerCase()
+  for (const keyword of config.keywords) {
+    if (lowerContent.includes(keyword.toLowerCase())) {
+      return true
+    }
+  }
+  
+  // Check for question marks (complex questions)
+  if (content.includes('?') || content.includes('？')) {
+    return true
+  }
+  
+  // Check for code blocks
+  if (content.includes('```') || content.includes('code')) {
+    return true
+  }
+  
+  // Check for action-oriented phrases
+  const actionPatterns = [
+    /help me (\w+)/i,
+    /can you (\w+)/i,
+    /please (\w+)/i,
+    /i need to (\w+)/i,
+    /i want to (\w+)/i,
+  ]
+  
+  for (const pattern of actionPatterns) {
+    if (pattern.test(content)) {
+      return true
+    }
+  }
+  
+  return false
+}
 
 /**
  * Convert OpenAI tools definition to system prompt

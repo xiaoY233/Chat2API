@@ -232,6 +232,7 @@ export interface ForwardResult {
   skipTransform?: boolean
   error?: string
   latency?: number
+  providerSessionId?: string
 }
 
 /**

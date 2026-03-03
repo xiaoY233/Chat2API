@@ -3,7 +3,105 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { ModelList } from '@/components/models'
 import { ModelMappingConfig } from '@/components/proxy'
-import { Database, ArrowRight, Wrench, DatabaseIcon, Code, CheckCircle2 } from 'lucide-react'
+import { Database, ArrowRight, Wrench, CheckCircle2, Settings } from 'lucide-react'
+import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Input } from '@/components/ui/input'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Badge } from '@/components/ui/badge'
+import { useState, useEffect } from 'react'
+import { useProxyStore } from '@/stores/proxyStore'
+import type { ToolPromptConfig } from '@/types/electron'
+
+function ToolPromptConfig() {
+  const { t } = useTranslation()
+  const { appConfig, saveAppConfig } = useProxyStore()
+  const [localConfig, setLocalConfig] = useState({
+    mode: 'smart' as 'always' | 'smart' | 'never',
+    smartThreshold: 50,
+  })
+
+  useEffect(() => {
+    if (appConfig?.toolPromptConfig) {
+      setLocalConfig({
+        mode: appConfig.toolPromptConfig.mode,
+        smartThreshold: appConfig.toolPromptConfig.smartThreshold,
+      })
+    }
+  }, [appConfig?.toolPromptConfig])
+
+  const handleModeChange = (mode: 'always' | 'smart' | 'never') => {
+    setLocalConfig(prev => ({ ...prev, mode }))
+    if (appConfig) {
+      const newToolPromptConfig: ToolPromptConfig = {
+        ...(appConfig.toolPromptConfig || { mode: 'smart', smartThreshold: 50, keywords: [] }),
+        mode,
+      }
+      saveAppConfig({ toolPromptConfig: newToolPromptConfig })
+    }
+  }
+
+  const handleThresholdChange = (threshold: number) => {
+    setLocalConfig(prev => ({ ...prev, smartThreshold: threshold }))
+    if (appConfig) {
+      const newToolPromptConfig: ToolPromptConfig = {
+        ...(appConfig.toolPromptConfig || { mode: 'smart', smartThreshold: 50, keywords: [] }),
+        smartThreshold: threshold,
+      }
+      saveAppConfig({ toolPromptConfig: newToolPromptConfig })
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center gap-3">
+          <div className="p-2 bg-blue-500/10 rounded-lg">
+            <Settings className="h-5 w-5 text-blue-500" />
+          </div>
+          <div>
+            <CardTitle className="text-base">{t('prompts.configTitle')}</CardTitle>
+            <CardDescription>{t('prompts.configDescription')}</CardDescription>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="space-y-2">
+          <Label>{t('prompts.injectionMode')}</Label>
+          <Select value={localConfig.mode} onValueChange={(v) => handleModeChange(v as 'always' | 'smart' | 'never')}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="always">{t('prompts.modeAlways')}</SelectItem>
+              <SelectItem value="smart">{t('prompts.modeSmart')}</SelectItem>
+              <SelectItem value="never">{t('prompts.modeNever')}</SelectItem>
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">
+            {localConfig.mode === 'always' && t('prompts.modeAlwaysDesc')}
+            {localConfig.mode === 'smart' && t('prompts.modeSmartDesc')}
+            {localConfig.mode === 'never' && t('prompts.modeNeverDesc')}
+          </p>
+        </div>
+
+        {localConfig.mode === 'smart' && (
+          <div className="space-y-2">
+            <Label>{t('prompts.threshold')}</Label>
+            <Input
+              type="number"
+              value={localConfig.smartThreshold}
+              onChange={(e) => handleThresholdChange(parseInt(e.target.value) || 50)}
+              min={10}
+              max={500}
+            />
+            <p className="text-xs text-muted-foreground">{t('prompts.thresholdDesc')}</p>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
 
 function ToolUsePrompts() {
   const { t } = useTranslation()
@@ -18,70 +116,37 @@ function ToolUsePrompts() {
             </div>
             <div>
               <CardTitle>{t('prompts.toolUseTitle')}</CardTitle>
-              <CardDescription>{t('prompts.toolUseDescription')}</CardDescription>
+              <CardDescription>{t('prompts.toolUseShortDesc')}</CardDescription>
             </div>
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="prose prose-sm dark:prose-invert max-w-none">
-            <p>{t('prompts.toolUseIntro')}</p>
-            
-            <h3 className="flex items-center gap-2 text-base font-semibold mt-6 mb-3">
-              <CheckCircle2 className="h-4 w-4 text-green-500" />
-              {t('prompts.howItWorks')}
-            </h3>
-            <p>{t('prompts.howItWorksDesc')}</p>
-            
-            <h3 className="flex items-center gap-2 text-base font-semibold mt-6 mb-3">
-              <DatabaseIcon className="h-4 w-4 text-blue-500" />
-              {t('prompts.supportedModels')}
-            </h3>
-            <p>{t('prompts.supportedModelsDesc')}</p>
-            
-            <h3 className="flex items-center gap-2 text-base font-semibold mt-6 mb-3">
-              <Code className="h-4 w-4 text-orange-500" />
-              {t('prompts.protocolFormat')}
-            </h3>
-            <p>{t('prompts.protocolFormatDesc')}</p>
+          <Alert>
+            <CheckCircle2 className="h-4 w-4" />
+            <AlertDescription>{t('prompts.toolUseEnabled')}</AlertDescription>
+          </Alert>
+          
+          <div className="mt-4 space-y-2">
+            <p className="text-sm text-muted-foreground">{t('prompts.supportedModelsShort')}</p>
+            <div className="flex flex-wrap gap-2">
+              {['DeepSeek', 'GLM', 'Kimi', 'Qwen', 'MiniMax'].map(m => (
+                <Badge key={m} variant="secondary">{m}</Badge>
+              ))}
+            </div>
           </div>
           
-          <div className="mt-6 p-4 bg-muted/50 rounded-lg border">
-            <h4 className="text-sm font-medium mb-2">{t('prompts.exampleOutput')}</h4>
+          <div className="mt-4 p-4 bg-muted/50 rounded-lg border">
+            <h4 className="text-sm font-medium mb-2">{t('prompts.protocolFormat')}</h4>
             <pre className="text-xs bg-background p-3 rounded-md overflow-x-auto">
 {`[function_calls]
-[call:get_weather]{"location": "Beijing"}[/call]
+[call:tool_name]{"arg": "value"}[/call]
 [/function_calls]`}
             </pre>
           </div>
         </CardContent>
       </Card>
       
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">{t('prompts.systemPromptPreview')}</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <pre className="text-xs bg-muted/50 p-4 rounded-lg overflow-x-auto whitespace-pre-wrap max-h-[400px] overflow-y-auto">
-{`## Available Tools
-You can invoke the following developer tools. Call a tool only when it is required and follow the JSON schema exactly when providing arguments.
-
-Tool \`get_weather\`: Get current weather for a city. Arguments JSON schema: {"type":"object","properties":{"location":{"type":"string"}},"required":["location"]}
-
-## Tool Call Protocol
-When you decide to call a tool, you MUST respond with NOTHING except a single [function_calls] block:
-
-[function_calls]
-[call:tool_name]{"argument": "value"}[/call]
-[/function_calls]
-
-CRITICAL RULES:
-1. EVERY tool call MUST start with [call:tool_name] and end with [/call]
-2. The content between [call:...] and [/call] MUST be a raw JSON object on ONE LINE
-3. Do NOT wrap JSON in \`\`\`json blocks
-4. Do NOT output any other text before or after the [function_calls] block`}
-          </pre>
-        </CardContent>
-      </Card>
+      <ToolPromptConfig />
     </div>
   )
 }

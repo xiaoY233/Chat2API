@@ -11,7 +11,7 @@ import crypto from 'crypto'
 import { createParser, EventSourceMessage } from 'eventsource-parser'
 import FormData from 'form-data'
 import { Account, Provider } from '../../store/types'
-import { toolsToSystemPrompt, TOOL_WRAP_HINT } from '../utils/tools'
+import { toolsToSystemPrompt, TOOL_WRAP_HINT, hasToolPromptInjected, shouldInjectToolPrompt } from '../utils/tools'
 import { parseToolCallsFromText } from '../utils/toolParser'
 import { 
   createToolCallState, 
@@ -75,6 +75,7 @@ interface ChatCompletionRequest {
   tools?: any[]
   tool_choice?: any
   chatId?: string
+  isMultiTurn?: boolean
 }
 
 interface DeviceInfo {
@@ -414,7 +415,7 @@ export class MiniMaxAdapter {
     return { session, stream }
   }
 
-  private messagesPrepare(messages: MiniMaxMessage[], toolsPrompt?: string): any {
+  private messagesPrepare(messages: MiniMaxMessage[], toolsPrompt?: string, isMultiTurn: boolean = false): any {
     // Process messages including tool calls and tool responses
     const processedMessages = messages.map(msg => {
       // Handle tool calls in assistant message
@@ -451,6 +452,45 @@ export class MiniMaxAdapter {
     // Prepend system message if exists
     if (systemContent) {
       content = `system:${systemContent}\n`
+    }
+    
+    // For multi-turn with existing session, only send the last user message
+    if (isMultiTurn) {
+      // Find last user message index manually (ES2021 compatible)
+      let lastUserIdx = -1
+      for (let i = otherMessages.length - 1; i >= 0; i--) {
+        if (otherMessages[i].role === 'user') {
+          lastUserIdx = i
+          break
+        }
+      }
+      
+      if (lastUserIdx !== -1) {
+        const lastUserMsg = otherMessages[lastUserIdx]
+        const text = typeof lastUserMsg.content === 'string' ? lastUserMsg.content : ''
+        content += `user:${text}\n`
+        
+        // Include any tool results after the last user message
+        for (let i = lastUserIdx + 1; i < otherMessages.length; i++) {
+          if (otherMessages[i].role === 'user') {
+            const toolText = typeof otherMessages[i].content === 'string' ? otherMessages[i].content : ''
+            content += `user:${toolText}\n`
+          }
+        }
+        
+        if (toolsPrompt) {
+          content = content.trim() + '\n\n' + toolsPrompt
+        }
+        return {
+          msg_type: 1,
+          text: content,
+          chat_type: 1,
+          attachments: [],
+          selected_mcp_tools: [],
+          backend_config: {},
+          sub_agent_ids: [],
+        }
+      }
     }
     
     if (otherMessages.length < 2) {
@@ -506,9 +546,11 @@ export class MiniMaxAdapter {
     const messages = [...request.messages]
     
     let toolsPrompt = ''
-    if (request.tools && request.tools.length > 0) {
+    // Only inject if tools are provided and not already injected by client
+    if (request.tools && request.tools.length > 0 && !hasToolPromptInjected(request.messages)) {
       toolsPrompt = toolsToSystemPrompt(request.tools)
       
+      // Find and update the last user message
       for (let i = messages.length - 1; i >= 0; i--) {
         if (messages[i].role === 'user') {
           const currentContent = messages[i].content
@@ -520,7 +562,7 @@ export class MiniMaxAdapter {
       }
     }
     
-    const requestBody = this.messagesPrepare(messages, toolsPrompt)
+    const requestBody = this.messagesPrepare(messages, toolsPrompt, request.isMultiTurn)
     
     let chatId: string = request.chatId || ''
     let msgId: string = ''
@@ -564,7 +606,11 @@ export class MiniMaxAdapter {
     }
     
     if (request.stream !== false) {
-      const transStream = this.createPollingStream(chatId, deviceInfo, this.model)
+      // Only delete chat if not in multi-turn mode
+      const onEnd = request.isMultiTurn ? undefined : async (chatId: string) => {
+        await this.deleteChat(chatId)
+      }
+      const transStream = this.createPollingStream(chatId, deviceInfo, this.model, onEnd)
       return { 
         response: null, 
         stream: { session: null as any, stream: transStream as any }, 
@@ -636,7 +682,7 @@ export class MiniMaxAdapter {
     throw new Error(`No AI response after ${maxPolls} polls`)
   }
 
-  private createPollingStream(chatId: string, deviceInfo: DeviceInfo, model: string): PassThrough {
+  private createPollingStream(chatId: string, deviceInfo: DeviceInfo, model: string, onEnd?: (chatId: string) => Promise<void>): PassThrough {
     const transStream = new PassThrough()
     const created = this.created
     let lastContent = ''
@@ -644,7 +690,6 @@ export class MiniMaxAdapter {
     const maxPolls = 60
     const pollInterval = 500
     
-    // Send initial chunk
     transStream.write(
       `data: ${JSON.stringify({
         id: '',
@@ -655,7 +700,6 @@ export class MiniMaxAdapter {
       })}\n\n`
     )
     
-    // Start polling
     const poll = async () => {
       try {
         while (pollCount < maxPolls) {
@@ -664,17 +708,29 @@ export class MiniMaxAdapter {
           
           const detailResponse = await this.request('POST', '/matrix/api/v1/chat/get_chat_detail', { chat_id: chatId }, deviceInfo)
           
-          if (detailResponse.status !== 200) continue
+          if (detailResponse.status !== 200) {
+            console.log('[MiniMax] Poll status:', detailResponse.status)
+            continue
+          }
           
           const { messages, base_resp } = detailResponse.data
-          if (base_resp?.status_code !== 0) continue
+          if (base_resp?.status_code !== 0) {
+            console.log('[MiniMax] Poll base_resp:', base_resp)
+            continue
+          }
+          
+          if (pollCount <= 3 || pollCount % 10 === 0) {
+            console.log('[MiniMax] Poll messages count:', messages?.length, 'first msg_type:', messages?.[0]?.msg_type)
+            if (messages && messages.length > 0) {
+              console.log('[MiniMax] All message types:', messages.map((m: any) => ({ msg_type: m.msg_type, has_content: !!m.msg_content, content_preview: m.msg_content?.substring?.(0, 50) })))
+            }
+          }
           
           const aiMessage = messages?.find((msg: any) => msg.msg_type === 2)
           
           if (aiMessage && aiMessage.msg_content) {
             const currentContent = aiMessage.msg_content
             
-            // Send new content
             if (currentContent.length > lastContent.length) {
               const newChunk = currentContent.substring(lastContent.length)
               transStream.write(
@@ -689,11 +745,9 @@ export class MiniMaxAdapter {
               lastContent = currentContent
             }
             
-            // Check if complete (content stopped growing)
             if (pollCount > 5 && currentContent === lastContent && lastContent.length > 0) {
-              console.log('[MiniMax] Stream completed after', pollCount, 'polls')
+              console.log('[MiniMax] Stream completed after', pollCount, 'polls, content length:', lastContent.length)
               
-              // Send finish chunk
               transStream.write(
                 `data: ${JSON.stringify({
                   id: chatId.toString(),
@@ -704,12 +758,14 @@ export class MiniMaxAdapter {
                 })}\n\n`
               )
               transStream.end('data: [DONE]\n\n')
+              if (onEnd) {
+                onEnd(chatId).catch(err => console.error('[MiniMax] Failed to delete chat:', err))
+              }
               return
             }
           }
         }
         
-        // Timeout
         console.log('[MiniMax] Stream timeout after', maxPolls, 'polls')
         transStream.end('data: [DONE]\n\n')
       } catch (err) {
@@ -724,15 +780,40 @@ export class MiniMaxAdapter {
   }
 
   async deleteChat(chatId: string): Promise<boolean> {
-    try {
-      const deviceInfo = await this.requestDeviceInfo()
-      const response = await this.request('DELETE', `/v1/api/chat/history/${chatId}`, {}, deviceInfo)
-      console.log('[MiniMax] Chat deleted:', chatId, 'Status:', response.status)
-      return response.status === 200 || response.status === 204
-    } catch (error) {
-      console.error('[MiniMax] Failed to delete chat:', error)
-      return false
+    const maxRetries = 3
+    const retryDelay = 2000
+    
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        const deviceInfo = await this.requestDeviceInfo()
+        const response = await this.request('POST', '/matrix/api/v1/chat/delete_chat', { chat_id: parseInt(chatId, 10) }, deviceInfo)
+        console.log('[MiniMax] Chat deleted attempt', attempt, ':', chatId, 'Status:', response.status, 'Response:', JSON.stringify(response.data))
+        
+        if (response.status === 200 && response.data?.base_resp?.status_code === 0) {
+          return true
+        }
+        
+        const errorMsg = response.data?.base_resp?.status_msg || 'Unknown error'
+        
+        if (errorMsg.includes('chat is running') && attempt < maxRetries) {
+          console.log(`[MiniMax] Chat still running, waiting ${retryDelay}ms before retry...`)
+          await new Promise(resolve => setTimeout(resolve, retryDelay))
+          continue
+        }
+        
+        console.warn('[MiniMax] Delete chat failed:', errorMsg)
+        return false
+      } catch (error) {
+        console.error('[MiniMax] Failed to delete chat:', error)
+        if (attempt < maxRetries) {
+          await new Promise(resolve => setTimeout(resolve, retryDelay))
+          continue
+        }
+        return false
+      }
     }
+    
+    return false
   }
 
   async getUserInfo(): Promise<any> {
