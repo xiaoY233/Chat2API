@@ -8,6 +8,7 @@ import ApiKeys from '@/pages/ApiKeys'
 import Logs from '@/pages/Logs'
 import { Settings } from '@/pages/Settings'
 import { About } from '@/pages/About'
+import { SessionManagement } from '@/pages/SessionManagement'
 import { Toaster } from '@/components/ui/toaster'
 
 function App() {
@@ -21,6 +22,7 @@ function App() {
           <Route path="/models" element={<Models />} />
           <Route path="/api-keys" element={<ApiKeys />} />
           <Route path="/logs" element={<Logs />} />
+          <Route path="/session" element={<SessionManagement />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/about" element={<About />} />
         </Route>

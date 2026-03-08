@@ -56,7 +56,10 @@ export function processStreamContent(
             ...baseChunk,
             choices: [{
               index: 0,
-              delta: { content: textBefore },
+              delta: { 
+                ...(isFirstChunk ? { role: 'assistant' } : {}),
+                content: textBefore 
+              },
               finish_reason: null
             }]
           })
@@ -78,7 +81,10 @@ export function processStreamContent(
                   ...baseChunk,
                   choices: [{
                     index: 0,
-                    delta: { content: textBefore },
+                    delta: { 
+                      ...(isFirstChunk ? { role: 'assistant' } : {}),
+                      content: textBefore 
+                    },
                     finish_reason: null
                   }]
                 })
@@ -107,7 +113,10 @@ export function processStreamContent(
           ...baseChunk,
           choices: [{
             index: 0,
-            delta: { content: state.contentBuffer },
+            delta: { 
+              ...(isFirstChunk ? { role: 'assistant' } : {}),
+              content: state.contentBuffer 
+            },
             finish_reason: null
           }]
         })
@@ -164,7 +173,10 @@ export function processStreamContent(
             ...baseChunk,
             choices: [{
               index: 0,
-              delta: { content: state.contentBuffer },
+              delta: { 
+                ...(isFirstChunk ? { role: 'assistant' } : {}),
+                content: state.contentBuffer 
+              },
               finish_reason: null
             }]
           })
@@ -182,7 +194,10 @@ export function processStreamContent(
         ...baseChunk,
         choices: [{
           index: 0,
-          delta: { content: state.contentBuffer },
+          delta: { 
+            ...(isFirstChunk ? { role: 'assistant' } : {}),
+            content: state.contentBuffer 
+          },
           finish_reason: null
         }]
       })
@@ -223,6 +238,17 @@ export function flushToolCallBuffer(
       })
     }
     state.hasEmittedToolCall = true
+    // Output any remaining clean content after tool calls
+    if (cleanContent && cleanContent.trim()) {
+      result.push({
+        ...baseChunk,
+        choices: [{
+          index: 0,
+          delta: { content: cleanContent },
+          finish_reason: null
+        }]
+      })
+    }
   } else {
     if (state.contentBuffer && !state.hasEmittedToolCall) {
       result.push({

@@ -13,6 +13,11 @@ import { streamHandler } from '../stream'
 import { proxyStatusManager } from '../status'
 import { modelMapper } from '../modelMapper'
 import { storeManager } from '../../store/store'
+import { 
+  isAnthropicToolFormat,
+  transformResponseToAnthropic,
+  transformChunkToAnthropic
+} from '../utils/toolFormatConverter'
 
 const router = new Router({ prefix: '/v1/chat' })
 
@@ -87,6 +92,14 @@ router.post('/completions', async (ctx: Context) => {
   const webSearchFromHeader = ctx.headers['x-web-search'] === 'true'
   const reasoningEffortFromHeader = ctx.headers['x-reasoning-effort'] as 'low' | 'medium' | 'high' | undefined
   const deepResearchFromHeader = ctx.headers['x-deep-research'] === 'true'
+
+  // Handle reasoningEffort (camelCase) from AI SDK - convert to reasoning_effort (snake_case)
+  const requestAny = request as any
+  if (requestAny.reasoningEffort && !request.reasoning_effort) {
+    request.reasoning_effort = requestAny.reasoningEffort
+    console.log('[Chat] Reasoning effort set via reasoningEffort (camelCase):', requestAny.reasoningEffort)
+    delete requestAny.reasoningEffort
+  }
 
   // Merge into request (request body parameters take priority)
   if (webSearchFromHeader && request.web_search === undefined) {
@@ -272,7 +285,13 @@ router.post('/completions', async (ctx: Context) => {
       ctx.set('Content-Type', 'application/json')
 
       if (result.body) {
-        ctx.body = result.body
+        // Check if we need to transform to Anthropic format
+        if (isAnthropicToolFormat(request.tool_format)) {
+          ctx.body = transformResponseToAnthropic(result.body)
+          console.log('[Chat] Transformed response to Anthropic tool format')
+        } else {
+          ctx.body = result.body
+        }
       } else {
         ctx.body = {
           id: requestId,

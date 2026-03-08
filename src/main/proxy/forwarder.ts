@@ -26,6 +26,8 @@ import {
 } from './promptToolUse'
 import { toolsToSystemPrompt, TOOL_WRAP_HINT, hasToolPromptInjected } from './utils/tools'
 import { parseToolCallsFromText } from './utils/toolParser'
+import { parseToolCallsUnified } from './utils/unifiedToolParser'
+import { promptAdapterRegistry } from './adapters/prompt'
 import { sessionManager } from './sessionManager'
 
 function shouldDeleteSession(): boolean {
@@ -45,13 +47,14 @@ export class RequestForwarder {
   /**
    * Transform request for prompt-based tool calling
    * For models that don't support native function calling
+   * Uses the new PromptAdapterRegistry for enhanced client detection
    */
   private transformRequestForPromptToolUse(
-    request: ChatCompletionRequest
+    request: ChatCompletionRequest,
+    provider?: Provider
   ): { messages: any[]; tools: undefined } | { messages: any[]; tools: ChatCompletionTool[] } {
     const { messages, tools, model } = request
 
-    // If no tools or model supports native FC, return as is
     if (!tools || tools.length === 0) {
       return { messages, tools: undefined }
     }
@@ -60,24 +63,32 @@ export class RequestForwarder {
       return { messages, tools }
     }
 
-    // Check injection mode from config
     const config = storeManager.getConfig()
     const injectionMode = config.toolPromptConfig?.mode || 'smart'
     
-    // If mode is 'never', skip injection
     if (injectionMode === 'never') {
       console.log('[Forwarder] Tool prompt injection disabled (mode=never), skipping transformation')
       return { messages, tools: undefined }
     }
 
-    // Check if tool prompt has already been injected by client (e.g., Cherry Studio)
-    if (hasToolPromptInjected(messages)) {
-      console.log('[Forwarder] Tool prompt already injected by client, skipping transformation')
+    if (promptAdapterRegistry.hasPromptInjected(messages)) {
+      console.log('[Forwarder] Tool prompt already injected by known client, skipping transformation')
       return { messages, tools: undefined }
     }
 
-    // Transform tools to prompt format
-    // Find existing system message or create one
+    const result = promptAdapterRegistry.transformRequest(
+      messages,
+      tools,
+      model,
+      provider?.id
+    )
+
+    if (result.injected) {
+      console.log('[Forwarder] Tool prompt injected successfully using adapter registry')
+      return { messages: result.messages, tools: undefined }
+    }
+
+    console.log('[Forwarder] Using legacy tool prompt injection')
     let systemPrompt = 'You are a helpful AI assistant.'
     const otherMessages: any[] = []
 
@@ -89,13 +100,11 @@ export class RequestForwarder {
       }
     }
 
-    // Build enhanced system prompt with tools using unified format
     const toolsPrompt = toolsToSystemPrompt(tools as any[])
     const enhancedSystemPrompt = systemPrompt 
       ? `${systemPrompt}\n\n${toolsPrompt}` 
       : toolsPrompt
 
-    // Return transformed messages with enhanced system prompt
     return {
       messages: [
         { role: 'system', content: enhancedSystemPrompt },
@@ -107,12 +116,17 @@ export class RequestForwarder {
 
   /**
    * Parse tool calls from response content
-   * Supports both [function_calls] and <tool_use> formats
+   * Supports multiple formats: bracket, XML, Anthropic, JSON
    */
   private parseToolCallsFromContent(content: string): ToolCall[] | null {
-    // Use unified parser that supports both formats
-    const { toolCalls } = parseToolCallsFromText(content, 'default')
-    return toolCalls.length > 0 ? toolCalls : null
+    const result = parseToolCallsUnified(content)
+    
+    if (result.toolCalls.length > 0) {
+      console.log(`[Forwarder] Parsed ${result.toolCalls.length} tool calls (format: ${result.format})`)
+      return result.toolCalls
+    }
+    
+    return null
   }
 
   /**
@@ -218,7 +232,7 @@ export class RequestForwarder {
 
     // Check if it is a DeepSeek provider, use dedicated adapter
     if (DeepSeekAdapter.isDeepSeekProvider(provider)) {
-      return this.forwardDeepSeek(request, account, provider, actualModel, startTime)
+      return this.forwardDeepSeek(request, account, provider, actualModel, startTime, sessionContext)
     }
 
     // Check if it is a GLM provider, use dedicated adapter
@@ -324,11 +338,11 @@ export class RequestForwarder {
     account: Account,
     provider: Provider,
     actualModel: string,
-    startTime: number
+    startTime: number,
+    sessionContext: { sessionId: string; providerSessionId?: string; parentMessageId?: string; messages: any[]; isNew: boolean }
   ): Promise<ForwardResult> {
     try {
-      // Transform request for prompt-based tool calling if needed
-      const transformed = this.transformRequestForPromptToolUse(request)
+      const transformed = this.transformRequestForPromptToolUse(request, provider)
       const transformedRequest = {
         ...request,
         messages: transformed.messages,
@@ -336,6 +350,12 @@ export class RequestForwarder {
       }
 
       const adapter = new DeepSeekAdapter(provider, account)
+      
+      // Determine if we should reuse session
+      const isMultiTurn = sessionManager.isMultiTurnEnabled() && sessionContext && !sessionContext.isNew
+      const existingSessionId = sessionContext?.providerSessionId || ''
+      const parentMessageId = sessionContext?.parentMessageId || ''
+      
       const { response, sessionId } = await adapter.chatCompletion({
         model: request.model,
         messages: transformedRequest.messages as any,
@@ -343,6 +363,9 @@ export class RequestForwarder {
         temperature: transformedRequest.temperature,
         web_search: transformedRequest.web_search,
         reasoning_effort: transformedRequest.reasoning_effort,
+        isMultiTurn,
+        sessionId: existingSessionId,
+        parentMessageId,
       })
 
       const latency = Date.now() - startTime
@@ -378,10 +401,24 @@ export class RequestForwarder {
         : undefined
 
       // DeepSeek always returns streaming response
-      const handler = new DeepSeekStreamHandler(actualModel, sessionId, deleteSessionCallback)
+      const handler = new DeepSeekStreamHandler(
+        actualModel,
+        sessionId,
+        deleteSessionCallback,
+        transformedRequest.web_search,
+        transformedRequest.reasoning_effort
+      )
       
       if (request.stream) {
         const transformedStream = await handler.handleStream(response.data)
+        
+        // Listen for stream end to update parent message ID
+        transformedStream.on('end', () => {
+          const lastMessageId = handler.getLastMessageId()
+          if (lastMessageId && sessionContext.sessionId) {
+            sessionManager.updateParentMessageId(sessionContext.sessionId, lastMessageId)
+          }
+        })
         
         return {
           success: true,
@@ -396,6 +433,12 @@ export class RequestForwarder {
 
       // Non-streaming requests need to collect stream data and convert
       const result = await handler.handleNonStream(response.data)
+      
+      // Update parent message ID for non-stream response
+      const lastMessageId = handler.getLastMessageId()
+      if (lastMessageId && sessionContext.sessionId) {
+        sessionManager.updateParentMessageId(sessionContext.sessionId, lastMessageId)
+      }
       
       // Parse tool calls from response content if using prompt-based tool calling
       if (request.tools && request.tools.length > 0 && !isNativeFunctionCallingModel(request.model)) {
@@ -422,6 +465,7 @@ export class RequestForwarder {
         body: result,
         latency,
         providerSessionId: sessionId,
+        parentMessageId: lastMessageId,
       }
     } catch (error) {
       const latency = Date.now() - startTime
@@ -445,8 +489,7 @@ export class RequestForwarder {
     sessionContext: { sessionId: string; providerSessionId?: string; parentMessageId?: string; messages: any[]; isNew: boolean }
   ): Promise<ForwardResult> {
     try {
-      // Transform request for prompt-based tool calling if needed
-      const transformed = this.transformRequestForPromptToolUse(request)
+      const transformed = this.transformRequestForPromptToolUse(request, provider)
       const transformedRequest = {
         ...request,
         messages: transformed.messages,
@@ -566,7 +609,7 @@ export class RequestForwarder {
         headers: this.extractHeaders(response.headers),
         body: result,
         latency,
-        providerSessionId: handler.getConversationId(),
+        providerSessionId: handler.getConversationId() ?? undefined,
       }
     } catch (error) {
       const latency = Date.now() - startTime
@@ -587,8 +630,7 @@ export class RequestForwarder {
     sessionContext: { sessionId: string; providerSessionId?: string; parentMessageId?: string; messages: any[]; isNew: boolean }
   ): Promise<ForwardResult> {
     try {
-      // Transform request for prompt-based tool calling if needed
-      const transformed = this.transformRequestForPromptToolUse(request)
+      const transformed = this.transformRequestForPromptToolUse(request, provider)
       
       const adapter = new KimiAdapter(provider, account)
       const { response, conversationId } = await adapter.chatCompletion({
@@ -633,7 +675,8 @@ export class RequestForwarder {
             sessionManager.updateParentMessageId(sessionContext.sessionId, lastMessageId)
           }
           // Update provider session ID with real chat_id from response
-          if (realChatId && sessionContext.sessionId && !realChatId.startsWith('kimi-')) {
+          // Only update if realChatId is valid (not null, not empty, and not a temporary ID)
+          if (realChatId && sessionContext.sessionId) {
             sessionManager.updateProviderSessionId(sessionContext.sessionId, realChatId)
           }
         })
@@ -703,7 +746,7 @@ export class RequestForwarder {
         headers: this.extractHeaders(response.headers),
         body: result,
         latency,
-        providerSessionId: handler.getConversationId(),
+        providerSessionId: handler.getConversationId() ?? undefined,
       }
     } catch (error) {
       const latency = Date.now() - startTime
@@ -727,8 +770,7 @@ export class RequestForwarder {
     sessionContext: { sessionId: string; providerSessionId?: string; parentMessageId?: string; messages: any[]; isNew: boolean }
   ): Promise<ForwardResult> {
     try {
-      // Transform request for prompt-based tool calling if needed
-      const transformed = this.transformRequestForPromptToolUse(request)
+      const transformed = this.transformRequestForPromptToolUse(request, provider)
       const transformedRequest = {
         ...request,
         messages: transformed.messages,
@@ -741,6 +783,8 @@ export class RequestForwarder {
         messages: transformedRequest.messages as any,
         stream: request.stream,
         temperature: request.temperature,
+        enableThinking: !!request.reasoning_effort,
+        enableWebSearch: !!request.web_search,
         sessionContext: {
           sessionId: sessionContext.sessionId,
           providerSessionId: sessionContext.providerSessionId,
@@ -851,8 +895,7 @@ export class RequestForwarder {
     sessionContext: { sessionId: string; providerSessionId?: string; parentMessageId?: string; messages: any[]; isNew: boolean }
   ): Promise<ForwardResult> {
     try {
-      // Transform request for prompt-based tool calling if needed
-      const transformed = this.transformRequestForPromptToolUse(request)
+      const transformed = this.transformRequestForPromptToolUse(request, provider)
       
       const adapter = new QwenAiAdapter(provider, account)
       const { response, chatId, parentId } = await adapter.chatCompletion({
@@ -968,8 +1011,7 @@ export class RequestForwarder {
     console.log('[forwardZai] actualModel:', actualModel)
     console.log('[forwardZai] provider.modelMappings:', provider.modelMappings)
     try {
-      // Transform request for prompt-based tool calling if needed
-      const transformed = this.transformRequestForPromptToolUse(request)
+      const transformed = this.transformRequestForPromptToolUse(request, provider)
       
       const adapter = new ZaiAdapter(provider, account)
       const { response, chatId, requestId } = await adapter.chatCompletion({
@@ -1092,8 +1134,7 @@ export class RequestForwarder {
     console.log('[forwardMiniMax] actualModel:', actualModel)
     console.log('[forwardMiniMax] provider.modelMappings:', provider.modelMappings)
     try {
-      // Transform request for prompt-based tool calling if needed
-      const transformed = this.transformRequestForPromptToolUse(request)
+      const transformed = this.transformRequestForPromptToolUse(request, provider)
       
       const adapter = new MiniMaxAdapter(provider, account)
       const { response, stream, chatId } = await adapter.chatCompletion({

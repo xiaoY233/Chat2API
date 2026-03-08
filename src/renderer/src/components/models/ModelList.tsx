@@ -20,10 +20,29 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { useProvidersStore } from '@/stores/providersStore'
+import { useProxyStore } from '@/stores/proxyStore'
 import { useToast } from '@/hooks/use-toast'
 import { Search, Copy, CheckCircle2, XCircle, Cpu, Check, Square, Database } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { Account } from '@/types/electron'
+import deepseekIcon from '@/assets/providers/deepseek.svg'
+import glmIcon from '@/assets/providers/glm.svg'
+import kimiIcon from '@/assets/providers/kimi.svg'
+import minimaxIcon from '@/assets/providers/minimax.svg'
+import qwenIcon from '@/assets/providers/qwen.svg'
+import zaiIcon from '@/assets/providers/zai.svg'
+import modelMappingIcon from '@/assets/providers/model-mapping.svg'
+
+const providerIcons: Record<string, string> = {
+  deepseek: deepseekIcon,
+  glm: glmIcon,
+  kimi: kimiIcon,
+  minimax: minimaxIcon,
+  qwen: qwenIcon,
+  'qwen-ai': qwenIcon,
+  zai: zaiIcon,
+  mapping: modelMappingIcon,
+}
 
 interface ModelInfo {
   id: string
@@ -45,6 +64,8 @@ interface ModelRowProps {
 const PAGE_SIZE = 50
 
 const ModelRow = memo(({ model, isSelected, onSelect, t }: ModelRowProps) => {
+  const providerIcon = providerIcons[model.providerId]
+  
   return (
     <TableRow 
       className={cn(
@@ -66,7 +87,18 @@ const ModelRow = memo(({ model, isSelected, onSelect, t }: ModelRowProps) => {
         </code>
       </TableCell>
       <TableCell>
-        <Badge variant="outline">{model.providerName}</Badge>
+        <div className="flex items-center gap-2">
+          {providerIcon ? (
+            <img 
+              src={providerIcon} 
+              alt={model.providerName} 
+              className="h-4 w-4 object-contain"
+            />
+          ) : (
+            <Database className="h-4 w-4 text-muted-foreground" />
+          )}
+          <Badge variant="outline">{model.providerName}</Badge>
+        </div>
       </TableCell>
       <TableCell>
         {model.accountName ? (
@@ -99,6 +131,7 @@ ModelRow.displayName = 'ModelRow'
 export function ModelList() {
   const { t } = useTranslation()
   const { providers, accounts } = useProvidersStore()
+  const { modelMappings } = useProxyStore()
   const { toast } = useToast()
   
   const [searchQuery, setSearchQuery] = useState('')
@@ -110,6 +143,7 @@ export function ModelList() {
   const modelList = useMemo(() => {
     const models: ModelInfo[] = []
     const enabledProviders = providers.filter(p => p.enabled)
+    const addedModelNames = new Set<string>()
     
     const accountMap = new Map<string, Account[]>()
     for (const account of accounts) {
@@ -126,6 +160,7 @@ export function ModelList() {
       activeProviderMap.set(provider.id, hasActiveAccounts)
     }
     
+    // Add models from providers
     for (const provider of enabledProviders) {
       if (!provider.supportedModels || provider.supportedModels.length === 0) {
         continue
@@ -137,6 +172,7 @@ export function ModelList() {
       for (const modelName of provider.supportedModels) {
         const modelId = `${provider.id}-${modelName}`
         const status = hasActiveAccounts ? 'available' : 'unavailable'
+        addedModelNames.add(modelName)
         
         models.push({
           id: modelId,
@@ -150,13 +186,32 @@ export function ModelList() {
       }
     }
     
+    // Add model mappings (only if not already added from providers)
+    for (const mapping of modelMappings) {
+      if (!addedModelNames.has(mapping.requestModel)) {
+        models.push({
+          id: `mapping-${mapping.requestModel}`,
+          name: mapping.requestModel,
+          providerId: 'mapping',
+          providerName: t('models.modelMapping') || 'Model Mapping',
+          accountId: mapping.preferredAccountId,
+          accountName: mapping.preferredAccountId 
+            ? (accounts.find(a => a.id === mapping.preferredAccountId)?.name)
+            : undefined,
+          status: 'available',
+        })
+      }
+    }
+    
     return models
-  }, [providers, accounts])
+  }, [providers, accounts, modelMappings])
   
   const filteredModels = useMemo(() => {
     let filtered = modelList
     
-    if (selectedProvider !== 'all') {
+    if (selectedProvider === 'mapping') {
+      filtered = filtered.filter(m => m.providerId === 'mapping' || m.id.startsWith('mapping-'))
+    } else if (selectedProvider !== 'all') {
       filtered = filtered.filter(m => m.providerId === selectedProvider)
     }
     
@@ -182,11 +237,16 @@ export function ModelList() {
   
   const providerOptions = useMemo(() => {
     const enabledProviders = providers.filter(p => p.enabled)
-    return [
+    const options = [
       { value: 'all', label: t('models.allProviders') },
       ...enabledProviders.map(p => ({ value: p.id, label: p.name })),
     ]
-  }, [providers, t])
+    // Add 'Model Mapping' option if there are model mappings
+    if (modelMappings.length > 0) {
+      options.push({ value: 'mapping', label: t('models.modelMapping') || 'Model Mapping' })
+    }
+    return options
+  }, [providers, modelMappings, t])
   
   const handleSelectAll = useCallback(() => {
     const newSelectAll = !selectAll

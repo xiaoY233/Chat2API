@@ -11,6 +11,7 @@ import {
   Key,
   Cpu,
   Info,
+  MessageSquare,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useSettingsStore } from '@/stores/settingsStore'
@@ -26,6 +27,7 @@ const navItems: NavItem[] = [
   { titleKey: 'nav.providers', href: '/providers', icon: Server },
   { titleKey: 'nav.proxy', href: '/proxy', icon: Settings2 },
   { titleKey: 'nav.models', href: '/models', icon: Cpu },
+  { titleKey: 'nav.session', href: '/session', icon: MessageSquare },
   { titleKey: 'nav.apiKeys', href: '/api-keys', icon: Key },
   { titleKey: 'nav.logs', href: '/logs', icon: FileText },
   { titleKey: 'nav.settings', href: '/settings', icon: Settings },

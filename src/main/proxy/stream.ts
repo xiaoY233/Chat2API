@@ -372,6 +372,13 @@ export class StreamHandler {
       delta.role = 'assistant'
     }
 
+    // Set reasoning_content first to ensure it appears before content in the response
+    if (data.choices?.[0]?.delta?.reasoning_content) {
+      delta.reasoning_content = data.choices[0].delta.reasoning_content
+    } else if (data.reasoning_content) {
+      delta.reasoning_content = data.reasoning_content
+    }
+
     if (typeof data === 'string') {
       delta.content = data
     } else if (data.choices?.[0]?.delta?.content !== undefined) {
@@ -382,12 +389,6 @@ export class StreamHandler {
       delta.content = data.content
     } else if (data.message) {
       delta.content = data.message
-    }
-
-    if (data.choices?.[0]?.delta?.reasoning_content) {
-      delta.reasoning_content = data.choices[0].delta.reasoning_content
-    } else if (data.reasoning_content) {
-      delta.reasoning_content = data.reasoning_content
     }
 
     // Handle tool_calls in streaming response
@@ -503,12 +504,12 @@ export class StreamHandler {
 
         const message: any = {
           role: 'assistant',
-          // If we have tool calls, force content to null to avoid client confusion
-          content: finalToolCalls.length > 0 ? null : (cleanContent || null),
         }
         if (reasoningContent) {
           message.reasoning_content = reasoningContent.trim()
         }
+        // If we have tool calls, force content to null to avoid client confusion
+        message.content = finalToolCalls.length > 0 ? null : (cleanContent || null)
 
         if (finalToolCalls.length > 0) {
           // Remove index field and sort by original index

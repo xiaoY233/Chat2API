@@ -184,9 +184,12 @@ export interface SystemPrompt {
 }
 
 export interface ToolPromptConfig {
-  mode: 'always' | 'smart' | 'never'
+  mode: 'always' | 'smart' | 'never' | 'auto'
   smartThreshold: number
   keywords: string[]
+  clientDetection: boolean
+  preferredVariant?: string
+  skipKnownClients: string[]
 }
 
 export interface SessionConfig {

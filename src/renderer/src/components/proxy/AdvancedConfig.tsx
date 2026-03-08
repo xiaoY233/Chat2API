@@ -21,7 +21,7 @@ interface FormErrors {
 
 export function AdvancedConfig({ onConfigChange }: AdvancedConfigProps) {
   const { t } = useTranslation()
-  const { proxyConfig, setProxyConfig, appConfig, saveAppConfig, isLoading } = useProxyStore()
+  const { proxyConfig, setProxyConfig, saveAppConfig, isLoading } = useProxyStore()
   const { toast } = useToast()
   
   const initialFormDataRef = useRef({

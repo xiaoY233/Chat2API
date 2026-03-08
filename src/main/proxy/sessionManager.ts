@@ -38,12 +38,13 @@ class SessionManagerClass {
   }
 
   private startCleanupScheduler(): void {
-    const config = this.getSessionConfig()
-    const intervalMs = config.sessionTimeout * 60 * 1000
+    const CLEANUP_INTERVAL_MS = 60 * 1000
     
     this.cleanupInterval = setInterval(() => {
       this.cleanExpiredSessions()
-    }, intervalMs)
+    }, CLEANUP_INTERVAL_MS)
+    
+    console.log('[SessionManager] Cleanup scheduler started, interval: 1 minute')
   }
 
   getSessionConfig(): SessionConfig {

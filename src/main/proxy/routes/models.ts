@@ -8,6 +8,7 @@ import type { Context } from 'koa'
 import { ModelsResponse, ModelInfo } from '../types'
 import { loadBalancer } from '../loadbalancer'
 import { storeManager } from '../../store/store'
+import { modelMapper } from '../modelMapper'
 
 const router = new Router({ prefix: '/v1' })
 
@@ -42,6 +43,21 @@ router.get('/models', async (ctx: Context) => {
     }
   }
 
+  // Add model mappings to the list
+  const config = storeManager.getConfig()
+  const mappings = config.modelMappings || {}
+  for (const [requestModel, mapping] of Object.entries(mappings)) {
+    if (!addedModels.has(requestModel)) {
+      addedModels.add(requestModel)
+      models.push({
+        id: requestModel,
+        object: 'model',
+        created: Math.floor(Date.now() / 1000),
+        owned_by: 'model-mapping',
+      })
+    }
+  }
+
   const response: ModelsResponse = {
     object: 'list',
     data: models,
@@ -56,6 +72,20 @@ router.get('/models', async (ctx: Context) => {
  */
 router.get('/models/:model', async (ctx: Context) => {
   const modelId = ctx.params.model
+
+  // First check if it's a model mapping
+  const config = storeManager.getConfig()
+  const mappings = config.modelMappings || {}
+  if (mappings[modelId]) {
+    ctx.set('Content-Type', 'application/json')
+    ctx.body = {
+      id: modelId,
+      object: 'model',
+      created: Math.floor(Date.now() / 1000),
+      owned_by: 'model-mapping',
+    }
+    return
+  }
 
   const providers = storeManager.getProviders().filter(p => p.enabled)
 

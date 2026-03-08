@@ -318,8 +318,22 @@ export class KimiAdapter {
 
     const content = this.messagesPrepare(messages, toolsPrompt, isMultiTurn)
 
-    const enableThinking = request.enableThinking ?? false
-    const enableWebSearch = request.enableWebSearch ?? false
+    // Determine if thinking and web search should be enabled
+    // Priority: explicit parameters > model name detection
+    const modelLower = request.model.toLowerCase()
+    
+    let enableThinking = request.enableThinking ?? false
+    let enableWebSearch = request.enableWebSearch ?? false
+    
+    // Auto-enable based on model name (if not explicitly set)
+    if (!enableThinking && (modelLower.includes('think') || modelLower.includes('r1'))) {
+      enableThinking = true
+      console.log('[Kimi] Thinking mode enabled (from model name)')
+    }
+    if (!enableWebSearch && modelLower.includes('search')) {
+      enableWebSearch = true
+      console.log('[Kimi] Web search enabled (from model name)')
+    }
 
     const jsonBody = JSON.stringify({
       scenario: 'SCENARIO_K2D5',
@@ -374,7 +388,8 @@ export class KimiAdapter {
       throw new Error(`Completion request failed: HTTP ${response.status}`)
     }
 
-    return { response, conversationId: chatId || `kimi-${Date.now()}` }
+    // Return empty string for new conversations, real chat_id will be extracted from response
+    return { response, conversationId: chatId }
   }
 
   async deleteConversation(conversationId: string): Promise<boolean> {
@@ -424,8 +439,17 @@ export class KimiStreamHandler {
     this.toolCallState = createToolCallState()
   }
 
-  getConversationId(): string {
-    return this.realChatId || this.conversationId
+  getConversationId(): string | null {
+    // Return realChatId if available, otherwise return null (not empty string)
+    // to prevent saving invalid session IDs
+    if (this.realChatId) {
+      return this.realChatId
+    }
+    // Only return conversationId if it's a valid ID (not empty and not a temporary ID)
+    if (this.conversationId && this.conversationId.length > 0 && !this.conversationId.startsWith('kimi-')) {
+      return this.conversationId
+    }
+    return null
   }
 
   getLastMessageId(): string | null {
@@ -579,7 +603,9 @@ export class KimiStreamHandler {
 
   private sendChunk(transStream: PassThrough, content: string, created: number) {
     // Process tool call interception
-    const baseChunk = createBaseChunk(this.conversationId, this.model, created)
+    // Use getConversationId() to get the real chat_id if available
+    const chatId = this.getConversationId() || this.conversationId
+    const baseChunk = createBaseChunk(chatId, this.model, created)
     const { chunks: outputChunks } = processStreamContent(
       content, 
       this.toolCallState, 
@@ -633,6 +659,18 @@ export class KimiStreamHandler {
                 return
               }
 
+              // Extract real chat_id from data.chat.id
+              if (data.chat?.id && !this.realChatId) {
+                this.realChatId = data.chat.id
+                console.log('[Kimi] Non-stream: Extracted real chat_id from chat.id:', this.realChatId)
+              }
+
+              // Extract message ID from assistant message
+              if (data.message?.id && data.message?.role === 'assistant' && !this.lastMessageId) {
+                this.lastMessageId = data.message.id
+                console.log('[Kimi] Non-stream: Extracted assistant message id:', this.lastMessageId)
+              }
+
               if (data.op === 'set' && data.block?.text?.content) {
                 content += data.block.text.content
               }
@@ -646,7 +684,7 @@ export class KimiStreamHandler {
                 const { content: cleanContent, toolCalls } = parseToolCallsFromText(content, 'kimi')
 
                 resolve({
-                  id: this.conversationId,
+                  id: this.realChatId || this.conversationId,
                   model: this.model,
                   object: 'chat.completion',
                   created,

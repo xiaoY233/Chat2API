@@ -69,6 +69,10 @@ interface ChatCompletionRequest {
   temperature?: number
   session_id?: string
   isMultiTurn?: boolean
+  web_search?: boolean
+  reasoning_effort?: 'low' | 'medium' | 'high'
+  enableThinking?: boolean
+  enableWebSearch?: boolean
   sessionContext?: {
     sessionId: string
     providerSessionId?: string
@@ -155,7 +159,33 @@ export class QwenAdapter {
     // Use parentMessageId (previous req_id) if available
     const parentReqId = sessionContext?.parentMessageId || '0'
     
-    const actualModel = this.mapModel(request.model)
+    let actualModel = this.mapModel(request.model)
+    
+    // Determine if thinking and web search should be enabled
+    // Priority: explicit parameters > model name detection
+    const modelLower = request.model.toLowerCase()
+    
+    let enableThinking = request.enableThinking ?? false
+    let enableWebSearch = request.enableWebSearch ?? false
+    
+    // Auto-enable based on model name (if not explicitly set)
+    if (!enableThinking && (modelLower.includes('think') || modelLower.includes('r1'))) {
+      enableThinking = true
+      console.log('[Qwen] Thinking mode enabled (from model name)')
+    }
+    if (!enableWebSearch && modelLower.includes('search')) {
+      enableWebSearch = true
+      console.log('[Qwen] Web search enabled (from model name)')
+    }
+
+    // Map thinking mode to model
+    if (enableThinking) {
+      // Use thinking model if available
+      if (actualModel === 'tongyi-qwen3-max-model-agent') {
+        actualModel = 'tongyi-qwen3-max-thinking-agent'
+        console.log('[Qwen] Using thinking model:', actualModel)
+      }
+    }
     
     console.log('[Qwen] Session info:', {
       isMultiTurn,
@@ -202,7 +232,7 @@ export class QwenAdapter {
     const nonce = generateNonce()
 
     const requestBody = {
-      deep_search: '0',
+      deep_search: (enableWebSearch || enableThinking) ? '1' : '0',
       req_id: reqId,
       model: actualModel,
       scene: 'chat',
@@ -220,6 +250,7 @@ export class QwenAdapter {
       ],
       from: 'default',
       parent_req_id: parentReqId,
+      enable_search: enableWebSearch,
       biz_data: '{"entryPoint":"tongyigw"}',
       scene_param: isMultiTurn ? 'continue_chat' : 'first_turn',
       chat_client: 'h5',
@@ -317,6 +348,8 @@ export class QwenStreamHandler {
   private hasError: boolean = false
   private toolCallState: ToolCallState
   private sentRole: boolean = false
+  private thinkingContent: string = ''
+  private sentThinkingRole: boolean = false
 
   constructor(model: string, onEnd?: (sessionId: string) => void) {
     this.model = model
@@ -435,8 +468,61 @@ export class QwenStreamHandler {
             if (result.data?.messages) {
               for (const msg of result.data.messages) {
                 console.log('[Qwen] Message detail:', JSON.stringify(msg).substring(0, 500))
+                
+                // Handle thinking content from meta_data.multi_load
+                const metaData = msg.meta_data || {}
+                const multiLoad = metaData.multi_load || []
+                for (const load of multiLoad) {
+                  if (load.type === 'deep_think' && load.content?.think_content) {
+                    const newThinkingContent = load.content.think_content
+                    // Only process if there's new content and it's not just a period
+                    if (newThinkingContent.length > this.thinkingContent.length) {
+                      const chunk = newThinkingContent.substring(this.thinkingContent.length)
+                      this.thinkingContent = newThinkingContent
+                      console.log('[Qwen] Thinking chunk, length:', chunk.length, 'content:', chunk.substring(0, 50))
+                      
+                      // Skip if chunk is just punctuation or whitespace
+                      if (chunk.trim() && chunk.trim() !== '。' && chunk.trim() !== '.') {
+                        // Send reasoning_content delta
+                        if (!this.sentThinkingRole) {
+                          transStream.write(`data: ${JSON.stringify({
+                            id: this.responseId || this.sessionId,
+                            model: this.model,
+                            object: 'chat.completion.chunk',
+                            choices: [{ index: 0, delta: { role: 'assistant' }, finish_reason: null }],
+                            created: this.created,
+                          })}\n\n`)
+                          this.sentThinkingRole = true
+                        }
+                        
+                        transStream.write(`data: ${JSON.stringify({
+                          id: this.responseId || this.sessionId,
+                          model: this.model,
+                          object: 'chat.completion.chunk',
+                          choices: [{ index: 0, delta: { reasoning_content: chunk }, finish_reason: null }],
+                          created: this.created,
+                        })}\n\n`)
+                      }
+                    }
+                  }
+                }
+                
+                // Filter out [(deep_think)] markers from content
                 if ((msg.mime_type === 'text/plain' || msg.mime_type === 'multi_load/iframe') && msg.content) {
-                  const newContent = msg.content
+                  // Skip content that is just the deep_think marker
+                  let newContent = msg.content
+                  if (newContent === '[(deep_think)]' || newContent.trim() === '[(deep_think)]') {
+                    console.log('[Qwen] Skipping deep_think marker')
+                    continue
+                  }
+                  // Remove any deep_think markers from content
+                  newContent = newContent.replace(/\[\(deep_think\)\]/g, '')
+                  
+                  if (!newContent.trim()) {
+                    console.log('[Qwen] Skipping empty content after filtering')
+                    continue
+                  }
+                  
                   console.log('[Qwen] newContent.length:', newContent.length, 'this.content.length:', this.content.length)
                   if (newContent.length > this.content.length) {
                     const chunk = newContent.substring(this.content.length)
@@ -614,7 +700,7 @@ export class QwenStreamHandler {
         object: string
         choices: Array<{
           index: number
-          message: { role: string; content: string | null; tool_calls?: any[] }
+          message: { role: string; content: string | null; reasoning_content?: string; tool_calls?: any[] }
           finish_reason: string
         }>
         usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number }
@@ -635,6 +721,7 @@ export class QwenStreamHandler {
       }
 
       let contentAccumulator = ''
+      let thinkingAccumulator = ''
       let buffer = ''
       let resolved = false
 
@@ -683,16 +770,40 @@ export class QwenStreamHandler {
 
               if (result.data?.messages) {
                 for (const msg of result.data.messages) {
+                  // Handle thinking content from meta_data.multi_load
+                  const metaData = msg.meta_data || {}
+                  const multiLoad = metaData.multi_load || []
+                  for (const load of multiLoad) {
+                    if (load.type === 'deep_think' && load.content?.think_content) {
+                      const thinkContent = load.content.think_content
+                      if (thinkContent.length > thinkingAccumulator.length) {
+                        thinkingAccumulator = thinkContent
+                        console.log('[Qwen] Non-stream: Thinking content length:', thinkingAccumulator.length)
+                      }
+                    }
+                  }
+                  
                   // Handle multi_load/iframe content (actual response content)
                   if (msg.mime_type === 'multi_load/iframe' && msg.content) {
-                    contentAccumulator = msg.content
-                    console.log('[Qwen] Non-stream multi_load/iframe content length:', contentAccumulator.length)
+                    // Filter out deep_think markers
+                    let filteredContent = msg.content
+                    if (filteredContent === '[(deep_think)]' || filteredContent.trim() === '[(deep_think)]') {
+                      console.log('[Qwen] Non-stream: Skipping deep_think marker')
+                      continue
+                    }
+                    filteredContent = filteredContent.replace(/\[\(deep_think\)\]/g, '')
+                    if (filteredContent.length > contentAccumulator.length) {
+                      contentAccumulator = filteredContent
+                      console.log('[Qwen] Non-stream multi_load/iframe content length:', contentAccumulator.length)
+                    }
                   }
                   
                   // Also handle text/plain content
                   if (msg.mime_type === 'text/plain' && msg.content) {
-                    if (msg.content.length > contentAccumulator.length) {
-                      contentAccumulator = msg.content
+                    // Filter out deep_think markers
+                    let filteredContent = msg.content.replace(/\[\(deep_think\)\]/g, '')
+                    if (filteredContent.length > contentAccumulator.length) {
+                      contentAccumulator = filteredContent
                     }
                   }
 
@@ -710,6 +821,11 @@ export class QwenStreamHandler {
                         data.choices[0].finish_reason = 'tool_calls'
                       } else {
                         data.choices[0].message.content = cleanContent.trim()
+                      }
+                      
+                      // Add reasoning_content if available
+                      if (thinkingAccumulator) {
+                        data.choices[0].message.reasoning_content = thinkingAccumulator
                       }
                       
                       this.onEnd?.(this.sessionId)

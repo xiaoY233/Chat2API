@@ -660,6 +660,7 @@ export class MiniMaxAdapter {
     }
     
     const content = aiMessage?.msg_content || ''
+    const thinkingContent = aiMessage?.extra_info?.thinking_content || ''
     const { content: cleanContent, toolCalls } = parseToolCallsFromText(content, 'minimax')
     
     const response = {
@@ -676,6 +677,7 @@ export class MiniMaxAdapter {
           message: {
             role: 'assistant',
             content: toolCalls.length > 0 ? null : cleanContent,
+            ...(thinkingContent ? { reasoning_content: thinkingContent } : {}),
             ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {})
           },
           finish_reason: toolCalls.length > 0 ? 'tool_calls' : 'stop',
@@ -725,11 +727,13 @@ export class MiniMaxAdapter {
     const transStream = new PassThrough()
     const created = this.created
     let lastContent = ''
+    let lastThinkingContent = ''
     let pollCount = 0
     const maxPolls = 60
     const pollInterval = 500
     const toolCallState = createToolCallState()
     let sentRole = false
+    let sentThinkingRole = false
     
     const poll = async () => {
       try {
@@ -761,6 +765,37 @@ export class MiniMaxAdapter {
           
           if (aiMessage && aiMessage.msg_content) {
             const currentContent = aiMessage.msg_content
+            const currentThinkingContent = aiMessage?.extra_info?.thinking_content || ''
+            
+            // Handle thinking content
+            if (currentThinkingContent && currentThinkingContent.length > lastThinkingContent.length) {
+              const newThinkingChunk = currentThinkingContent.substring(lastThinkingContent.length)
+              
+              if (newThinkingChunk.trim()) {
+                // Send role for thinking content first
+                if (!sentThinkingRole) {
+                  transStream.write(`data: ${JSON.stringify({
+                    id: chatId.toString(),
+                    model,
+                    object: 'chat.completion.chunk',
+                    choices: [{ index: 0, delta: { role: 'assistant' }, finish_reason: null }],
+                    created,
+                  })}\n\n`)
+                  sentThinkingRole = true
+                }
+                
+                // Send thinking content as reasoning_content
+                transStream.write(`data: ${JSON.stringify({
+                  id: chatId.toString(),
+                  model,
+                  object: 'chat.completion.chunk',
+                  choices: [{ index: 0, delta: { reasoning_content: newThinkingChunk }, finish_reason: null }],
+                  created,
+                })}\n\n`)
+              }
+              
+              lastThinkingContent = currentThinkingContent
+            }
             
             if (currentContent.length > lastContent.length) {
               const newChunk = currentContent.substring(lastContent.length)

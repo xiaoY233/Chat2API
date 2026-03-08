@@ -90,12 +90,16 @@ export interface ChatCompletionRequest {
   }
   /** Reasoning effort level (OpenAI compatible) - enables thinking mode */
   reasoning_effort?: 'low' | 'medium' | 'high'
+  /** Reasoning effort level (camelCase, for AI SDK compatibility) */
+  reasoningEffort?: 'low' | 'medium' | 'high'
   /** Enable deep research mode (GLM specific) */
   deep_research?: boolean
   /** Tools for function calling */
   tools?: ChatCompletionTool[]
   /** Tool choice strategy */
   tool_choice?: ChatCompletionToolChoice
+  /** Tool format - determines response format for tool calls */
+  tool_format?: 'native' | 'json' | 'auto'
 }
 
 /**

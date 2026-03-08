@@ -293,12 +293,18 @@ export interface SessionConfig {
  * Controls how tool prompts are injected for models without native function calling
  */
 export interface ToolPromptConfig {
-  /** Injection mode: 'always' injects for all requests, 'smart' only for complex queries, 'never' disables injection */
-  mode: 'always' | 'smart' | 'never'
+  /** Injection mode: 'always' injects for all requests, 'smart' only for complex queries, 'never' disables injection, 'auto' detects client automatically */
+  mode: 'always' | 'smart' | 'never' | 'auto'
   /** Message length threshold for smart mode (default 50) */
   smartThreshold: number
   /** Keywords that trigger injection in smart mode */
   keywords: string[]
+  /** Enable client detection to skip injection for known clients */
+  clientDetection: boolean
+  /** Preferred prompt variant ID */
+  preferredVariant?: string
+  /** Clients to skip injection for */
+  skipKnownClients: string[]
 }
 
 /**
@@ -432,6 +438,8 @@ export const DEFAULT_TOOL_PROMPT_CONFIG: ToolPromptConfig = {
   mode: 'smart',
   smartThreshold: 50,
   keywords: ['search', 'find', 'get', 'call', 'use', 'tool', 'query', 'fetch', 'read', 'write', 'list', 'delete', 'update', 'create'],
+  clientDetection: true,
+  skipKnownClients: ['cline', 'kilocode', 'rooCode', 'vscodeCopilot', 'cherryStudio'],
 }
 
 /**
@@ -543,7 +551,7 @@ export const BUILTIN_PROVIDERS: BuiltinProviderConfig[] = [
     },
     enabled: true,
     description: 'Kimi K2.5 AI assistant, supports thinking mode and web search',
-    supportedModels: ['kimi-k2.5'],
+    supportedModels: ['Kimi-K2.5'],
     credentialFields: [
       {
         name: 'token',
