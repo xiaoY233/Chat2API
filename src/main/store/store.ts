@@ -149,14 +149,16 @@ class StoreManager {
 
   /**
    * Get Encryption Key
-   * Uses Electron's safeStorage API to generate encryption key
+   * Returns a fixed encryption key for electron-store
+   * Note: electron-store uses this key to encrypt/decrypt the data file,
+   * so it must be stable across app restarts
    */
   private getEncryptionKey(): string | undefined {
     try {
       if (safeStorage.isEncryptionAvailable()) {
-        const key = 'chat2api-encryption-key'
-        const encryptedKey = safeStorage.encryptString(key)
-        return encryptedKey.toString('base64')
+        // Use a fixed key - electron-store will use this to encrypt/decrypt data
+        // The key itself is not stored in the data file, only used for encryption
+        return 'chat2api-fixed-encryption-key-v1'
       }
     } catch (error) {
       console.warn('Encryption unavailable, using unencrypted storage:', error)
