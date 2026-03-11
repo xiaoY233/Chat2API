@@ -15,7 +15,7 @@
 </p>
 
 <p align="center">
-  <strong><a href="README_CN.md">中文文档</a></strong>
+  <strong><a href="README_CN.md">中文</a> | <a href="https://chat2api-doc.vercel.app/">Official Website</a> | <a href="https://chat2api-doc.vercel.app/docs">Documentation</a></strong>
 </p>
 
 <p align="center">
@@ -100,27 +100,65 @@ npm run build:all          # Build for all platforms
 
 ## 📖 Usage
 
-### 1. Start the Application
+### Step 1: Launch the App
 
-Launch Chat2API and configure your preferred settings.
+After installation, launch Chat2API. You'll see the main dashboard.
 
-### 2. Add Providers
+### Step 2: Add a Provider
 
-Go to **Providers** tab → Add a provider → Enter API key or authenticate via OAuth.
+1. Navigate to **Providers** from the sidebar
+2. Click **Add Provider** button
+3. Select a built-in provider (e.g., DeepSeek)
+4. Enter your authentication credentials
 
-### 3. Configure Proxy
+For example, to get a DeepSeek token:
 
-Go to **Proxy Settings** tab → Configure port and routing strategy → Start the proxy server.
+1. Visit [DeepSeek Chat](https://chat.deepseek.com/)
+2. Start any conversation
+3. Press `F12` to open Developer Tools
+4. Go to **Application** > **Local Storage**
+5. Find `userToken` and copy its value
 
-### 4. Manage API Keys
+### Step 3: Configure Proxy
 
-Go to **API Keys** tab → Generate keys for accessing your local proxy.
+1. Navigate to **Proxy Settings** from the sidebar
+2. Set the port (default: 8080)
+3. Choose a load balancing strategy:
+   - **Round Robin**: Distributes requests evenly across accounts
+   - **Fill First**: Uses one account until limit is reached
+   - **Failover**: Automatically switches on failure
+4. Click **Start Proxy**
 
-### 5. Monitor Usage
+### Step 4: Test the API
 
-- **Dashboard**: Overall health and traffic statistics
-- **Models**: View available models from all providers
-- **Logs**: Request logs for debugging
+Using Python (OpenAI SDK):
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    api_key="your-api-key",
+    base_url="http://localhost:8080/v1"
+)
+
+response = client.chat.completions.create(
+    model="DeepSeek-V3.2",
+    messages=[
+        {"role": "user", "content": "Hello, who are you?"}
+    ]
+)
+
+print(response.choices[0].message.content)
+```
+
+### Step 5: Manage API Keys (Optional)
+
+For security, you can enable API Key authentication:
+
+1. Go to **API Keys** page
+2. Click **New API Key**
+3. Enter a name and description
+4. Copy the generated key
 
 ## 📸 Screenshots
 
@@ -132,13 +170,9 @@ Go to **API Keys** tab → Generate keys for accessing your local proxy.
 | ------------------------------------------------- | ------------------------------------------- |
 | ![Proxy](docs/screenshots/proxy.png)              | ![API Keys](docs/screenshots/api-keys.png)  |
 
-| Models                                    | Logs                                    |
+| Models                                    | Session                                    |
 | ----------------------------------------- | --------------------------------------- |
-| ![Models](docs/screenshots/models.png)    | ![Logs](docs/screenshots/logs.png)      |
-
-| Settings                                    | About                                    |
-| ------------------------------------------- | ---------------------------------------- |
-| ![Settings](docs/screenshots/settings.png)  | ![About](docs/screenshots/about.png)    |
+| ![Models](docs/screenshots/models.png)    | ![Session](docs/screenshots/Session.png)      |
 
 ## ⚙️ Settings
 

@@ -15,7 +15,7 @@
 </p>
 
 <p align="center">
-  <strong><a href="README.md">English</a></strong>
+  <strong><a href="README.md">English</a> | <a href="https://chat2api-doc.vercel.app/">官网介绍</a> | <a href="https://chat2api-doc.vercel.app/docs">文档</a></strong>
 </p>
 
 <p align="center">
@@ -100,27 +100,65 @@ npm run build:all          # 构建所有平台
 
 ## 📖 使用方法
 
-### 1. 启动应用
+### 步骤 1：启动应用
 
-启动 Chat2API，配置你的偏好设置。
+安装完成后，启动 Chat2API。您将看到主仪表盘。
 
-### 2. 添加服务商
+### 步骤 2：添加供应商
 
-进入 **供应商** 标签页 → 添加服务商 → 输入 API Key 或通过 OAuth 认证。
+1. 从侧边栏导航到**供应商**页面
+2. 点击**添加供应商**按钮
+3. 选择一个内置供应商（例如 DeepSeek）
+4. 输入您的认证凭证
 
-### 3. 配置代理
+例如，获取 DeepSeek Token：
 
-进入 **代理设置** 标签页 → 配置端口和路由策略 → 启动代理服务器。
+1. 访问 [DeepSeek Chat](https://chat.deepseek.com/)
+2. 开始任意对话
+3. 按 `F12` 打开开发者工具
+4. 转到 **Application** > **Local Storage**
+5. 找到 `userToken` 并复制其值
 
-### 4. 管理 API Key
+### 步骤 3：配置代理
 
-进入 **API Key** 标签页 → 生成访问本地代理的密钥。
+1. 从侧边栏导航到**代理设置**页面
+2. 设置端口（默认：8080）
+3. 选择负载均衡策略：
+   - **轮询**：在账户间均匀分配请求
+   - **填充优先**：使用一个账户直到达到限制
+   - **故障转移**：失败时自动切换
+4. 点击**启动代理**
 
-### 5. 监控使用情况
+### 步骤 4：测试 API
 
-- **仪表盘**：整体健康状况和流量统计
-- **模型**：查看所有服务商的可用模型
-- **日志**：请求日志，用于调试
+使用 Python (OpenAI SDK)：
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    api_key="your-api-key",
+    base_url="http://localhost:8080/v1"
+)
+
+response = client.chat.completions.create(
+    model="DeepSeek-V3.2",
+    messages=[
+        {"role": "user", "content": "你好，你是谁？"}
+    ]
+)
+
+print(response.choices[0].message.content)
+```
+
+### 步骤 5：管理 API Key（可选）
+
+为了安全，您可以启用 API Key 认证：
+
+1. 转到 **API Keys** 页面
+2. 点击**新建 API Key**
+3. 输入名称和描述
+4. 复制生成的密钥
 
 ## 📸 截图
 
@@ -132,13 +170,9 @@ npm run build:all          # 构建所有平台
 | ----------------------------------------- | ------------------------------------------ |
 | ![Proxy](docs/screenshots/proxy.png)      | ![API Keys](docs/screenshots/api-keys.png) |
 
-| 模型管理                                | 日志                                    |
+| 模型管理                                | 会话管理                                    |
 | --------------------------------------- | --------------------------------------- |
-| ![Models](docs/screenshots/models.png)  | ![Logs](docs/screenshots/logs.png)      |
-
-| 设置                                       | 关于                                    |
-| ------------------------------------------ | --------------------------------------- |
-| ![Settings](docs/screenshots/settings.png) | ![About](docs/screenshots/about.png)    |
+| ![Models](docs/screenshots/models.png)  | ![Session](docs/screenshots/Session.png)      |
 
 ## ⚙️ 设置选项
 
