@@ -62,6 +62,36 @@ function extractUserInput(messages: Array<{ role: string; content?: string | any
   return undefined
 }
 
+function normalizeModelFeatureFlags(model: string): {
+  normalizedModel: string
+  webSearch?: boolean
+  reasoningEffort?: 'low' | 'medium' | 'high'
+} {
+  const parts = model.split('-')
+  const suffixes = new Set<string>()
+
+  while (parts.length > 1) {
+    const suffix = parts[parts.length - 1].toLowerCase()
+    if (suffix !== 'think' && suffix !== 'search') {
+      break
+    }
+    suffixes.add(suffix)
+    parts.pop()
+  }
+
+  const normalizedModel = parts.join('-')
+
+  if (normalizedModel === model) {
+    return { normalizedModel: model }
+  }
+
+  return {
+    normalizedModel,
+    webSearch: suffixes.has('search') ? true : undefined,
+    reasoningEffort: suffixes.has('think') ? 'medium' : undefined,
+  }
+}
+
 /**
  * Handle Chat Completions Request
  */
@@ -116,6 +146,12 @@ router.post('/completions', async (ctx: Context) => {
   const webSearchFromHeader = ctx.headers['x-web-search'] === 'true'
   const reasoningEffortFromHeader = ctx.headers['x-reasoning-effort'] as 'low' | 'medium' | 'high' | undefined
   const deepResearchFromHeader = ctx.headers['x-deep-research'] === 'true'
+  const modelFeatureFlags = normalizeModelFeatureFlags(request.model)
+  const selectionModel = modelFeatureFlags.normalizedModel
+
+  if (selectionModel !== request.model) {
+    console.log('[Chat] Model suffix detected, using normalized model for selection only:', request.model, '->', selectionModel)
+  }
 
   // Handle reasoningEffort (camelCase) from AI SDK - convert to reasoning_effort (snake_case)
   const requestAny = request as any
@@ -130,9 +166,17 @@ router.post('/completions', async (ctx: Context) => {
     request.web_search = true
     console.log('[Chat] Web search enabled via X-Web-Search header')
   }
+  if (modelFeatureFlags.webSearch && request.web_search === undefined) {
+    request.web_search = true
+    console.log('[Chat] Web search enabled via model suffix (-Search)')
+  }
   if (reasoningEffortFromHeader && request.reasoning_effort === undefined) {
     request.reasoning_effort = reasoningEffortFromHeader
     console.log('[Chat] Reasoning effort set via X-Reasoning-Effort header:', reasoningEffortFromHeader)
+  }
+  if (modelFeatureFlags.reasoningEffort && request.reasoning_effort === undefined) {
+    request.reasoning_effort = modelFeatureFlags.reasoningEffort
+    console.log('[Chat] Reasoning effort set via model suffix (-Think):', modelFeatureFlags.reasoningEffort)
   }
   if (deepResearchFromHeader && request.deep_research === undefined) {
     request.deep_research = true
@@ -140,11 +184,11 @@ router.post('/completions', async (ctx: Context) => {
   }
 
   const config = storeManager.getConfig()
-  const preferredProviderId = modelMapper.getPreferredProvider(request.model)
-  const preferredAccountId = modelMapper.getPreferredAccount(request.model)
+  const preferredProviderId = modelMapper.getPreferredProvider(selectionModel)
+  const preferredAccountId = modelMapper.getPreferredAccount(selectionModel)
 
   const selection = loadBalancer.selectAccount(
-    request.model,
+    selectionModel,
     config.loadBalanceStrategy,
     preferredProviderId,
     preferredAccountId
