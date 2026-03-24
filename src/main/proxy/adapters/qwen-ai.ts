@@ -297,7 +297,7 @@ export class QwenAiAdapter {
           feature_config: featureConfig,
           extra: { meta: { subChatType: 't2t' } },
           sub_chat_type: 't2t',
-          parent_id: null,
+          parent_id: parentId || null,
         },
       ],
       timestamp: ts + 1,

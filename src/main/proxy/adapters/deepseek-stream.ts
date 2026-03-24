@@ -357,6 +357,8 @@ export class DeepSeekStreamHandler {
     let currentPath = ''
     let accumulatedTokenUsage = 2
     const isThinkingModel = this.model.includes('think') || this.model.includes('r1') || !!this.reasoningEffort
+    const isFoldModel = (this.model.includes('fold') || this.model.includes('search') || this.webSearchEnabled) && !isThinkingModel
+    const isSearchSilentModel = this.model.includes('search-silent')
 
     return new Promise((resolve, reject) => {
       let buffer = ''
@@ -425,6 +427,11 @@ export class DeepSeekStreamHandler {
             // For thinking models, default to 'thinking' path if not set
             if (!currentPath && isThinkingModel) {
               currentPath = 'thinking'
+            }
+            
+            // For fold models (web search only), default to 'content' path if not set
+            if (!currentPath && isFoldModel) {
+              currentPath = 'content'
             }
 
             if (typeof parsed.v === 'object' && Array.isArray(parsed.v)) {
