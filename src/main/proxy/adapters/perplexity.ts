@@ -112,7 +112,7 @@ function extractQuery(messages: PerplexityMessage[]): string {
 
 function mapModel(model: string): string {
   const directMappings: Record<string, string> = {
-    'Auto': 'auto',
+    'Auto': 'turbo',
     'Turbo': 'turbo',
     'PPLX-Pro': 'pplx_pro',
     'GPT-5': 'gpt5',
@@ -177,11 +177,38 @@ export class PerplexityAdapter {
     for (const [name, value] of Object.entries(this.allCookies)) {
       cookieParts.push(`${name}=${value}`)
     }
-    // Always include session token
     if (this.cookie && !this.allCookies['__Secure-next-auth.session-token']) {
       cookieParts.push(`__Secure-next-auth.session-token=${this.cookie}`)
     }
     return cookieParts.join('; ')
+  }
+
+  private formatNetworkError(error: Error): string {
+    const errorMsg = error.message || String(error)
+    
+    if (errorMsg.includes('ERR_CONNECTION_RESET') || errorMsg.includes('net::ERR_CONNECTION_RESET')) {
+      return 'Network connection reset. Please check your network connection and try again.'
+    }
+    if (errorMsg.includes('ERR_CONNECTION_REFUSED') || errorMsg.includes('net::ERR_CONNECTION_REFUSED')) {
+      return 'Connection refused. The server may be temporarily unavailable.'
+    }
+    if (errorMsg.includes('ERR_CONNECTION_TIMED_OUT') || errorMsg.includes('net::ERR_CONNECTION_TIMED_OUT')) {
+      return 'Connection timed out. Please check your network and try again.'
+    }
+    if (errorMsg.includes('ERR_SSL') || errorMsg.includes('SSL')) {
+      return 'SSL/TLS handshake failed. Please check your network security settings.'
+    }
+    if (errorMsg.includes('ERR_NAME_NOT_RESOLVED') || errorMsg.includes('net::ERR_NAME_NOT_RESOLVED')) {
+      return 'DNS resolution failed. Please check your network connection.'
+    }
+    if (errorMsg.includes('ERR_NETWORK_CHANGED') || errorMsg.includes('net::ERR_NETWORK_CHANGED')) {
+      return 'Network changed during request. Please try again.'
+    }
+    if (errorMsg.includes('ERR_INTERNET_DISCONNECTED') || errorMsg.includes('net::ERR_INTERNET_DISCONNECTED')) {
+      return 'No internet connection. Please check your network settings.'
+    }
+    
+    return `Network error: ${errorMsg}. Please check your connection and try again.`
   }
 
   private buildRequestData(
@@ -375,7 +402,8 @@ export class PerplexityAdapter {
         
         response.on('error', (error) => {
           console.error('[Perplexity] Response error:', error)
-          stream.emit('error', error)
+          const errorMessage = this.formatNetworkError(error)
+          stream.emit('error', new Error(errorMessage))
         })
         
         const sessionId = sessionData?.backend_uuid || requestId
@@ -384,8 +412,10 @@ export class PerplexityAdapter {
       
       request_.on('error', (error) => {
         console.error('[Perplexity] Request error:', error)
-        stream.emit('error', error)
-        reject(error)
+        const errorMessage = this.formatNetworkError(error)
+        const wrappedError = new Error(errorMessage)
+        stream.emit('error', wrappedError)
+        reject(wrappedError)
       })
       
       request_.write(JSON.stringify(data))

@@ -203,6 +203,8 @@ export interface AppConfig {
   sessionConfig: SessionConfig
   /** Tool prompt injection configuration */
   toolPromptConfig: ToolPromptConfig
+  /** Management API configuration */
+  managementApi: ManagementApiConfig
 }
 
 /**
@@ -326,6 +328,19 @@ export interface ToolPromptConfig {
   protocolFormat: 'bracket' | 'xml'
   /** How to handle existing client-injected prompts (default: 'skip') */
   clientInjectionBehavior?: ClientInjectionBehavior
+}
+
+/**
+ * Management API Configuration Interface
+ * Controls the management API server settings
+ */
+export interface ManagementApiConfig {
+  /** Whether to enable the management API */
+  enableManagementApi: boolean
+  /** Secret key for management API authentication */
+  managementApiSecret: string
+  /** Management API port (optional, defaults to proxyPort) */
+  managementApiPort?: number
 }
 
 /**
@@ -584,6 +599,14 @@ export const DEFAULT_TOOL_PROMPT_CONFIG: ToolPromptConfig = {
 }
 
 /**
+ * Default Management API Configuration
+ */
+export const DEFAULT_MANAGEMENT_API_CONFIG: ManagementApiConfig = {
+  enableManagementApi: false,
+  managementApiSecret: '',
+}
+
+/**
  * Default Application Configuration
  */
 export const DEFAULT_CONFIG: AppConfig = {
@@ -604,6 +627,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   oauthProxyMode: 'system',
   sessionConfig: DEFAULT_SESSION_CONFIG,
   toolPromptConfig: DEFAULT_TOOL_PROMPT_CONFIG,
+  managementApi: DEFAULT_MANAGEMENT_API_CONFIG,
 }
 
 /**

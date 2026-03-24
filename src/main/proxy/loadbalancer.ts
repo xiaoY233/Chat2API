@@ -197,9 +197,18 @@ export class LoadBalancer {
     const config = storeManager.getConfig()
     const mapping = config.modelMappings[model]
 
-    if (mapping && mapping.preferredProviderId === provider.id) {
-      console.log(`[LoadBalancer] Model mapped from "${model}" to "${mapping.actualModel}" via global mapping`)
-      return mapping.actualModel
+    if (mapping && (!mapping.preferredProviderId || mapping.preferredProviderId === provider.id)) {
+      const actualModel = mapping.actualModel
+      console.log(`[LoadBalancer] Model mapped from "${model}" to "${actualModel}" via global mapping`)
+      
+      // After global mapping, check if provider has a mapping for the actual model
+      if (provider.modelMappings && provider.modelMappings[actualModel]) {
+        const finalModel = provider.modelMappings[actualModel]
+        console.log(`[LoadBalancer] Model further mapped from "${actualModel}" to "${finalModel}" via provider mapping`)
+        return finalModel
+      }
+      
+      return actualModel
     }
 
     console.log(`[LoadBalancer] No mapping found, returning original model "${model}"`)

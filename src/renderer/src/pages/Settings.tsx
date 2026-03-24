@@ -5,8 +5,9 @@ import {
   GeneralSettings,
   DataManagement,
   SecuritySettings,
+  ManagementApiSettings,
 } from '@/components/settings'
-import { Sun, Settings as SettingsIcon, Database, Shield } from 'lucide-react'
+import { Sun, Settings as SettingsIcon, Database, Shield, Key } from 'lucide-react'
 
 export function Settings() {
   const { t } = useTranslation()
@@ -19,7 +20,7 @@ export function Settings() {
       </div>
 
       <Tabs defaultValue="appearance" className="w-full">
-        <TabsList className="grid w-full grid-cols-4 h-auto">
+        <TabsList className="grid w-full grid-cols-5 h-auto">
           <TabsTrigger value="appearance" className="flex items-center gap-2 py-2">
             <Sun className="h-4 w-4" />
             <span className="hidden sm:inline">{t('settings.appearance')}</span>
@@ -35,6 +36,10 @@ export function Settings() {
           <TabsTrigger value="security" className="flex items-center gap-2 py-2">
             <Shield className="h-4 w-4" />
             <span className="hidden sm:inline">{t('settings.security')}</span>
+          </TabsTrigger>
+          <TabsTrigger value="managementApi" className="flex items-center gap-2 py-2">
+            <Key className="h-4 w-4" />
+            <span className="hidden sm:inline">{t('settings.managementApi.title')}</span>
           </TabsTrigger>
         </TabsList>
 
@@ -52,6 +57,10 @@ export function Settings() {
 
         <TabsContent value="security" className="mt-6">
           <SecuritySettings />
+        </TabsContent>
+
+        <TabsContent value="managementApi" className="mt-6">
+          <ManagementApiSettings />
         </TabsContent>
       </Tabs>
     </div>

@@ -1,4 +1,5 @@
 import { useCallback } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -22,6 +23,7 @@ function formatTime(timestamp: string | number | Date): string {
 }
 
 export function LogDetail() {
+  const { t } = useTranslation()
   const { selectedLog, setSelectedLog } = useLogsStore()
   const { toast } = useToast()
 
@@ -30,37 +32,37 @@ export function LogDetail() {
       try {
         await navigator.clipboard.writeText(text)
         toast({
-          title: 'Copied',
-          description: 'Copied to clipboard',
+          title: t('common.copied'),
+          description: t('logs.copiedToClipboard'),
         })
       } catch {
         toast({
-          title: 'Copy Failed',
-          description: 'Unable to copy to clipboard',
+          title: t('logs.copyFailed'),
+          description: t('logs.unableToCopy'),
           variant: 'destructive',
         })
       }
     },
-    [toast]
+    [toast, t]
   )
 
   const handleCopyAll = useCallback(() => {
     if (!selectedLog) return
 
     const logText = [
-      `Time: ${formatTime(selectedLog.timestamp)}`,
-      `Level: ${selectedLog.level.toUpperCase()}`,
-      `Message: ${selectedLog.message}`,
-      selectedLog.providerId && `Provider: ${selectedLog.providerId}`,
-      selectedLog.accountId && `Account: ${selectedLog.accountId}`,
-      selectedLog.requestId && `Request ID: ${selectedLog.requestId}`,
-      selectedLog.data && `Data: ${JSON.stringify(selectedLog.data, null, 2)}`,
+      `${t('logs.time')}: ${formatTime(selectedLog.timestamp)}`,
+      `${t('logs.level')}: ${selectedLog.level.toUpperCase()}`,
+      `${t('logs.message')}: ${selectedLog.message}`,
+      selectedLog.providerId && `${t('logs.provider')}: ${selectedLog.providerId}`,
+      selectedLog.accountId && `${t('logs.account')}: ${selectedLog.accountId}`,
+      selectedLog.requestId && `${t('logs.requestId')}: ${selectedLog.requestId}`,
+      selectedLog.data && `${t('logs.additionalData')}: ${JSON.stringify(selectedLog.data, null, 2)}`,
     ]
       .filter(Boolean)
       .join('\n')
 
     handleCopy(logText)
-  }, [selectedLog, handleCopy])
+  }, [selectedLog, handleCopy, t])
 
   const handleClose = useCallback(() => {
     setSelectedLog(null)
@@ -71,12 +73,12 @@ export function LogDetail() {
       <SheetContent className="w-[500px] sm:max-w-[500px]">
         <SheetHeader>
           <div className="flex items-center justify-between">
-            <SheetTitle>Log Details</SheetTitle>
+            <SheetTitle>{t('logs.logDetails')}</SheetTitle>
             <Button variant="ghost" size="sm" onClick={handleClose}>
               <X className="h-4 w-4" />
             </Button>
           </div>
-          <SheetDescription>View complete log information</SheetDescription>
+          <SheetDescription>{t('logs.viewCompleteLogInfo')}</SheetDescription>
         </SheetHeader>
 
         {selectedLog && (
@@ -95,7 +97,7 @@ export function LogDetail() {
                 </div>
                 <Button variant="outline" size="sm" onClick={handleCopyAll}>
                   <Copy className="h-4 w-4 mr-1" />
-                  Copy All
+                  {t('logs.copyAll')}
                 </Button>
               </div>
 
@@ -104,7 +106,7 @@ export function LogDetail() {
               <div className="space-y-3">
                 <div>
                   <label className="text-sm font-medium text-muted-foreground">
-                    Message
+                    {t('logs.message')}
                   </label>
                   <div className="mt-1 p-3 bg-muted rounded-md font-mono text-sm break-all">
                     {selectedLog.message}
@@ -122,7 +124,7 @@ export function LogDetail() {
                 {selectedLog.providerId && (
                   <div>
                     <label className="text-sm font-medium text-muted-foreground">
-                      Provider ID
+                      {t('logs.providerId')}
                     </label>
                     <div className="mt-1 flex items-center gap-2">
                       <code className="px-2 py-1 bg-muted rounded text-sm">
@@ -143,7 +145,7 @@ export function LogDetail() {
                 {selectedLog.accountId && (
                   <div>
                     <label className="text-sm font-medium text-muted-foreground">
-                      Account ID
+                      {t('logs.accountId')}
                     </label>
                     <div className="mt-1 flex items-center gap-2">
                       <code className="px-2 py-1 bg-muted rounded text-sm">
@@ -164,7 +166,7 @@ export function LogDetail() {
                 {selectedLog.requestId && (
                   <div>
                     <label className="text-sm font-medium text-muted-foreground">
-                      Request ID
+                      {t('logs.requestId')}
                     </label>
                     <div className="mt-1 flex items-center gap-2">
                       <code className="px-2 py-1 bg-muted rounded text-sm">
@@ -185,7 +187,7 @@ export function LogDetail() {
                 {selectedLog.data && Object.keys(selectedLog.data).length > 0 && (
                   <div>
                     <label className="text-sm font-medium text-muted-foreground">
-                      Additional Data
+                      {t('logs.additionalData')}
                     </label>
                     <div className="mt-1 p-3 bg-muted rounded-md">
                       <pre className="text-sm font-mono overflow-x-auto">
@@ -200,7 +202,7 @@ export function LogDetail() {
                         }
                       >
                         <Copy className="h-4 w-4 mr-1" />
-                        Copy Data
+                        {t('logs.copyData')}
                       </Button>
                     </div>
                   </div>
@@ -208,7 +210,7 @@ export function LogDetail() {
 
                 <div>
                   <label className="text-sm font-medium text-muted-foreground">
-                    Log ID
+                    {t('logs.logId')}
                   </label>
                   <div className="mt-1 flex items-center gap-2">
                     <code className="px-2 py-1 bg-muted rounded text-sm text-muted-foreground">

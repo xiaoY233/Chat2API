@@ -581,8 +581,6 @@ export class QwenAiStreamHandler {
   }
 
   async handleNonStream(stream: any): Promise<any> {
-    console.log('[QwenAI] Starting non-stream handler...')
-
     return new Promise((resolve, reject) => {
       const data = {
         id: '',
@@ -600,6 +598,21 @@ export class QwenAiStreamHandler {
       }
 
       let reasoningText = ''
+      let resolved = false
+
+      const resolveOnce = (value: any) => {
+        if (!resolved) {
+          resolved = true
+          resolve(value)
+        }
+      }
+
+      const rejectOnce = (reason: any) => {
+        if (!resolved) {
+          resolved = true
+          reject(reason)
+        }
+      }
 
       const parser = createParser({
         onEvent: (event: any) => {
@@ -621,26 +634,28 @@ export class QwenAiStreamHandler {
 
               if (phase === 'think' && status !== 'finished') {
                 reasoningText += content
-              } else if (phase === 'answer' && status !== 'finished') {
+              } else if (phase === 'answer') {
+                if (content) {
+                  data.choices[0].message.content += content
+                }
+                if (status === 'finished') {
+                  if (reasoningText) {
+                    data.choices[0].message.reasoning_content = reasoningText
+                  }
+
+                  if (this.onEnd && this.chatId) {
+                    this.onEnd(this.chatId)
+                  }
+
+                  resolveOnce(data)
+                }
+              } else if (phase === null && content) {
                 data.choices[0].message.content += content
-              }
-
-              if (status === 'finished') {
-                if (reasoningText) {
-                  data.choices[0].message.reasoning_content = reasoningText
-                }
-                console.log('[QwenAI] Non-stream finished, content length:', data.choices[0].message.content.length)
-
-                if (this.onEnd && this.chatId) {
-                  this.onEnd(this.chatId)
-                }
-
-                resolve(data)
               }
             }
           } catch (err) {
             console.error('[QwenAI] Non-stream parse error:', err)
-            reject(err)
+            rejectOnce(err)
           }
         },
       })
@@ -648,14 +663,13 @@ export class QwenAiStreamHandler {
       stream.on('data', (buffer: Buffer) => parser.feed(buffer.toString()))
       stream.once('error', (err: Error) => {
         console.error('[QwenAI] Non-stream error:', err)
-        reject(err)
+        rejectOnce(err)
       })
       stream.once('close', () => {
-        console.log('[QwenAI] Non-stream closed, resolving with current data')
         if (reasoningText) {
           data.choices[0].message.reasoning_content = reasoningText
         }
-        resolve(data)
+        resolveOnce(data)
       })
     })
   }

@@ -96,6 +96,10 @@ export const IpcChannels = {
   SESSION_DELETE: 'session:delete',
   SESSION_CLEAR_ALL: 'session:clearAll',
   SESSION_CLEAN_EXPIRED: 'session:cleanExpired',
+
+  MANAGEMENT_API_GET_CONFIG: 'managementApi:getConfig',
+  MANAGEMENT_API_UPDATE_CONFIG: 'managementApi:updateConfig',
+  MANAGEMENT_API_GENERATE_SECRET: 'managementApi:generateSecret',
 } as const
 
 export type IpcChannel = (typeof IpcChannels)[keyof typeof IpcChannels]

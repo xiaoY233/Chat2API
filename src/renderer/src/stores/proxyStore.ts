@@ -34,9 +34,6 @@ interface ProxyState {
   setAccountWeights: (weights: AccountWeight[]) => void
   updateAccountWeight: (accountId: string, weight: number) => void
   setModelMappings: (mappings: ModelMapping[]) => void
-  addModelMapping: (mapping: ModelMapping) => void
-  updateModelMapping: (requestModel: string, mapping: Partial<ModelMapping>) => void
-  removeModelMapping: (requestModel: string) => void
   setAppConfig: (config: AppConfig | null) => void
   setLoading: (loading: boolean) => void
   setError: (error: string | null) => void
@@ -106,20 +103,6 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
   }),
 
   setModelMappings: (mappings) => set({ modelMappings: mappings }),
-
-  addModelMapping: (mapping) => set((state) => ({
-    modelMappings: [...state.modelMappings, mapping],
-  })),
-
-  updateModelMapping: (requestModel, mapping) => set((state) => ({
-    modelMappings: state.modelMappings.map(m =>
-      m.requestModel === requestModel ? { ...m, ...mapping } : m
-    ),
-  })),
-
-  removeModelMapping: (requestModel) => set((state) => ({
-    modelMappings: state.modelMappings.filter(m => m.requestModel !== requestModel),
-  })),
 
   setAppConfig: (config) => set({ appConfig: config }),
 

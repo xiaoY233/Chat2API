@@ -136,7 +136,7 @@ export function LogDetailModal({ log, open, onClose }: LogDetailModalProps) {
                 <p className="font-medium break-all">{log.account || '-'}</p>
               </div>
               <div className="min-w-0">
-                <label className="text-sm text-muted-foreground">Duration</label>
+                <label className="text-sm text-muted-foreground">{t('logs.duration')}</label>
                 <p className="font-medium">{log.duration ? `${(log.duration * 1000).toFixed(0)}ms` : '-'}</p>
               </div>
             </div>
@@ -154,7 +154,7 @@ export function LogDetailModal({ log, open, onClose }: LogDetailModalProps) {
 
             {log.error && (
               <div>
-                <label className="text-sm text-red-500">Error</label>
+                <label className="text-sm text-red-500">{t('logs.error')}</label>
                 <div className="mt-1 p-3 bg-red-500/10 rounded-lg border border-red-500/20">
                   <pre className="text-sm text-red-600 whitespace-pre-wrap break-all font-sans">
                     {log.error}

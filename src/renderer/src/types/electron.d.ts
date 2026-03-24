@@ -350,6 +350,18 @@ interface TrayAPI {
   quitApp: () => void
 }
 
+interface ManagementApiConfig {
+  enableManagementApi: boolean
+  managementApiSecret: string
+  managementApiPort?: number
+}
+
+interface ManagementApiAPI {
+  getConfig: () => Promise<ManagementApiConfig>
+  updateConfig: (updates: Partial<ManagementApiConfig>) => Promise<boolean>
+  generateSecret: () => Promise<string>
+}
+
 interface ElectronAPI {
   proxy: ProxyAPI
   store: StoreAPI
@@ -363,6 +375,7 @@ interface ElectronAPI {
   config: ConfigAPI
   prompts: PromptsAPI
   session: SessionAPI
+  managementApi: ManagementApiAPI
   tray: TrayAPI
   on: (channel: string, callback: (...args: unknown[]) => void) => () => void
   send: (channel: string, ...args: unknown[]) => void

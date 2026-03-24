@@ -82,6 +82,26 @@ export class PerplexityStreamHandler {
     return this.sessionTokens
   }
 
+  private formatStreamError(errorMsg: string): string {
+    if (errorMsg.includes('ERR_CONNECTION_RESET') || errorMsg.includes('net::ERR_CONNECTION_RESET')) {
+      return 'Network connection reset during streaming. Please check your network connection and try again.'
+    }
+    if (errorMsg.includes('ERR_CONNECTION_REFUSED') || errorMsg.includes('net::ERR_CONNECTION_REFUSED')) {
+      return 'Connection refused during streaming. The server may be temporarily unavailable.'
+    }
+    if (errorMsg.includes('ERR_CONNECTION_TIMED_OUT') || errorMsg.includes('net::ERR_CONNECTION_TIMED_OUT')) {
+      return 'Connection timed out during streaming. Please check your network and try again.'
+    }
+    if (errorMsg.includes('ERR_SSL') || errorMsg.includes('SSL')) {
+      return 'SSL/TLS handshake failed during streaming. Please check your network security settings.'
+    }
+    if (errorMsg.includes('ERR_NETWORK_CHANGED') || errorMsg.includes('net::ERR_NETWORK_CHANGED')) {
+      return 'Network changed during streaming. Please try again.'
+    }
+    
+    return `Stream error: ${errorMsg}`
+  }
+
   private parseSSE(data: string): PerplexitySSEEvent | null {
     try {
       return JSON.parse(data)
@@ -149,7 +169,9 @@ export class PerplexityStreamHandler {
 
     stream.on('error', (err) => {
       console.error('[Perplexity Stream] Stream error:', err)
-      transStream.emit('error', err)
+      const errorMessage = err.message || String(err)
+      const userFriendlyError = this.formatStreamError(errorMessage)
+      transStream.emit('error', new Error(userFriendlyError))
     })
 
     return transStream
@@ -394,7 +416,11 @@ export class PerplexityStreamHandler {
         })
       })
 
-      stream.on('error', reject)
+      stream.on('error', (err) => {
+        const errorMessage = err.message || String(err)
+        const userFriendlyError = this.formatStreamError(errorMessage)
+        reject(new Error(userFriendlyError))
+      })
     })
   }
 

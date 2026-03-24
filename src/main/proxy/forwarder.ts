@@ -1204,7 +1204,7 @@ CRITICAL RULES:
       const handler = new ZaiStreamHandler(actualModel, deleteChatCallback)
       handler.setChatId(chatId)
       
-      if (request.stream !== false) {
+      if (request.stream === true) {
         const transformedStream = await handler.handleStream(response.data)
         
         // Listen for stream end to update parent message ID using the requestId
@@ -1227,7 +1227,7 @@ CRITICAL RULES:
         }
       }
 
-      const result = await handler.handleNonStream(response)
+      const result = await handler.handleNonStream(response.data)
 
       // Parse tool calls from response content if using prompt-based tool calling
       if (request.tools && request.tools.length > 0 && !isNativeFunctionCallingModel(request.model)) {

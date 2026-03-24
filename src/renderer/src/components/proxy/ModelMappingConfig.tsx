@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -23,9 +23,10 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { useProxyStore } from '@/stores/proxyStore'
+import { useNavigationStore } from '@/stores/navigationStore'
 import { useToast } from '@/hooks/use-toast'
 import type { ModelMapping, Provider, Account } from '@/types/electron'
-import { ArrowRight, Plus, Pencil, Trash2, Search, Sparkles } from 'lucide-react'
+import { ArrowRight, Plus, Pencil, Trash2, Search, Sparkles, Save, RotateCcw, AlertTriangle } from 'lucide-react'
 
 interface ModelMappingConfigProps {
   onConfigChange?: () => void
@@ -38,25 +39,28 @@ interface MappingFormData {
   preferredAccountId: string
 }
 
+const BLOCKER_ID = 'model-mapping-changes'
+
 export function ModelMappingConfig({ onConfigChange }: ModelMappingConfigProps) {
   const { t } = useTranslation()
   const {
     modelMappings,
-    addModelMapping,
-    updateModelMapping,
-    removeModelMapping,
+    setModelMappings,
     saveAppConfig,
     isLoading,
   } = useProxyStore()
+  const { registerBlocker, unregisterBlocker } = useNavigationStore()
   const { toast } = useToast()
   
-  const [mappings, setMappings] = useState<ModelMapping[]>(modelMappings)
+  const [mappings, setMappings] = useState<ModelMapping[]>([])
+  const [originalMappings, setOriginalMappings] = useState<ModelMapping[]>([])
   const [providers, setProviders] = useState<Provider[]>([])
   const [accounts, setAccounts] = useState<Account[]>([])
   const [searchQuery, setSearchQuery] = useState('')
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [editingMapping, setEditingMapping] = useState<ModelMapping | null>(null)
   const [hasChanges, setHasChanges] = useState(false)
+  const isInitializedRef = useRef(false)
   
   const [formData, setFormData] = useState<MappingFormData>({
     requestModel: '',
@@ -79,8 +83,34 @@ export function ModelMappingConfig({ onConfigChange }: ModelMappingConfigProps) 
   }, [])
 
   useEffect(() => {
-    setMappings(modelMappings)
+    if (!isInitializedRef.current && modelMappings.length >= 0) {
+      setMappings([...modelMappings])
+      setOriginalMappings([...modelMappings])
+      isInitializedRef.current = true
+    }
   }, [modelMappings])
+
+  useEffect(() => {
+    if (hasChanges) {
+      registerBlocker(BLOCKER_ID, t('proxy.unsavedChangesDescription'))
+    } else {
+      unregisterBlocker(BLOCKER_ID)
+    }
+    return () => unregisterBlocker(BLOCKER_ID)
+  }, [hasChanges, registerBlocker, unregisterBlocker, t])
+
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (hasChanges) {
+        e.preventDefault()
+        e.returnValue = t('proxy.unsavedChangesWarning')
+        return e.returnValue
+      }
+    }
+
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [hasChanges, t])
 
   const fetchProviders = async () => {
     try {
@@ -159,7 +189,6 @@ export function ModelMappingConfig({ onConfigChange }: ModelMappingConfigProps) 
         m.requestModel === editingMapping.requestModel ? mapping : m
       )
       setMappings(updatedMappings)
-      updateModelMapping(editingMapping.requestModel, mapping)
     } else {
       if (mappings.some(m => m.requestModel === mapping.requestModel)) {
         toast({
@@ -170,7 +199,6 @@ export function ModelMappingConfig({ onConfigChange }: ModelMappingConfigProps) 
         return
       }
       setMappings([...mappings, mapping])
-      addModelMapping(mapping)
     }
 
     setHasChanges(true)
@@ -179,20 +207,19 @@ export function ModelMappingConfig({ onConfigChange }: ModelMappingConfigProps) 
     
     toast({
       title: editingMapping ? t('providers.updateSuccess') : t('providers.addSuccess'),
-      description: t(editingMapping ? 'proxy.mappingUpdated' : 'proxy.mappingAdded', { model: mapping.requestModel }),
+      description: t(editingMapping ? 'proxy.mappingUpdatedPending' : 'proxy.mappingAddedPending', { model: mapping.requestModel }),
     })
   }
 
   const handleDeleteMapping = (requestModel: string) => {
     const updatedMappings = mappings.filter(m => m.requestModel !== requestModel)
     setMappings(updatedMappings)
-    removeModelMapping(requestModel)
     setHasChanges(true)
     onConfigChange?.()
     
     toast({
       title: t('providers.deleteSuccess'),
-      description: t('proxy.mappingDeleted', { model: requestModel }),
+      description: t('proxy.mappingDeletedPending', { model: requestModel }),
     })
   }
 
@@ -207,6 +234,8 @@ export function ModelMappingConfig({ onConfigChange }: ModelMappingConfigProps) 
     })
 
     if (success) {
+      setModelMappings(mappings)
+      setOriginalMappings([...mappings])
       setHasChanges(false)
       toast({
         title: t('providers.updateSuccess'),
@@ -222,8 +251,11 @@ export function ModelMappingConfig({ onConfigChange }: ModelMappingConfigProps) 
   }
 
   const handleReset = () => {
-    setMappings(modelMappings)
+    setMappings([...originalMappings])
     setHasChanges(false)
+    toast({
+      description: t('proxy.changesDiscarded'),
+    })
   }
 
   const filteredAccounts = formData.preferredProviderId
@@ -233,7 +265,7 @@ export function ModelMappingConfig({ onConfigChange }: ModelMappingConfigProps) 
   const isWildcard = formData.requestModel.includes('*')
 
   return (
-    <Card>
+    <Card className={hasChanges ? 'ring-2 ring-amber-500/50' : ''}>
       <CardHeader>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -241,7 +273,8 @@ export function ModelMappingConfig({ onConfigChange }: ModelMappingConfigProps) 
             <CardTitle>{t('proxy.modelMappingConfig')}</CardTitle>
           </div>
           {hasChanges && (
-            <Badge variant="secondary" className="text-xs">
+            <Badge variant="outline" className="bg-amber-500/10 text-amber-600 border-amber-500/50 gap-1">
+              <AlertTriangle className="h-3 w-3" />
               {t('proxy.unsaved')}
             </Badge>
           )}
@@ -368,23 +401,38 @@ export function ModelMappingConfig({ onConfigChange }: ModelMappingConfigProps) 
             </div>
           </div>
         </div>
-
-        <div className="flex justify-end space-x-2 pt-4">
-          <Button
-            variant="outline"
-            onClick={handleReset}
-            disabled={!hasChanges || isLoading}
-          >
-            {t('common.reset')}
-          </Button>
-          <Button
-            onClick={handleSaveAll}
-            disabled={!hasChanges || isLoading}
-          >
-            {isLoading ? t('providers.saving') : t('proxy.saveConfig')}
-          </Button>
-        </div>
       </CardContent>
+
+      {hasChanges && (
+        <div className="border-t bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-950/30 dark:to-orange-950/30 p-4 rounded-b-[16px]">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-sm">
+              <AlertTriangle className="h-4 w-4 text-amber-600" />
+              <span className="text-amber-700 dark:text-amber-400 font-medium">{t('proxy.unsavedChangesHint')}</span>
+            </div>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleReset}
+                disabled={isLoading}
+              >
+                <RotateCcw className="h-4 w-4 mr-2" />
+                {t('common.reset')}
+              </Button>
+              <Button
+                size="sm"
+                onClick={handleSaveAll}
+                disabled={isLoading}
+                className="bg-amber-600 hover:bg-amber-700"
+              >
+                <Save className="h-4 w-4 mr-2" />
+                {isLoading ? t('providers.saving') : t('proxy.saveConfig')}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
         <DialogContent>

@@ -483,6 +483,23 @@ const sessionAPI = {
     ipcRenderer.invoke(IpcChannels.SESSION_CLEAN_EXPIRED),
 }
 
+interface ManagementApiConfig {
+  enableManagementApi: boolean
+  managementApiSecret: string
+  managementApiPort?: number
+}
+
+const managementApiAPI = {
+  getConfig: (): Promise<ManagementApiConfig> => 
+    ipcRenderer.invoke(IpcChannels.MANAGEMENT_API_GET_CONFIG),
+  
+  updateConfig: (updates: Partial<ManagementApiConfig>): Promise<ManagementApiConfig> => 
+    ipcRenderer.invoke(IpcChannels.MANAGEMENT_API_UPDATE_CONFIG, updates),
+  
+  generateSecret: (): Promise<string> => 
+    ipcRenderer.invoke(IpcChannels.MANAGEMENT_API_GENERATE_SECRET),
+}
+
 const trayAPI = {
   openDashboard: (): void => 
     ipcRenderer.send('tray:open-dashboard'),
@@ -507,6 +524,7 @@ const electronAPI = {
   config: configAPI,
   prompts: promptsAPI,
   session: sessionAPI,
+  managementApi: managementApiAPI,
   tray: trayAPI,
   
   on: (channel: string, callback: (...args: unknown[]) => void) => {

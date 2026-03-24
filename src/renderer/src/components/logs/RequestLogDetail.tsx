@@ -243,7 +243,7 @@ export function RequestLogDetail({ log, onClose }: RequestLogDetailProps) {
                   value={<span className="font-mono text-xs bg-muted px-2 py-0.5 rounded">{log.method}</span>}
                 />
                 <InfoItem 
-                  label="URL" 
+                  label={t('logs.url')} 
                   value={<span className="font-mono text-xs break-all">{log.url}</span>}
                 />
                 <InfoItem 

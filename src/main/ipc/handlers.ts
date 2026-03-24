@@ -11,8 +11,10 @@ import { ProxyServer } from '../proxy/server'
 import { proxyStatusManager } from '../proxy/status'
 import { sessionManager } from '../proxy/sessionManager'
 import { TrayManager } from '../tray/TrayManager'
+import { ConfigManager } from '../store/config'
+import { generateManagementSecret } from '../proxy/middleware/managementAuth'
 import type { Provider, Account, ProxyStatus, ProviderCheckResult, OAuthResult, AuthType, CredentialField, LogLevel, LogEntry, ProviderVendor, AppConfig } from '../../shared/types'
-import type { SystemPrompt, SessionConfig, SessionRecord } from '../store/types'
+import type { SystemPrompt, SessionConfig, SessionRecord, ManagementApiConfig } from '../store/types'
 
 let proxyServer: ProxyServer | null = null
 let proxyStartTime: number | null = null
@@ -608,6 +610,33 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow | null): Pro
 
   ipcMain.handle(IpcChannels.SESSION_CLEAN_EXPIRED, async (): Promise<number> => {
     return sessionManager.cleanExpiredSessions()
+  })
+
+  // ==================== Management API Handlers ====================
+
+  ipcMain.handle(IpcChannels.MANAGEMENT_API_GET_CONFIG, async (): Promise<ManagementApiConfig> => {
+    const config = ConfigManager.get()
+    return config.managementApi
+  })
+
+  ipcMain.handle(IpcChannels.MANAGEMENT_API_UPDATE_CONFIG, async (_, updates: Partial<ManagementApiConfig>): Promise<ManagementApiConfig> => {
+    const config = ConfigManager.get()
+    const currentManagementConfig = config.managementApi
+    const newManagementConfig = { ...currentManagementConfig, ...updates }
+    
+    ConfigManager.update({ managementApi: newManagementConfig })
+    
+    return newManagementConfig
+  })
+
+  ipcMain.handle(IpcChannels.MANAGEMENT_API_GENERATE_SECRET, async (): Promise<string> => {
+    const newSecret = generateManagementSecret()
+    
+    const config = ConfigManager.get()
+    const newManagementConfig = { ...config.managementApi, managementApiSecret: newSecret }
+    ConfigManager.update({ managementApi: newManagementConfig })
+    
+    return newSecret
   })
   
   oauthManager.on('progress', (event) => {

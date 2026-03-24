@@ -202,3 +202,159 @@ export interface SessionConfig {
   deleteAfterTimeout: boolean
   maxSessionsPerAccount: number
 }
+
+export interface ManagementApiConfig {
+  enableManagementApi: boolean
+  managementApiSecret: string
+  managementApiPort?: number
+}
+
+export interface ManagementApiResponse<T = unknown> {
+  success: boolean
+  data?: T
+  error?: ManagementApiError
+}
+
+export interface ManagementApiError {
+  code: string
+  message: string
+  details?: Record<string, unknown>
+}
+
+export interface ManagementApiPaginationParams {
+  page?: number
+  limit?: number
+}
+
+export interface ManagementApiPaginatedResponse<T> {
+  items: T[]
+  total: number
+  page: number
+  limit: number
+  totalPages: number
+}
+
+export interface CreateProviderRequest {
+  name: string
+  type: ProviderType
+  authType: AuthType
+  apiEndpoint: string
+  chatPath?: string
+  headers?: Record<string, string>
+  enabled?: boolean
+  description?: string
+  icon?: string
+  supportedModels?: string[]
+  modelMappings?: Record<string, string>
+}
+
+export interface UpdateProviderRequest {
+  name?: string
+  apiEndpoint?: string
+  chatPath?: string
+  headers?: Record<string, string>
+  enabled?: boolean
+  description?: string
+  icon?: string
+  supportedModels?: string[]
+  modelMappings?: Record<string, string>
+}
+
+export interface ProviderStatusRequest {
+  enabled: boolean
+}
+
+export interface CreateAccountRequest {
+  providerId: string
+  name: string
+  email?: string
+  credentials: Record<string, string>
+  dailyLimit?: number
+}
+
+export interface UpdateAccountRequest {
+  name?: string
+  email?: string
+  credentials?: Record<string, string>
+  dailyLimit?: number
+}
+
+export interface CreateApiKeyRequest {
+  name: string
+  description?: string
+}
+
+export interface UpdateApiKeyRequest {
+  name?: string
+  description?: string
+  enabled?: boolean
+}
+
+export interface CreateModelMappingRequest {
+  requestModel: string
+  actualModel: string
+  preferredProviderId?: string
+  preferredAccountId?: string
+}
+
+export interface UpdateModelMappingRequest {
+  actualModel?: string
+  preferredProviderId?: string
+  preferredAccountId?: string
+}
+
+export interface ProxyStatusResponse {
+  isRunning: boolean
+  port: number
+  host: string
+  uptime: number
+  connections: number
+}
+
+export interface HealthCheckResponse {
+  status: 'healthy' | 'unhealthy' | 'degraded'
+  version: string
+  uptime: number
+  timestamp: number
+  components?: {
+    proxy: 'up' | 'down'
+    database: 'up' | 'down'
+    managementApi: 'up' | 'down'
+  }
+}
+
+export interface StatisticsResponse {
+  totalRequests: number
+  successRequests: number
+  failedRequests: number
+  avgLatency: number
+  requestsPerMinute: number
+  activeConnections: number
+  modelUsage: Record<string, number>
+  providerUsage: Record<string, number>
+  accountUsage: Record<string, number>
+  dailyStats?: Record<string, {
+    totalRequests: number
+    successRequests: number
+    failedRequests: number
+  }>
+}
+
+export interface ConfigUpdateRequest {
+  proxyPort?: number
+  proxyHost?: string
+  loadBalanceStrategy?: LoadBalanceStrategy
+  theme?: Theme
+  autoStart?: boolean
+  autoStartProxy?: boolean
+  minimizeToTray?: boolean
+  logLevel?: 'debug' | 'info' | 'warn' | 'error'
+  logRetentionDays?: number
+  requestTimeout?: number
+  retryCount?: number
+  enableApiKey?: boolean
+  oauthProxyMode?: 'system' | 'none'
+  sessionConfig?: SessionConfig
+  toolPromptConfig?: ToolPromptConfig
+  managementApi?: ManagementApiConfig
+}

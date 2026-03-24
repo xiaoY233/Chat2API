@@ -1228,7 +1228,8 @@ export class MiniMaxStreamHandler {
     return transStream
   }
 
-  async handleNonStream(response: any): Promise<any> {
+  async handleNonStream(stream: any): Promise<any> {
+    // Parameter 'stream' is response.data from forwarder.ts (the actual stream/data)
     return new Promise((resolve, reject) => {
       const data = {
         id: '',
@@ -1264,9 +1265,9 @@ export class MiniMaxStreamHandler {
         },
       })
 
-      response.data.on('data', (buffer: Buffer) => parser.feed(buffer.toString()))
-      response.data.once('error', reject)
-      response.data.once('close', () => resolve(data))
+      stream.on('data', (buffer: Buffer) => parser.feed(buffer.toString()))
+      stream.once('error', reject)
+      stream.once('close', () => resolve(data))
     })
   }
 }
