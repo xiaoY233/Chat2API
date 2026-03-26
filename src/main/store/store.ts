@@ -867,10 +867,26 @@ class StoreManager {
     }
     
     this.store!.set('requestLogs', requestLogs)
-    
+
     this.mainWindow?.webContents.send(IpcChannels.REQUEST_LOGS_NEW, newEntry)
-    
+
     return newEntry
+  }
+
+  /**
+   * Update Request Log Entry
+   */
+  updateRequestLog(id: string, updates: Partial<RequestLogEntry>): boolean {
+    this.ensureInitialized()
+    const requestLogs = this.store!.get('requestLogs') || []
+
+    const index = requestLogs.findIndex((l: RequestLogEntry) => l.id === id)
+    if (index === -1) return false
+
+    requestLogs[index] = { ...requestLogs[index], ...updates }
+    this.store!.set('requestLogs', requestLogs)
+
+    return true
   }
 
   /**

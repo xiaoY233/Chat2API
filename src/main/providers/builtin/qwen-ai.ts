@@ -33,13 +33,6 @@ export const qwenAiConfig: BuiltinProviderConfig = {
     'Qwen3-VL-235B-A22B': 'qwen3-vl-235b-a22b',
     'Qwen3-Omni-Flash': 'qwen3-omni-flash',
     'Qwen2.5-Max': 'qwen2.5-max',
-    qwen: 'qwen3-max',
-    qwen3: 'qwen3-max',
-    'qwen3.5': 'qwen3.5-plus',
-    'qwen3-coder': 'qwen3-coder-plus',
-    'qwen3-vl': 'qwen3-vl-235b-a22b',
-    'qwen3-omni': 'qwen3-omni-flash',
-    'qwen2.5': 'qwen2.5-max',
   },
   credentialFields: [
     {

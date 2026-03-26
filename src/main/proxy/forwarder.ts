@@ -1112,6 +1112,12 @@ CRITICAL RULES:
 
       const result = await handler.handleNonStream(response.data)
 
+      // Update parent message ID for non-stream response
+      const responseId = handler.getResponseId()
+      if (responseId && sessionContext.sessionId) {
+        sessionManager.updateParentMessageId(sessionContext.sessionId, responseId)
+      }
+
       // Parse tool calls from response content if using prompt-based tool calling
       if (request.tools && request.tools.length > 0 && !isNativeFunctionCallingModel(request.model)) {
         const content = result?.choices?.[0]?.message?.content || ''

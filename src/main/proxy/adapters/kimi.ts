@@ -630,7 +630,11 @@ export class KimiStreamHandler {
   async handleNonStream(stream: any): Promise<any> {
     const created = unixTimestamp()
     let content = ''
+    let reasoningContent = ''
     let buffer = Buffer.alloc(0)
+    // Track thinking phase based on explicit flags only
+    // undefined = not yet determined, 'thinking' = in thinking phase, 'answer' = in answer phase
+    let currentPhase: 'thinking' | 'answer' | undefined = undefined
 
     return new Promise((resolve, reject) => {
       stream.on('data', (chunk: Buffer) => {
@@ -671,17 +675,50 @@ export class KimiStreamHandler {
                 console.log('[Kimi] Non-stream: Extracted assistant message id:', this.lastMessageId)
               }
 
+              // Check for thinking flag in block
+              // Update phase based on explicit flags from Kimi API
+              if (data.block?.text?.flags === 'thinking') {
+                currentPhase = 'thinking'
+              } else if (data.block?.text?.flags === 'answer') {
+                currentPhase = 'answer'
+              }
+
               if (data.op === 'set' && data.block?.text?.content) {
-                content += data.block.text.content
+                // Only put content in reasoning_content if explicitly marked as 'thinking'
+                if (currentPhase === 'thinking') {
+                  reasoningContent += data.block.text.content
+                } else {
+                  // 'answer' phase or undefined phase goes to normal content
+                  content += data.block.text.content
+                }
               }
 
               if (data.op === 'append' && data.block?.text?.content) {
-                content += data.block.text.content
+                // Only put content in reasoning_content if explicitly marked as 'thinking'
+                if (currentPhase === 'thinking') {
+                  reasoningContent += data.block.text.content
+                } else {
+                  // 'answer' phase or undefined phase goes to normal content
+                  content += data.block.text.content
+                }
               }
 
               if (data.done !== undefined) {
                 // Parse tool calls from accumulated content
                 const { content: cleanContent, toolCalls } = parseToolCallsFromText(content, 'kimi')
+
+                const message: any = {
+                  role: 'assistant',
+                  content: toolCalls.length > 0 ? null : cleanContent.trim(),
+                }
+
+                if (reasoningContent.trim()) {
+                  message.reasoning_content = reasoningContent.trim()
+                }
+
+                if (toolCalls.length > 0) {
+                  message.tool_calls = toolCalls
+                }
 
                 resolve({
                   id: this.realChatId || this.conversationId,
@@ -690,11 +727,7 @@ export class KimiStreamHandler {
                   created,
                   choices: [{
                     index: 0,
-                    message: { 
-                      role: 'assistant', 
-                      content: toolCalls.length > 0 ? null : cleanContent.trim(),
-                      ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {})
-                    },
+                    message,
                     finish_reason: toolCalls.length > 0 ? 'tool_calls' : 'stop',
                   }],
                   usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
@@ -716,6 +749,19 @@ export class KimiStreamHandler {
         // Parse tool calls from accumulated content
         const { content: cleanContent, toolCalls } = parseToolCallsFromText(content, 'kimi')
 
+        const message: any = {
+          role: 'assistant',
+          content: toolCalls.length > 0 ? null : cleanContent.trim(),
+        }
+
+        if (reasoningContent.trim()) {
+          message.reasoning_content = reasoningContent.trim()
+        }
+
+        if (toolCalls.length > 0) {
+          message.tool_calls = toolCalls
+        }
+
         resolve({
           id: this.conversationId,
           model: this.model,
@@ -723,11 +769,7 @@ export class KimiStreamHandler {
           created,
           choices: [{
             index: 0,
-            message: { 
-              role: 'assistant', 
-              content: toolCalls.length > 0 ? null : cleanContent.trim(),
-              ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {})
-            },
+            message,
             finish_reason: toolCalls.length > 0 ? 'tool_calls' : 'stop',
           }],
           usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },

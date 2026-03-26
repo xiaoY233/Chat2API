@@ -37,6 +37,7 @@ export const IpcChannels = {
   ACCOUNTS_VALIDATE: 'accounts:validate',
   ACCOUNTS_VALIDATE_TOKEN: 'accounts:validateToken',
   ACCOUNTS_GET_CREDITS: 'accounts:getCredits',
+  ACCOUNTS_CLEAR_CHATS: 'accounts:clearChats',
 
   OAUTH_START_LOGIN: 'oauth:startLogin',
   OAUTH_CANCEL_LOGIN: 'oauth:cancelLogin',

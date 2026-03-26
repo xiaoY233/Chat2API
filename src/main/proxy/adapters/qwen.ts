@@ -479,19 +479,21 @@ export class QwenStreamHandler {
             if (result.data?.messages) {
               for (const msg of result.data.messages) {
                 console.log('[Qwen] Message detail:', JSON.stringify(msg).substring(0, 500))
-                
+
                 // Handle thinking content from meta_data.multi_load
                 const metaData = msg.meta_data || {}
                 const multiLoad = metaData.multi_load || []
                 for (const load of multiLoad) {
-                  if (load.type === 'deep_think' && load.content?.think_content) {
-                    const newThinkingContent = load.content.think_content
+                  // Handle both deep_think and multimodal_chat_think types
+                  if ((load.type === 'deep_think' || load.type === 'multimodal_chat_think') && load.content) {
+                    // deep_think uses think_content, multimodal_chat_think uses content directly
+                    const newThinkingContent = load.content.think_content || load.content.content || ''
                     // Only process if there's new content and it's not just a period
                     if (newThinkingContent.length > this.thinkingContent.length) {
                       const chunk = newThinkingContent.substring(this.thinkingContent.length)
                       this.thinkingContent = newThinkingContent
                       console.log('[Qwen] Thinking chunk, length:', chunk.length, 'content:', chunk.substring(0, 50))
-                      
+
                       // Skip if chunk is just punctuation or whitespace
                       if (chunk.trim() && chunk.trim() !== '。' && chunk.trim() !== '.') {
                         // Send reasoning_content delta
@@ -505,7 +507,7 @@ export class QwenStreamHandler {
                           })}\n\n`)
                           this.sentThinkingRole = true
                         }
-                        
+
                         transStream.write(`data: ${JSON.stringify({
                           id: this.responseId || this.sessionId,
                           model: this.model,
@@ -518,7 +520,7 @@ export class QwenStreamHandler {
                   }
                 }
                 
-                // Filter out [(deep_think)] markers from content
+                // Filter out [(deep_think)] and [(multimodal_chat_think_*)] markers from content
                 if ((msg.mime_type === 'text/plain' || msg.mime_type === 'multi_load/iframe') && msg.content) {
                   // Skip content that is just the deep_think marker
                   let newContent = msg.content
@@ -526,8 +528,9 @@ export class QwenStreamHandler {
                     console.log('[Qwen] Skipping deep_think marker')
                     continue
                   }
-                  // Remove any deep_think markers from content
+                  // Remove any deep_think and multimodal_chat_think markers from content
                   newContent = newContent.replace(/\[\(deep_think\)\]/g, '')
+                  newContent = newContent.replace(/\[\(multimodal_chat_think_\d+\)\]/g, '')
                   
                   if (!newContent.trim()) {
                     console.log('[Qwen] Skipping empty content after filtering')
@@ -788,24 +791,28 @@ export class QwenStreamHandler {
                   const metaData = msg.meta_data || {}
                   const multiLoad = metaData.multi_load || []
                   for (const load of multiLoad) {
-                    if (load.type === 'deep_think' && load.content?.think_content) {
-                      const thinkContent = load.content.think_content
-                      if (thinkContent.length > thinkingAccumulator.length) {
+                    // Handle both deep_think and multimodal_chat_think types
+                    if ((load.type === 'deep_think' || load.type === 'multimodal_chat_think') && load.content) {
+                      // deep_think uses think_content, multimodal_chat_think uses content directly
+                      const thinkContent = load.content.think_content || load.content.content || ''
+                      if (thinkContent && thinkContent.length > thinkingAccumulator.length) {
                         thinkingAccumulator = thinkContent
-                        console.log('[Qwen] Non-stream: Thinking content length:', thinkingAccumulator.length)
+                        console.log('[Qwen] Non-stream: Thinking content length:', thinkingAccumulator.length, 'type:', load.type)
                       }
                     }
                   }
                   
                   // Handle multi_load/iframe content (actual response content)
                   if (msg.mime_type === 'multi_load/iframe' && msg.content) {
-                    // Filter out deep_think markers
+                    // Filter out deep_think and multimodal_chat_think markers
                     let filteredContent = msg.content
                     if (filteredContent === '[(deep_think)]' || filteredContent.trim() === '[(deep_think)]') {
                       console.log('[Qwen] Non-stream: Skipping deep_think marker')
                       continue
                     }
+                    // Filter out all think markers: [(deep_think)], [(multimodal_chat_think_*)]
                     filteredContent = filteredContent.replace(/\[\(deep_think\)\]/g, '')
+                    filteredContent = filteredContent.replace(/\[\(multimodal_chat_think_\d+\)\]/g, '')
                     if (filteredContent.length > contentAccumulator.length) {
                       contentAccumulator = filteredContent
                       console.log('[Qwen] Non-stream multi_load/iframe content length:', contentAccumulator.length)
@@ -814,8 +821,9 @@ export class QwenStreamHandler {
                   
                   // Also handle text/plain content
                   if (msg.mime_type === 'text/plain' && msg.content) {
-                    // Filter out deep_think markers
+                    // Filter out deep_think and multimodal_chat_think markers
                     let filteredContent = msg.content.replace(/\[\(deep_think\)\]/g, '')
+                    filteredContent = filteredContent.replace(/\[\(multimodal_chat_think_\d+\)\]/g, '')
                     if (filteredContent.length > contentAccumulator.length) {
                       contentAccumulator = filteredContent
                     }
@@ -859,6 +867,10 @@ export class QwenStreamHandler {
             console.log('[Qwen] Non-stream complete event, content length:', contentAccumulator.length)
             this.content = contentAccumulator
             finalizeWithData(contentAccumulator)
+            // Add reasoning_content if available
+            if (thinkingAccumulator) {
+              data.choices[0].message.reasoning_content = thinkingAccumulator
+            }
             resolved = true
             resolve(data)
             return
@@ -894,6 +906,10 @@ export class QwenStreamHandler {
               console.log('[Qwen] Zstd non-stream finished, content length:', contentAccumulator.length)
               this.content = contentAccumulator
               finalizeWithData(contentAccumulator)
+              // Add reasoning_content if available
+              if (thinkingAccumulator) {
+                data.choices[0].message.reasoning_content = thinkingAccumulator
+              }
               resolve(data)
             })
           } catch (err) {
@@ -924,6 +940,10 @@ export class QwenStreamHandler {
           processBuffer()
           this.content = contentAccumulator
           finalizeWithData(contentAccumulator)
+          // Add reasoning_content if available
+          if (thinkingAccumulator) {
+            data.choices[0].message.reasoning_content = thinkingAccumulator
+          }
           resolve(data)
         }
       })
@@ -933,6 +953,10 @@ export class QwenStreamHandler {
           processBuffer()
           this.content = contentAccumulator
           finalizeWithData(contentAccumulator)
+          // Add reasoning_content if available
+          if (thinkingAccumulator) {
+            data.choices[0].message.reasoning_content = thinkingAccumulator
+          }
           resolve(data)
         }
       })

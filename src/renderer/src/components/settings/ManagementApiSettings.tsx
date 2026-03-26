@@ -14,7 +14,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { Key, Copy, RefreshCw, AlertTriangle, Terminal, Check } from 'lucide-react'
+import { Key, Copy, RefreshCw, AlertTriangle, Terminal, Check, Eye, EyeOff } from 'lucide-react'
 
 interface ManagementApiConfig {
   enableManagementApi: boolean
@@ -34,6 +34,7 @@ export function ManagementApiSettings() {
   const [showConfirmDialog, setShowConfirmDialog] = useState(false)
   const [copied, setCopied] = useState(false)
   const [proxyPort, setProxyPort] = useState<number>(8181)
+  const [showSecret, setShowSecret] = useState(false) // 默认隐藏
 
   useEffect(() => {
     loadConfig()
@@ -98,7 +99,8 @@ export function ManagementApiSettings() {
 
   const maskSecret = (secret: string) => {
     if (!secret || secret.length < 12) return secret
-    return '••••••••' + secret.slice(-8)
+    // 显示前 4 位和后 4 位，中间用 **** 隐藏
+    return secret.slice(0, 4) + '****' + secret.slice(-4)
   }
 
   const apiEndpoint = `http://127.0.0.1:${config.managementApiPort || proxyPort}/v0/management`
@@ -164,10 +166,19 @@ export function ManagementApiSettings() {
               <div className="flex items-center gap-2">
                 <Input
                   type="text"
-                  value={config.managementApiSecret ? maskSecret(config.managementApiSecret) : t('settings.managementApi.secretKeyPlaceholder')}
+                  value={config.managementApiSecret ? (showSecret ? config.managementApiSecret : maskSecret(config.managementApiSecret)) : t('settings.managementApi.secretKeyPlaceholder')}
                   readOnly
                   className="font-mono"
                 />
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={() => setShowSecret(!showSecret)}
+                  disabled={!config.managementApiSecret}
+                  title={showSecret ? t('settings.managementApi.hideSecret') : t('settings.managementApi.showSecret')}
+                >
+                  {showSecret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </Button>
                 <Button
                   variant="outline"
                   size="icon"
@@ -210,7 +221,7 @@ export function ManagementApiSettings() {
                 <Label>curl {t('settings.managementApi.exampleUsage')}</Label>
                 <pre className="block w-full rounded-md bg-muted p-3 text-sm font-mono overflow-x-auto whitespace-pre-wrap break-all">
 {`curl -X GET "${apiEndpoint}/config" \\
-  -H "Authorization: Bearer ${config.managementApiSecret || 'YOUR_SECRET_KEY'}"`}
+  -H "Authorization: Bearer YOUR_SECRET_KEY"`}
                 </pre>
               </div>
 
@@ -218,7 +229,7 @@ export function ManagementApiSettings() {
                 <Label>PUT {t('settings.managementApi.exampleUsage')}</Label>
                 <pre className="block w-full rounded-md bg-muted p-3 text-sm font-mono overflow-x-auto whitespace-pre-wrap break-all">
 {`curl -X PUT "${apiEndpoint}/config" \\
-  -H "Authorization: Bearer ${config.managementApiSecret || 'YOUR_SECRET_KEY'}" \\
+  -H "Authorization: Bearer YOUR_SECRET_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{"proxyPort": 8181}'`}
                 </pre>

@@ -28,9 +28,11 @@ Thumbs.db
 # IDE
 .idea/
 .vscode/
+.workbuddy/
 .trae/
 *.swp
 *.swo
+CLAUDE.md
 
 # Environment
 .env
@@ -46,4 +48,4 @@ coverage/
 
 # Backup
 backup/
-CLAUDE.md
+

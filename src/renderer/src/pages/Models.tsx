@@ -16,7 +16,7 @@ import { Switch } from '@/components/ui/switch'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Textarea } from '@/components/ui/textarea'
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useProxyStore } from '@/stores/proxyStore'
 import type { ToolPromptConfig } from '@/types/electron'
@@ -712,9 +712,18 @@ function ToolUsePrompts() {
 
 export function Models() {
   const { t } = useTranslation()
+  const { fetchAppConfig } = useProxyStore()
   const [searchParams, setSearchParams] = useSearchParams()
   const tabFromUrl = searchParams.get('tab')
   const [activeTab, setActiveTab] = useState(tabFromUrl || 'list')
+  const hasLoadedRef = useRef(false)
+
+  useEffect(() => {
+    if (hasLoadedRef.current) return
+    hasLoadedRef.current = true
+    
+    fetchAppConfig()
+  }, [fetchAppConfig])
 
   useEffect(() => {
     if (tabFromUrl && ['list', 'mapping', 'prompts'].includes(tabFromUrl)) {

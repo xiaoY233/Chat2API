@@ -58,6 +58,9 @@ const FAKE_USER_DATA: Record<string, any> = {
   unix: null,
   lang: 'zh',
   token: null,
+  timezone_offset: 28800,
+  sys_language: 'zh',
+  client: 'web',
 }
 
 interface MiniMaxMessage {
@@ -98,6 +101,14 @@ interface CreditInfo {
   totalCredits: number
   usedCredits: number
   remainingCredits: number
+  expiresAt?: number // Credit reset timestamp (milliseconds)
+}
+
+interface ChatListItem {
+  chat_id: number
+  chat_name: string
+  update_time: number
+  create_time: number
 }
 
 const deviceInfoMap = new Map<string, DeviceInfo>()
@@ -912,24 +923,127 @@ export class MiniMaxAdapter {
   async getCredits(): Promise<CreditInfo> {
     try {
       const deviceInfo = await this.requestDeviceInfo()
-      const response = await this.request('GET', '/v1/api/user/credit', {}, deviceInfo)
-      if (response.status === 200 && response.data?.statusInfo?.code === 0) {
-        const data = response.data.data
+      
+      const response = await this.request('POST', '/matrix/api/v1/commerce/get_membership_info', {}, deviceInfo)
+      
+      console.log('[MiniMax] get_membership_info status:', response.status)
+      
+      if (response.status === 200 && response.data?.base_resp?.status_code === 0) {
+        const data = response.data
+        const remainingCredits = data?.daily_login_gift_credit_remaining || 0
+        
+        // Get credit expires timestamp (resets at next day 00:00)
+        let expiresAt: number | undefined = undefined
+        const creditsData = data?.credits?.['4']?.[0]
+        if (creditsData?.expires_at) {
+          // expires_at is in milliseconds, use it directly
+          expiresAt = creditsData.expires_at
+        }
+        
+        if (expiresAt) {
+          console.log('[MiniMax] Credit expires at:', new Date(expiresAt).toISOString())
+        }
+        console.log('[MiniMax] Credits:', { remainingCredits, expiresAt: expiresAt ? new Date(expiresAt).toISOString() : undefined })
+        
         return {
-          totalCredits: data?.totalCredit || 0,
-          usedCredits: data?.usedCredit || 0,
-          remainingCredits: data?.remainCredit || 0,
+          totalCredits: 0, // Not available
+          usedCredits: 0, // Not available
+          remainingCredits,
+          expiresAt,
         }
       }
-      const userInfo = await this.getUserInfo()
-      return {
-        totalCredits: userInfo?.creditInfo?.totalCredit || 0,
-        usedCredits: userInfo?.creditInfo?.usedCredit || 0,
-        remainingCredits: userInfo?.creditInfo?.remainCredit || 0,
-      }
-    } catch (error) {
-      console.error('[MiniMax] Failed to get credits:', error)
+      
+      console.warn('[MiniMax] Failed to get membership info, token may be expired or invalid')
       return { totalCredits: 0, usedCredits: 0, remainingCredits: 0 }
+    } catch (error) {
+      console.error('[MiniMax] Failed to get credits:', error instanceof Error ? error.message : 'Unknown error')
+      return { totalCredits: 0, usedCredits: 0, remainingCredits: 0 }
+    }
+  }
+
+  async getChatList(): Promise<ChatListItem[]> {
+    const allChats: ChatListItem[] = []
+    let nextPageIndexId: number | undefined = undefined
+    const pageSize = 100
+    
+    try {
+      const deviceInfo = await this.requestDeviceInfo()
+      
+      while (true) {
+        const requestBody: any = {
+          page_size: pageSize,
+          workspace_storage_mode: 0,
+        }
+        
+        if (nextPageIndexId !== undefined) {
+          requestBody.next_page_index_id = nextPageIndexId
+        }
+        
+        const response = await this.request('POST', '/matrix/api/v1/chat/list_chat', requestBody, deviceInfo)
+        
+        console.log('[MiniMax] list_chat response status:', response.status)
+        
+        if (response.status !== 200 || response.data?.base_resp?.status_code !== 0) {
+          console.error('[MiniMax] Failed to get chat list:', response.data?.base_resp?.status_msg)
+          break
+        }
+        
+        const chatList = response.data?.chats || response.data?.chat_list || []
+        console.log('[MiniMax] Received chats count:', chatList.length)
+        if (chatList.length === 0) {
+          break
+        }
+        
+        allChats.push(...chatList)
+        
+        if (chatList.length < pageSize) {
+          break
+        }
+        
+        nextPageIndexId = chatList[chatList.length - 1]?.chat_id
+      }
+      
+      console.log('[MiniMax] Got chat list, total:', allChats.length)
+      return allChats
+    } catch (error) {
+      console.error('[MiniMax] Failed to get chat list:', error)
+      return []
+    }
+  }
+
+  async deleteAllChats(): Promise<boolean> {
+    try {
+      console.log('[MiniMax] Starting to delete all chats...')
+      
+      const chatList = await this.getChatList()
+      if (chatList.length === 0) {
+        console.log('[MiniMax] No chats to delete')
+        return true
+      }
+      
+      console.log('[MiniMax] Found', chatList.length, 'chats to delete')
+      
+      let successCount = 0
+      let failCount = 0
+      
+      for (const chat of chatList) {
+        const result = await this.deleteChat(String(chat.chat_id))
+        if (result) {
+          successCount++
+        } else {
+          failCount++
+        }
+        
+        if (successCount % 10 === 0) {
+          console.log(`[MiniMax] Deleted ${successCount}/${chatList.length} chats...`)
+        }
+      }
+      
+      console.log(`[MiniMax] Delete all chats completed. Success: ${successCount}, Failed: ${failCount}`)
+      return failCount === 0
+    } catch (error) {
+      console.error('[MiniMax] Failed to delete all chats:', error)
+      return false
     }
   }
 
@@ -1235,7 +1349,15 @@ export class MiniMaxStreamHandler {
         id: '',
         model: this.model,
         object: 'chat.completion',
-        choices: [{ index: 0, message: { role: 'assistant', content: '' }, finish_reason: 'stop' }],
+        choices: [{ 
+          index: 0, 
+          message: { 
+            role: 'assistant', 
+            content: '', 
+            reasoning_content: '' 
+          }, 
+          finish_reason: 'stop' 
+        }],
         usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
         created: this.created,
       }
@@ -1253,10 +1375,14 @@ export class MiniMaxStreamHandler {
             }
             const { messageResult } = _data || {}
             if (event.event === 'message_result' && messageResult) {
-              const { chatID, chat_id, isEnd, content: text } = messageResult
+              const { chatID, chat_id, isEnd, content: text, extra_info } = messageResult
               const finalChatId = chat_id || chatID
               if (!data.id && finalChatId) data.id = finalChatId
               if (isEnd !== 0 && text) data.choices[0].message.content += text
+              // Extract thinking_content from extra_info
+              if (extra_info?.thinking_content) {
+                data.choices[0].message.reasoning_content = extra_info.thinking_content
+              }
               if (isEnd === 0) resolve(data)
             }
           } catch (err) {

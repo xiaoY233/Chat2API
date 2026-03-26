@@ -400,7 +400,7 @@ export interface RequestLogEntry {
   status: 'success' | 'error'
   /** HTTP status code */
   statusCode: number
-  
+
   /** HTTP method */
   method: string
   /** Request URL path */
@@ -409,7 +409,7 @@ export interface RequestLogEntry {
   model: string
   /** Actual model used (after mapping) */
   actualModel?: string
-  
+
   /** Provider ID */
   providerId?: string
   /** Provider name */
@@ -418,22 +418,29 @@ export interface RequestLogEntry {
   accountId?: string
   /** Account name */
   accountName?: string
-  
+
   /** Request body JSON string */
   requestBody?: string
   /** User input extracted from messages (truncated to 200 chars) */
   userInput?: string
-  
+
+  /** Web search enabled */
+  webSearch?: boolean
+  /** Reasoning effort level */
+  reasoningEffort?: 'low' | 'medium' | 'high'
+
   /** Response status code */
   responseStatus: number
   /** Response preview (truncated) */
   responsePreview?: string
-  
+  /** Response body JSON string */
+  responseBody?: string
+
   /** Request latency in milliseconds */
   latency: number
   /** Whether streaming request */
   isStream: boolean
-  
+
   /** Error message */
   errorMessage?: string
   /** Error stack trace */

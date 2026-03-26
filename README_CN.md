@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Release-v1.1.3-blue?style=flat-square&logo=github" alt="Release">
+  <img src="https://img.shields.io/badge/Release-v1.1.4-blue?style=flat-square&logo=github" alt="Release">
   <img src="https://img.shields.io/badge/License-GPL--3.0-blue?style=flat-square" alt="License">
   <br>
   <a href="https://www.electronjs.org/"><img src="https://img.shields.io/badge/Electron-33+-47848F?style=flat-square&logo=electron&logoColor=white" alt="Electron"></a>
@@ -26,10 +26,12 @@
   Chat2API 通过驱动各大模型的官方 Web UI，实现 0 成本接入主流 AI 大模型。支持 DeepSeek、GLM、Kimi、MiniMax、Qwen、Z.ai 等渠道，可无缝连接 openlcaw、Cline、Roo-Code 等工具，让任何 OpenAI 兼容客户端即刻可用。
 </p>
 
+![Product Preview](docs/screenshots/preview.png)
+
 ## ✨ 功能特性
 
 - OpenAI 兼容 API：提供标准 OpenAI 兼容接口，无缝对接现有工具
-- 多服务商支持：支持 DeepSeek、GLM、Kimi、MiniMax、Qwen、Z.ai 等
+- 多服务商支持：支持 DeepSeek、GLM、Kimi、MiniMax、Perplexity 🆕、Qwen、Z.ai 等
 - 🆕 多轮对话支持：完整支持多轮对话，提供会话管理和上下文保持功能
 - 🆕 工具调用支持：通过提示词工程为所有模型提供通用工具调用能力，兼容 Cherry Studio、Kilo Code 等客户端
 - 🆕 模型映射：灵活的模型名称映射，支持通配符和首选服务商/账户选择
@@ -45,15 +47,16 @@
 
 ## 🤖 支持的服务商
 
-| 服务商           | 认证类型      | OAuth | 模型                                              |
-| ---------------- | ------------- | ----- | ------------------------------------------------- |
-| DeepSeek         | User Token    | 是    | DeepSeek-V3.2                                    |
-| GLM              | Refresh Token | 是    | GLM-5                                            |
-| Kimi             | JWT Token     | 是    | kimi-k2.5                                        |
-| MiniMax          | JWT Token     | 是    | MiniMax-M2.5                                     |
-| Qwen (国内版)    | SSO Ticket    | 是    | Qwen3.5-Plus, Qwen3-Max, Qwen3-Flash, Qwen3-Coder, qwen-max-latest |
-| Qwen AI (国际版) | JWT Token     | 是    | Qwen3.5-Plus, Qwen3-Max, Qwen3-VL-Plus, Qwen3-Coder-Plus, Qwen-Plus, Qwen-Turbo |
-| Z.ai             | JWT Token     | 是    | GLM-5, GLM-4.7, GLM-4.6V, GLM-4.6             |
+| 服务商           | 认证类型          | OAuth | 模型                                                                              |
+| ------------- | ------------- | ----- | ------------------------------------------------------------------------------- |
+| DeepSeek      | User Token    | 是     | DeepSeek-V3.2                                                                   |
+| GLM           | Refresh Token | 是     | GLM-5                                                                           |
+| Kimi          | JWT Token     | 是     | kimi-k2.5                                                                       |
+| MiniMax       | JWT Token     | 是     | MiniMax-M2.5                                                                    |
+| 🆕 Perplexity | JWT Token     | 是     | Sonar, Sonar Pro, Sonar Deep Research                                           |
+| Qwen (国内版)    | SSO Ticket    | 是     | Qwen3.5-Plus, Qwen3-Max, Qwen3-Flash, Qwen3-Coder, qwen-max-latest              |
+| Qwen AI (国际版) | JWT Token     | 是     | Qwen3.5-Plus, Qwen3-Max, Qwen3-VL-Plus, Qwen3-Coder-Plus, Qwen-Plus, Qwen-Turbo |
+| Z.ai          | JWT Token     | 是     | GLM-5, GLM-4.7, GLM-4.6V, GLM-4.6                                               |
 
 ## 📥 安装
 
@@ -61,11 +64,11 @@
 
 从 [GitHub Releases](https://github.com/xiaoY233/Chat2API/releases) 下载最新版本：
 
-| 平台                  | 下载文件                              |
-| --------------------- | ------------------------------------- |
-| macOS (Apple Silicon) | `Chat2API-x.x.x-arm64.dmg`            |
-| macOS (Intel)         | `Chat2API-x.x.x-x64.dmg`              |
-| Windows               | `Chat2API-x.x.x-x64-setup.exe`        |
+| 平台                    | 下载文件                                   |
+| --------------------- | -------------------------------------- |
+| macOS (Apple Silicon) | `Chat2API-x.x.x-arm64.dmg`             |
+| macOS (Intel)         | `Chat2API-x.x.x-x64.dmg`               |
+| Windows               | `Chat2API-x.x.x-x64-setup.exe`         |
 | Linux                 | `Chat2API-x.x.x-x64.AppImage` 或 `.deb` |
 
 ### 从源码构建
@@ -162,17 +165,17 @@ print(response.choices[0].message.content)
 
 ## 📸 截图
 
-| 仪表盘                                       | 服务商                                       |
-| -------------------------------------------- | -------------------------------------------- |
-| ![Dashboard](docs/screenshots/dashboard.png) | ![Providers](docs/screenshots/providers.png) |
+| 仪表盘                                                 | 服务商                                                 |
+| --------------------------------------------------- | --------------------------------------------------- |
+| !\[Dashboard]\(docs/screenshots/dashboard.png null) | !\[Providers]\(docs/screenshots/providers.png null) |
 
-| 代理设置                                  | API Key                                    |
-| ----------------------------------------- | ------------------------------------------ |
-| ![Proxy](docs/screenshots/proxy.png)      | ![API Keys](docs/screenshots/api-keys.png) |
+| 代理设置                                        | API Key                                           |
+| ------------------------------------------- | ------------------------------------------------- |
+| !\[Proxy]\(docs/screenshots/proxy.png null) | !\[API Keys]\(docs/screenshots/api-keys.png null) |
 
-| 模型管理                                | 会话管理                                    |
-| --------------------------------------- | --------------------------------------- |
-| ![Models](docs/screenshots/models.png)  | ![Session](docs/screenshots/Session.png)      |
+| 模型管理                                          | 会话管理                                            |
+| --------------------------------------------- | ----------------------------------------------- |
+| !\[Models]\(docs/screenshots/models.png null) | !\[Session]\(docs/screenshots/Session.png null) |
 
 ## ⚙️ 设置选项
 
@@ -205,15 +208,15 @@ Chat2API/
 
 ## 🔧 技术栈
 
-| 组件     | 技术                  |
-| -------- | --------------------- |
-| 框架     | Electron 33+          |
-| 前端     | React 18 + TypeScript |
-| 样式     | Tailwind CSS          |
+| 组件   | 技术                    |
+| ---- | --------------------- |
+| 框架   | Electron 33+          |
+| 前端   | React 18 + TypeScript |
+| 样式   | Tailwind CSS          |
 | 状态管理 | Zustand               |
 | 构建工具 | Vite + electron-vite  |
 | 打包工具 | electron-builder      |
-| 服务器   | Koa                   |
+| 服务器  | Koa                   |
 
 ## 📁 数据存储
 
@@ -251,6 +254,7 @@ sudo xattr -rd com.apple.quarantine "/Applications/Chat2API.app"
 GNU 通用公共许可证 v3.0。详见 [LICENSE](LICENSE)。
 
 这意味着：
+
 - ✅ 可以自由使用、修改和分发
 - ✅ 衍生作品必须以相同许可证开源
 - ✅ 必须保留原始版权声明
@@ -263,3 +267,4 @@ GNU 通用公共许可证 v3.0。详见 [LICENSE](LICENSE)。
 - [Tailwind CSS](https://tailwindcss.com/) - CSS 框架
 - [Zustand](https://zustand-demo.pmnd.rs/) - 状态管理
 - [Koa](https://koajs.com/) - HTTP 服务器
+

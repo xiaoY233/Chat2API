@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Release-v1.1.3-blue?style=flat-square&logo=github" alt="Release">
+  <img src="https://img.shields.io/badge/Release-v1.1.4-blue?style=flat-square&logo=github" alt="Release">
   <img src="https://img.shields.io/badge/License-GPL--3.0-blue?style=flat-square" alt="License">
   <br>
   <a href="https://www.electronjs.org/"><img src="https://img.shields.io/badge/Electron-33+-47848F?style=flat-square&logo=electron&logoColor=white" alt="Electron"></a>
@@ -26,10 +26,12 @@
   Chat2API enables zero-cost access to leading AI models by leveraging official web UIs. It supports providers such as DeepSeek, GLM, Kimi, MiniMax, Qwen, and Z.ai, and seamlessly integrates with tools like openlcaw, Cline, and Roo-Code — making any OpenAI-compatible client work out of the box.
 </p>
 
+![Product Preview](docs/screenshots/preview.png)
+
 ## ✨ Features
 
 - OpenAI Compatible API: Provides standard OpenAI-compatible API endpoints for seamless integration
-- Multi-Provider Support: Connect DeepSeek, GLM, Kimi, MiniMax, Qwen, Z.ai and more
+- Multi-Provider Support: Connect DeepSeek, GLM, Kimi, MiniMax, Perplexity 🆕, Qwen, Z.ai and more
 - 🆕 Multi-turn Conversation: Full support for multi-turn dialogue with session management and context retention
 - 🆕 Function Calling Support: Universal tool calling capability for all models via prompt engineering, compatible with Cherry Studio, Kilo Code, and other clients
 - 🆕 Model Mapping: Flexible model name mapping with wildcard support and preferred provider/account selection
@@ -45,15 +47,16 @@
 
 ## 🤖 Supported Providers
 
-| Provider         | Auth Type        | OAuth | Models                                           |
-| ---------------- | ---------------- | ----- | ------------------------------------------------ |
-| DeepSeek         | User Token       | Yes   | DeepSeek-V3.2                                    |
-| GLM              | Refresh Token    | Yes   | GLM-5                                            |
-| Kimi             | JWT Token        | Yes   | kimi-k2.5                                        |
-| MiniMax          | JWT Token        | Yes   | MiniMax-M2.5                                     |
-| Qwen (CN)        | SSO Ticket       | Yes   | Qwen3.5-Plus, Qwen3-Max, Qwen3-Flash, Qwen3-Coder, qwen-max-latest |
-| Qwen AI (Global) | JWT Token        | Yes   | Qwen3.5-Plus, Qwen3-Max, Qwen3-VL-Plus, Qwen3-Coder-Plus, Qwen-Plus, Qwen-Turbo |
-| Z.ai             | JWT Token        | Yes   | GLM-5, GLM-4.7, GLM-4.6V, GLM-4.6              |
+| Provider         | Auth Type     | OAuth | Models                                                                          |
+| ---------------- | ------------- | ----- | ------------------------------------------------------------------------------- |
+| DeepSeek         | User Token    | Yes   | DeepSeek-V3.2                                                                   |
+| GLM              | Refresh Token | Yes   | GLM-5                                                                           |
+| Kimi             | JWT Token     | Yes   | kimi-k2.5                                                                       |
+| MiniMax          | JWT Token     | Yes   | MiniMax-M2.5                                                                    |
+| 🆕 Perplexity    | JWT Token     | Yes   | Sonar, Sonar Pro, Sonar Deep Research                                           |
+| Qwen (CN)        | SSO Ticket    | Yes   | Qwen3.5-Plus, Qwen3-Max, Qwen3-Flash, Qwen3-Coder, qwen-max-latest              |
+| Qwen AI (Global) | JWT Token     | Yes   | Qwen3.5-Plus, Qwen3-Max, Qwen3-VL-Plus, Qwen3-Coder-Plus, Qwen-Plus, Qwen-Turbo |
+| Z.ai             | JWT Token     | Yes   | GLM-5, GLM-4.7, GLM-4.6V, GLM-4.6                                               |
 
 ## 📥 Installation
 
@@ -61,11 +64,11 @@
 
 Download the latest release from [GitHub Releases](https://github.com/xiaoY233/Chat2API/releases):
 
-| Platform              | Download                              |
-| --------------------- | ------------------------------------- |
-| macOS (Apple Silicon) | `Chat2API-x.x.x-arm64.dmg`            |
-| macOS (Intel)         | `Chat2API-x.x.x-x64.dmg`              |
-| Windows               | `Chat2API-x.x.x-x64-setup.exe`        |
+| Platform              | Download                                |
+| --------------------- | --------------------------------------- |
+| macOS (Apple Silicon) | `Chat2API-x.x.x-arm64.dmg`              |
+| macOS (Intel)         | `Chat2API-x.x.x-x64.dmg`                |
+| Windows               | `Chat2API-x.x.x-x64-setup.exe`          |
 | Linux                 | `Chat2API-x.x.x-x64.AppImage` or `.deb` |
 
 ### Build from Source
@@ -162,17 +165,17 @@ For security, you can enable API Key authentication:
 
 ## 📸 Screenshots
 
-| Dashboard                                    | Providers                                    |
-| -------------------------------------------- | -------------------------------------------- |
-| ![Dashboard](docs/screenshots/dashboard.png) | ![Providers](docs/screenshots/providers.png) |
+| Dashboard                                           | Providers                                           |
+| --------------------------------------------------- | --------------------------------------------------- |
+| !\[Dashboard]\(docs/screenshots/dashboard.png null) | !\[Providers]\(docs/screenshots/providers.png null) |
 
-| Proxy Settings                                    | API Keys                                    |
-| ------------------------------------------------- | ------------------------------------------- |
-| ![Proxy](docs/screenshots/proxy.png)              | ![API Keys](docs/screenshots/api-keys.png)  |
+| Proxy Settings                              | API Keys                                          |
+| ------------------------------------------- | ------------------------------------------------- |
+| !\[Proxy]\(docs/screenshots/proxy.png null) | !\[API Keys]\(docs/screenshots/api-keys.png null) |
 
-| Models                                    | Session                                    |
-| ----------------------------------------- | --------------------------------------- |
-| ![Models](docs/screenshots/models.png)    | ![Session](docs/screenshots/Session.png)      |
+| Models                                        | Session                                         |
+| --------------------------------------------- | ----------------------------------------------- |
+| !\[Models]\(docs/screenshots/models.png null) | !\[Session]\(docs/screenshots/Session.png null) |
 
 ## ⚙️ Settings
 
@@ -251,6 +254,7 @@ Check for updates in the **About** page, or download the latest version from [Gi
 GNU General Public License v3.0. See [LICENSE](LICENSE) for details.
 
 This means:
+
 - ✅ Free to use, modify, and distribute
 - ✅ Derivative works must be open-sourced under the same license
 - ✅ Must preserve original copyright notices
@@ -263,3 +267,4 @@ This means:
 - [Tailwind CSS](https://tailwindcss.com/) - CSS framework
 - [Zustand](https://zustand-demo.pmnd.rs/) - State management
 - [Koa](https://koajs.com/) - HTTP server
+

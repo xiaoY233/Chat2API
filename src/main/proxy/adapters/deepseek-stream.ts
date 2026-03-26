@@ -357,6 +357,8 @@ export class DeepSeekStreamHandler {
     let currentPath = ''
     let accumulatedTokenUsage = 2
     const isThinkingModel = this.model.includes('think') || this.model.includes('r1') || !!this.reasoningEffort
+    const isFoldModel = (this.model.includes('fold') || this.model.includes('search') || this.webSearchEnabled) && !isThinkingModel
+    const isSearchSilentModel = this.model.includes('search-silent')
 
     return new Promise((resolve, reject) => {
       let buffer = ''
@@ -381,6 +383,11 @@ export class DeepSeekStreamHandler {
             }
 
             if (parsed.v && typeof parsed.v === 'object' && parsed.v.response) {
+              const isThinkingNow = parsed.v.response.thinking_enabled
+              if (isThinkingNow !== undefined) {
+                currentPath = isThinkingNow ? 'thinking' : 'content'
+              }
+              
               const fragments = parsed.v.response.fragments
               if (Array.isArray(fragments) && fragments.length > 0) {
                 for (const fragment of fragments) {
@@ -388,10 +395,8 @@ export class DeepSeekStreamHandler {
                     let cleanedFragment = fragment.content.replace(/FINISHED/g, '')
                     cleanedFragment = cleanedFragment.replace(/^(SEARCH|WEB_SEARCH|SEARCHING)\s*/i, '')
                     if (fragment.type === 'THINK') {
-                      currentPath = 'thinking'
                       accumulatedThinkingContent += cleanedFragment
                     } else if (fragment.type === 'ANSWER' || fragment.type === 'RESPONSE') {
-                      currentPath = 'content'
                       accumulatedContent += cleanedFragment
                     }
                   }
@@ -425,6 +430,11 @@ export class DeepSeekStreamHandler {
             // For thinking models, default to 'thinking' path if not set
             if (!currentPath && isThinkingModel) {
               currentPath = 'thinking'
+            }
+            
+            // For fold models (web search only), default to 'content' path if not set
+            if (!currentPath && isFoldModel) {
+              currentPath = 'content'
             }
 
             if (typeof parsed.v === 'object' && Array.isArray(parsed.v)) {
@@ -471,6 +481,13 @@ export class DeepSeekStreamHandler {
 
         if (toolCalls.length > 0) {
           message.tool_calls = toolCalls
+        }
+
+        // Log for debugging
+        if (isThinkingModel || accumulatedThinkingContent) {
+          console.log('[DeepSeek] Non-stream thinking model:', this.model)
+          console.log('[DeepSeek] Accumulated thinking content length:', accumulatedThinkingContent.length)
+          console.log('[DeepSeek] Accumulated content length:', accumulatedContent.length)
         }
 
         resolve({

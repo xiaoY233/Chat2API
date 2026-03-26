@@ -349,7 +349,7 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow | null): Pro
     usedCredits: number
     remainingCredits: number
   } | null> => {
-    const account = AccountManager.getById(accountId)
+    const account = AccountManager.getById(accountId, true)
     if (!account) {
       return null
     }
@@ -370,6 +370,41 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow | null): Pro
     } catch (error) {
       console.error('[IPC] Failed to get credits:', error)
       return null
+    }
+  })
+
+  ipcMain.handle(IpcChannels.ACCOUNTS_CLEAR_CHATS, async (_, accountId: string): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const account = AccountManager.getById(accountId, true)
+      if (!account) {
+        return { success: false, error: 'Account not found' }
+      }
+      
+      const provider = ProviderManager.getById(account.providerId)
+      if (!provider) {
+        return { success: false, error: 'Provider not found' }
+      }
+
+      // Support qwen-ai and minimax providers
+      if (provider.id === 'qwen-ai') {
+        const { QwenAiAdapter } = await import('../proxy/adapters/qwen-ai')
+        const adapter = new QwenAiAdapter(provider, account)
+        const success = await adapter.deleteAllChats()
+        return { success }
+      } else if (provider.id === 'minimax') {
+        const { MiniMaxAdapter } = await import('../proxy/adapters/minimax')
+        const adapter = new MiniMaxAdapter(provider, account)
+        const success = await adapter.deleteAllChats()
+        return { success }
+      } else {
+        return { success: false, error: 'This feature is not available for this provider' }
+      }
+    } catch (error) {
+      console.error('[IPC] Failed to clear chats:', error)
+      return { 
+        success: false, 
+        error: error instanceof Error ? error.message : 'Failed to clear chats' 
+      }
     }
   })
 

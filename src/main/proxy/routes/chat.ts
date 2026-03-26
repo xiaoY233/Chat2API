@@ -259,6 +259,14 @@ router.post('/completions', async (ctx: Context) => {
       })
 
       const userInput = extractUserInput(request.messages)
+      const errorResponseBody = JSON.stringify({
+        error: {
+          message: result.error || 'Request failed',
+          type: 'api_error',
+          param: null,
+          code: null,
+        },
+      })
       storeManager.addRequestLog({
         timestamp: startTime,
         status: 'error',
@@ -273,7 +281,10 @@ router.post('/completions', async (ctx: Context) => {
         accountName: account.name,
         requestBody: JSON.stringify(request),
         userInput,
+        webSearch: request.web_search,
+        reasoningEffort: request.reasoning_effort,
         responseStatus: result.status || 500,
+        responseBody: errorResponseBody,
         latency,
         isStream: request.stream || false,
         errorMessage: result.error,
@@ -305,24 +316,62 @@ router.post('/completions', async (ctx: Context) => {
     })
 
     const userInput = extractUserInput(request.messages)
-    storeManager.addRequestLog({
-      timestamp: startTime,
-      status: 'success',
-      statusCode: 200,
-      method: 'POST',
-      url: '/v1/chat/completions',
-      model: request.model,
-      actualModel,
-      providerId: provider.id,
-      providerName: provider.name,
-      accountId: account.id,
-      accountName: account.name,
-      requestBody: JSON.stringify(request),
-      userInput,
-      responseStatus: 200,
-      latency,
-      isStream: request.stream || false,
-    })
+    // Prepare response body for logging (only for non-stream requests)
+    const responseBodyForLog = !request.stream && result.body
+      ? JSON.stringify(result.body)
+      : undefined
+
+    // For streaming requests, we'll collect content and update the log later
+    let logEntryId: string | undefined
+
+    if (!request.stream) {
+      // Non-streaming: record log with response body now
+      const logEntry = storeManager.addRequestLog({
+        timestamp: startTime,
+        status: 'success',
+        statusCode: 200,
+        method: 'POST',
+        url: '/v1/chat/completions',
+        model: request.model,
+        actualModel,
+        providerId: provider.id,
+        providerName: provider.name,
+        accountId: account.id,
+        accountName: account.name,
+        requestBody: JSON.stringify(request),
+        userInput,
+        webSearch: request.web_search,
+        reasoningEffort: request.reasoning_effort,
+        responseStatus: 200,
+        responseBody: responseBodyForLog,
+        latency,
+        isStream: false,
+      })
+      logEntryId = logEntry.id
+    } else {
+      // Streaming: record log now, will update response body later
+      const logEntry = storeManager.addRequestLog({
+        timestamp: startTime,
+        status: 'success',
+        statusCode: 200,
+        method: 'POST',
+        url: '/v1/chat/completions',
+        model: request.model,
+        actualModel,
+        providerId: provider.id,
+        providerName: provider.name,
+        accountId: account.id,
+        accountName: account.name,
+        requestBody: JSON.stringify(request),
+        userInput,
+        webSearch: request.web_search,
+        reasoningEffort: request.reasoning_effort,
+        responseStatus: 200,
+        latency,
+        isStream: true,
+      })
+      logEntryId = logEntry.id
+    }
 
     storeManager.recordRequestInStats(true, latency, request.model, provider.id, account.id)
 
@@ -332,13 +381,16 @@ router.post('/completions', async (ctx: Context) => {
       ctx.set('Connection', 'keep-alive')
       ctx.set('X-Accel-Buffering', 'no')
 
-      // Create a wrapper stream to handle errors
+      // Create a wrapper stream to handle errors and collect content
       const wrapperStream = new PassThrough()
-      
+
+      // Collect stream content for logging (raw SSE output)
+      let collectedContent = ''
+
       // Handle stream errors
       result.stream.once('error', (err: Error) => {
         console.error('[Chat] Stream error:', err.message)
-        
+
         // Send error as SSE event
         const errorEvent = {
           id: requestId,
@@ -353,11 +405,11 @@ router.post('/completions', async (ctx: Context) => {
             finish_reason: 'stop',
           }],
         }
-        
+
         wrapperStream.write(`data: ${JSON.stringify(errorEvent)}\n\n`)
         wrapperStream.write('data: [DONE]\n\n')
         wrapperStream.end()
-        
+
         storeManager.addLog('error', `Stream error: ${err.message}`, {
           requestId,
           providerId: provider.id,
@@ -368,11 +420,21 @@ router.post('/completions', async (ctx: Context) => {
 
       // Check if stream is already in correct SSE format (from adapters like Kimi, GLM, DeepSeek)
       if (result.skipTransform) {
-        // Stream is already formatted, pipe through wrapper
+        // Stream is already formatted, pipe through wrapper and collect
+        result.stream.on('data', (chunk: Buffer) => {
+          collectedContent += chunk.toString()
+        })
+
         result.stream.pipe(wrapperStream, { end: false })
-        
-        // When source stream ends normally, end the wrapper
+
+        // When source stream ends normally, update log and end wrapper
         result.stream.once('end', () => {
+          // Update log with collected response
+          if (logEntryId) {
+            storeManager.updateRequestLog(logEntryId, {
+              responseBody: collectedContent || undefined,
+            })
+          }
           wrapperStream.end()
         })
       } else {
@@ -385,14 +447,25 @@ router.post('/completions', async (ctx: Context) => {
           }
         )
 
+        // Collect from transform stream output
+        transformStream.on('data', (chunk: Buffer) => {
+          collectedContent += chunk.toString()
+        })
+
         result.stream.pipe(transformStream)
         transformStream.pipe(wrapperStream, { end: false })
-        
+
         transformStream.once('end', () => {
+          // Update log with collected response
+          if (logEntryId) {
+            storeManager.updateRequestLog(logEntryId, {
+              responseBody: collectedContent || undefined,
+            })
+          }
           wrapperStream.end()
         })
       }
-      
+
       ctx.body = wrapperStream
     } else {
       ctx.set('Content-Type', 'application/json')
@@ -454,6 +527,14 @@ router.post('/completions', async (ctx: Context) => {
     })
 
     const userInput = extractUserInput(request.messages)
+    const exceptionResponseBody = JSON.stringify({
+      error: {
+        message: errorMessage,
+        type: 'internal_error',
+        param: null,
+        code: null,
+      },
+    })
     storeManager.addRequestLog({
       timestamp: startTime,
       status: 'error',
@@ -468,7 +549,10 @@ router.post('/completions', async (ctx: Context) => {
       accountName: account.name,
       requestBody: JSON.stringify(request),
       userInput,
+      webSearch: request.web_search,
+      reasoningEffort: request.reasoning_effort,
       responseStatus: 500,
+      responseBody: exceptionResponseBody,
       latency,
       isStream: request.stream || false,
       errorMessage,

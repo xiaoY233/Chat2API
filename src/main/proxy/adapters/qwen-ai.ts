@@ -133,10 +133,27 @@ export class QwenAiAdapter {
   }
 
   mapModel(openaiModel: string): string {
-    if (MODEL_MAP[openaiModel]) {
-      return MODEL_MAP[openaiModel]
+    // Support model name suffixes to control thinking mode:
+    // -thinking: Force enable thinking mode
+    // -fast: Force use fast mode (no thinking)
+    let model = openaiModel
+    let forceThinking: boolean | undefined
+    
+    if (model.endsWith('-thinking')) {
+      forceThinking = true
+      model = model.slice(0, -9) // Remove -thinking suffix
+    } else if (model.endsWith('-fast')) {
+      forceThinking = false
+      model = model.slice(0, -5) // Remove -fast suffix
     }
-    return openaiModel
+    
+    // Store in instance for later use
+    ;(this as any)._forceThinking = forceThinking
+    
+    if (MODEL_MAP[model]) {
+      return MODEL_MAP[model]
+    }
+    return model
   }
 
   async createChat(modelId: string, title: string = 'New Chat'): Promise<string> {
@@ -190,6 +207,33 @@ export class QwenAiAdapter {
     }
   }
 
+  /**
+   * Delete all chats for the current account
+   * @returns Promise<boolean> - true if deletion was successful
+   */
+  async deleteAllChats(): Promise<boolean> {
+    const url = `${QWEN_AI_BASE}/api/v2/chats/`
+
+    try {
+      console.log('[QwenAI] Deleting all chats for account')
+      
+      const response = await this.axiosInstance.delete(url, {
+        headers: this.getHeaders(),
+      })
+
+      if (response.data?.success) {
+        console.log('[QwenAI] All chats deleted successfully')
+        return true
+      }
+
+      console.warn('[QwenAI] Failed to delete all chats:', response.data)
+      return false
+    } catch (error) {
+      console.error('[QwenAI] Failed to delete all chats:', error)
+      return false
+    }
+  }
+
   async chatCompletion(request: ChatCompletionRequest): Promise<{
     response: AxiosResponse
     chatId: string
@@ -201,6 +245,9 @@ export class QwenAiAdapter {
     }
 
     const modelId = this.mapModel(request.model)
+    
+    // Get forced thinking mode setting (set via model name suffix)
+    const forceThinking = (this as any)._forceThinking
 
     // Use session context passed from forwarder (avoid duplicate getOrCreateSession calls)
     const sessionContext = request.sessionContext
@@ -261,13 +308,22 @@ export class QwenAiAdapter {
     const childId = uuid()
     const ts = Math.floor(Date.now() / 1000)
 
+    // Default to disable thinking mode to avoid automatic reasoning trigger
+    // Users can control thinking via:
+    // 1. Model name suffix: -thinking (force thinking), -fast (force fast mode)
+    // 2. enable_thinking parameter for explicit control
+    // 3. If neither is specified, thinking mode is disabled by default (fast mode)
+    const shouldEnableThinking = forceThinking !== undefined 
+      ? forceThinking 
+      : request.enable_thinking === true
+    
     const featureConfig: Record<string, any> = {
-      thinking_enabled: request.enable_thinking !== false,
+      thinking_enabled: shouldEnableThinking,
       output_schema: 'phase',
       research_mode: 'normal',
-      auto_thinking: true,
+      auto_thinking: shouldEnableThinking,
       thinking_format: 'summary',
-      auto_search: true,
+      auto_search: false, // Default to disable auto search
     }
 
     if (request.thinking_budget) {
@@ -297,7 +353,7 @@ export class QwenAiAdapter {
           feature_config: featureConfig,
           extra: { meta: { subChatType: 't2t' } },
           sub_chat_type: 't2t',
-          parent_id: null,
+          parent_id: parentId || null,
         },
       ],
       timestamp: ts + 1,
@@ -598,6 +654,7 @@ export class QwenAiStreamHandler {
       }
 
       let reasoningText = ''
+      let summaryText = ''
       let resolved = false
 
       const resolveOnce = (value: any) => {
@@ -634,13 +691,24 @@ export class QwenAiStreamHandler {
 
               if (phase === 'think' && status !== 'finished') {
                 reasoningText += content
+              } else if (phase === 'thinking_summary') {
+                // Handle thinking_summary phase - extract summary content
+                const extra = delta.extra || {}
+                if (extra.summary_thought?.content) {
+                  const newSummary = extra.summary_thought.content.join('\n')
+                  if (newSummary && newSummary.length > summaryText.length) {
+                    summaryText = newSummary
+                  }
+                }
               } else if (phase === 'answer') {
                 if (content) {
                   data.choices[0].message.content += content
                 }
                 if (status === 'finished') {
-                  if (reasoningText) {
-                    data.choices[0].message.reasoning_content = reasoningText
+                  // Use reasoningText or summaryText for reasoning_content
+                  const finalReasoning = reasoningText || summaryText
+                  if (finalReasoning) {
+                    data.choices[0].message.reasoning_content = finalReasoning
                   }
 
                   if (this.onEnd && this.chatId) {
@@ -666,8 +734,10 @@ export class QwenAiStreamHandler {
         rejectOnce(err)
       })
       stream.once('close', () => {
-        if (reasoningText) {
-          data.choices[0].message.reasoning_content = reasoningText
+        // Use reasoningText or summaryText for reasoning_content
+        const finalReasoning = reasoningText || summaryText
+        if (finalReasoning) {
+          data.choices[0].message.reasoning_content = finalReasoning
         }
         resolveOnce(data)
       })

@@ -61,6 +61,7 @@ export function AccountDetail({
     totalCredits: number
     usedCredits: number
     remainingCredits: number
+    expiresAt?: number
   } | null>(null)
   const [isLoadingCredits, setIsLoadingCredits] = useState(false)
   const [trendData, setTrendData] = useState<{ date: string; total: number; info: number; warn: number; error: number }[]>([])
@@ -383,18 +384,15 @@ export function AccountDetail({
             </div>
             
             {credits && (
-              <div className="grid grid-cols-3 gap-4">
-                <div className="p-4 rounded-lg bg-muted/50 text-center">
-                  <p className="text-sm text-muted-foreground mb-1">{t('minimax.totalCredits')}</p>
-                  <p className="text-2xl font-bold text-blue-600">{credits.totalCredits.toLocaleString()}</p>
-                </div>
-                <div className="p-4 rounded-lg bg-muted/50 text-center">
-                  <p className="text-sm text-muted-foreground mb-1">{t('minimax.usedCredits')}</p>
-                  <p className="text-2xl font-bold text-amber-600">{credits.usedCredits.toLocaleString()}</p>
-                </div>
+              <div className="space-y-4">
                 <div className="p-4 rounded-lg bg-muted/50 text-center">
                   <p className="text-sm text-muted-foreground mb-1">{t('minimax.remainingCredits')}</p>
-                  <p className="text-2xl font-bold text-green-600">{credits.remainingCredits.toLocaleString()}</p>
+                  <p className="text-3xl font-bold text-green-600">{credits.remainingCredits.toLocaleString()}</p>
+                  {credits.expiresAt && (
+                    <p className="text-xs text-muted-foreground mt-2">
+                      {t('minimax.creditResetsAt')}: {formatDate(credits.expiresAt)}
+                    </p>
+                  )}
                 </div>
               </div>
             )}

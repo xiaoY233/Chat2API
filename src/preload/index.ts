@@ -142,6 +142,9 @@ const accountsAPI = {
     remainingCredits: number
   } | null> =>
     ipcRenderer.invoke(IpcChannels.ACCOUNTS_GET_CREDITS, accountId),
+
+  clearChats: (accountId: string): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke(IpcChannels.ACCOUNTS_CLEAR_CHATS, accountId),
 }
 
 type ProviderType = ProviderVendor
@@ -282,8 +285,11 @@ interface RequestLogEntry {
   accountName?: string
   requestBody?: string
   userInput?: string
+  webSearch?: boolean
+  reasoningEffort?: 'low' | 'medium' | 'high'
   responseStatus: number
   responsePreview?: string
+  responseBody?: string
   latency: number
   isStream: boolean
   errorMessage?: string

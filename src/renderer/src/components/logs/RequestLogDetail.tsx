@@ -9,7 +9,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Copy, Check, Clock, Zap, Server, User, FileJson, AlertCircle } from 'lucide-react'
+import { Copy, Check, Clock, Zap, Server, User, FileJson, AlertCircle, Globe, Brain } from 'lucide-react'
 
 interface RequestLogEntry {
   id: string
@@ -26,8 +26,11 @@ interface RequestLogEntry {
   accountName?: string
   requestBody?: string
   userInput?: string
+  webSearch?: boolean
+  reasoningEffort?: 'low' | 'medium' | 'high'
   responseStatus: number
   responsePreview?: string
+  responseBody?: string
   latency: number
   isStream: boolean
   errorMessage?: string
@@ -191,29 +194,36 @@ export function RequestLogDetail({ log, onClose }: RequestLogDetailProps) {
         {/* Tabs */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col min-h-0 overflow-hidden">
           <div className="px-6 pt-4 shrink-0 overflow-hidden">
-            <TabsList className="grid w-full grid-cols-4 bg-muted/50 p-1 rounded-lg">
-              <TabsTrigger 
-                value="info" 
+            <TabsList className="grid w-full grid-cols-5 bg-muted/50 p-1 rounded-lg">
+              <TabsTrigger
+                value="info"
                 className="text-xs data-[state=active]:bg-background data-[state=active]:shadow-sm rounded-md transition-all"
               >
                 <FileJson className="h-3.5 w-3.5 mr-1.5" />
                 {t('logs.tabInfo')}
               </TabsTrigger>
-              <TabsTrigger 
+              <TabsTrigger
                 value="request"
                 className="text-xs data-[state=active]:bg-background data-[state=active]:shadow-sm rounded-md transition-all"
               >
                 <Server className="h-3.5 w-3.5 mr-1.5" />
                 {t('logs.tabRequest')}
               </TabsTrigger>
-              <TabsTrigger 
+              <TabsTrigger
+                value="response"
+                className="text-xs data-[state=active]:bg-background data-[state=active]:shadow-sm rounded-md transition-all"
+              >
+                <FileJson className="h-3.5 w-3.5 mr-1.5" />
+                {t('logs.tabResponse')}
+              </TabsTrigger>
+              <TabsTrigger
                 value="user"
                 className="text-xs data-[state=active]:bg-background data-[state=active]:shadow-sm rounded-md transition-all"
               >
                 <User className="h-3.5 w-3.5 mr-1.5" />
                 {t('logs.tabUserInput')}
               </TabsTrigger>
-              <TabsTrigger 
+              <TabsTrigger
                 value="error"
                 className="text-xs data-[state=active]:bg-background data-[state=active]:shadow-sm rounded-md transition-all"
               >
@@ -262,17 +272,37 @@ export function RequestLogDetail({ log, onClose }: RequestLogDetailProps) {
                   label={t('logs.responseStatus')} 
                   value={log.responseStatus}
                 />
+                <InfoItem 
+                  label={t('logs.webSearch')} 
+                  value={log.webSearch ? t('common.enabled') : t('common.disabled')}
+                  icon={<Globe className="h-3 w-3" />}
+                />
+                <InfoItem 
+                  label={t('logs.reasoningEffort')} 
+                  value={log.reasoningEffort || '-'}
+                  icon={<Brain className="h-3 w-3" />}
+                />
               </div>
             </TabsContent>
 
             {/* Request Tab */}
             <TabsContent value="request" className="mt-0">
-              <SectionHeader 
-                title={t('logs.requestBody')} 
+              <SectionHeader
+                title={t('logs.requestBody')}
                 icon={<FileJson className="h-4 w-4" />}
                 copyText={log.requestBody || ''}
               />
               {renderJsonViewer(log.requestBody)}
+            </TabsContent>
+
+            {/* Response Tab */}
+            <TabsContent value="response" className="mt-0">
+              <SectionHeader
+                title={t('logs.responseBody')}
+                icon={<FileJson className="h-4 w-4" />}
+                copyText={log.responseBody || ''}
+              />
+              {renderJsonViewer(log.responseBody)}
             </TabsContent>
 
             {/* User Input Tab */}
