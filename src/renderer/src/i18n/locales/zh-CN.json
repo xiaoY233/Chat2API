@@ -927,7 +927,6 @@
     "title": "会话管理",
     "description": "配置对话会话管理策略",
     "sessionSettings": "会话设置",
-    "sessionSettingsDescription": "配置会话相关设置",
     "deleteAfterChat": "对话记录清理",
     "deleteAfterChatHint": "每次对话结束后自动删除Web端对话记录",
     "sessionTimeout": "会话超时（分钟）",
@@ -966,7 +965,6 @@
   },
   "contextManagement": {
     "title": "上下文管理",
-    "description": "配置对话上下文管理策略，控制消息历史处理方式",
     "enableContextManagement": "启用上下文管理",
     "enableContextManagementHint": "自动管理对话上下文，防止超出模型限制",
     "strategyConfig": "策略配置",

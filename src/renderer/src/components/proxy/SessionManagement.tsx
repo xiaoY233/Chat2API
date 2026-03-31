@@ -70,9 +70,6 @@ export function SessionManagement() {
             <Settings2 className="h-5 w-5" />
             {t('session.sessionSettings')}
           </CardTitle>
-          <CardDescription>
-            {t('session.sessionSettingsDescription')}
-          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
           <div className="flex items-center justify-between p-4 bg-muted/30 rounded-lg">

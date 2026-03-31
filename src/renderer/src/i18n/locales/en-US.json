@@ -927,7 +927,6 @@
     "title": "Session Management",
     "description": "Configure conversation session management strategy",
     "sessionSettings": "Session Settings",
-    "sessionSettingsDescription": "Configure session-related settings",
     "deleteAfterChat": "Chat History Cleanup",
     "deleteAfterChatHint": "Automatically delete web-side chat history after each conversation",
     "sessionTimeout": "Session Timeout (minutes)",
@@ -966,7 +965,6 @@
   },
   "contextManagement": {
     "title": "Context Management",
-    "description": "Configure conversation context management strategies to control message history handling",
     "enableContextManagement": "Enable Context Management",
     "enableContextManagementHint": "Automatically manage conversation context to prevent exceeding model limits",
     "strategyConfig": "Strategy Configuration",
