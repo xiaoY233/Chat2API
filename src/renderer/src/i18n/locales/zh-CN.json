@@ -193,7 +193,7 @@
     "clearChatsWarning": "此操作将删除该供应商网站上的所有对话历史，且无法恢复。",
     "clearChatsSuccess": "对话记录已清除",
     "clearChatsFailed": "清除对话记录失败",
-    "clearChatsOnlyForQwenAI": "此功能仅支持 Qwen AI、MiniMax 和 Z.ai 供应商",
+    "clearChatsOnlyForQwenAI": "此功能仅支持 Qwen AI、MiniMax、Z.ai、Perplexity、DeepSeek 和 GLM 供应商",
     "saving": "保存中...",
     "saveChanges": "保存更改",
     "required": "必填",

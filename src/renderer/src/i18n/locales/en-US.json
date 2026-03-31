@@ -193,7 +193,7 @@
     "clearChatsWarning": "This will delete all conversation history on this provider's website and cannot be undone.",
     "clearChatsSuccess": "Chat history cleared successfully",
     "clearChatsFailed": "Failed to clear chat history",
-    "clearChatsOnlyForQwenAI": "This feature is only available for Qwen AI, MiniMax, and Z.ai providers",
+    "clearChatsOnlyForQwenAI": "This feature is only available for Qwen AI, MiniMax, Z.ai, Perplexity, DeepSeek, and GLM providers",
     "saving": "Saving...",
     "saveChanges": "Save Changes",
     "required": "Required",

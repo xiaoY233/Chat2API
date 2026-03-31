@@ -408,7 +408,7 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow | null): Pro
         return { success: false, error: 'Provider not found' }
       }
 
-      // Support qwen-ai, minimax, and zai providers
+      // Support qwen-ai, minimax, zai, perplexity, deepseek, and glm providers
       if (provider.id === 'qwen-ai') {
         const { QwenAiAdapter } = await import('../proxy/adapters/qwen-ai')
         const adapter = new QwenAiAdapter(provider, account)
@@ -422,6 +422,21 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow | null): Pro
       } else if (provider.id === 'zai') {
         const { ZaiAdapter } = await import('../proxy/adapters/zai')
         const adapter = new ZaiAdapter(provider, account)
+        const success = await adapter.deleteAllChats()
+        return { success }
+      } else if (provider.id === 'perplexity') {
+        const { PerplexityAdapter } = await import('../proxy/adapters/perplexity')
+        const adapter = new PerplexityAdapter(provider, account)
+        const success = await adapter.deleteAllChats()
+        return { success }
+      } else if (provider.id === 'deepseek') {
+        const { DeepSeekAdapter } = await import('../proxy/adapters/deepseek')
+        const adapter = new DeepSeekAdapter(provider, account)
+        const success = await adapter.deleteAllChats()
+        return { success }
+      } else if (provider.id === 'glm') {
+        const { GLMAdapter } = await import('../proxy/adapters/glm')
+        const adapter = new GLMAdapter(provider, account)
         const success = await adapter.deleteAllChats()
         return { success }
       } else {

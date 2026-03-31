@@ -526,6 +526,78 @@ export class PerplexityAdapter {
     }
   }
 
+  async deleteAllChats(): Promise<boolean> {
+    const deleteUrl = `${PERPLEXITY_URL}/rest/thread/delete_all_threads?version=2.18&source=default`
+    
+    const headers: Record<string, string> = {
+      'Accept': '*/*',
+      'Accept-Encoding': 'gzip, deflate, br, zstd',
+      'Accept-Language': 'en-US,en;q=0.9',
+      'Content-Type': 'application/json',
+      'Cookie': this.buildCookieHeader(),
+      'Origin': PERPLEXITY_URL,
+      'Referer': `${PERPLEXITY_URL}/library`,
+      'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36',
+      'sec-ch-ua': '"Chromium";v="134", "Not:A-Brand";v="24", "Google Chrome";v="134"',
+      'sec-ch-ua-mobile': '?0',
+      'sec-ch-ua-platform': '"macOS"',
+      'sec-fetch-dest': 'empty',
+      'sec-fetch-mode': 'cors',
+      'sec-fetch-site': 'same-origin',
+      'x-app-apiclient': 'default',
+      'x-app-apiversion': '2.18',
+      'x-perplexity-request-endpoint': deleteUrl,
+      'x-perplexity-request-reason': 'threads-list',
+      'x-perplexity-request-try-number': '1',
+    }
+
+    return new Promise((resolve) => {
+      const request_ = net.request({
+        method: 'DELETE',
+        url: deleteUrl,
+      })
+
+      for (const [key, value] of Object.entries(headers)) {
+        request_.setHeader(key, value)
+      }
+
+      request_.on('response', (response) => {
+        const statusCode = response.statusCode
+        
+        let responseBody = ''
+        response.on('data', (chunk: Buffer) => {
+          responseBody += chunk.toString()
+        })
+        
+        response.on('end', () => {
+          if (statusCode && statusCode >= 200 && statusCode < 300) {
+            try {
+              const data = JSON.parse(responseBody)
+              if (data.status === 'success') {
+                sessionCache.delete(this.account.id)
+                resolve(true)
+              } else {
+                resolve(false)
+              }
+            } catch {
+              resolve(false)
+            }
+          } else {
+            resolve(false)
+          }
+        })
+      })
+
+      request_.on('error', (error) => {
+        console.error('[Perplexity] Delete all chats error:', error)
+        resolve(false)
+      })
+
+      request_.write(JSON.stringify({ delete_all: true }))
+      request_.end()
+    })
+  }
+
   static isPerplexityProvider(provider: Provider): boolean {
     return provider.id === 'perplexity' || provider.apiEndpoint.includes('perplexity.ai')
   }
