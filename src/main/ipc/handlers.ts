@@ -1,11 +1,12 @@
 import { ipcMain, app, BrowserWindow, shell } from 'electron'
+import axios from 'axios'
 import { IpcChannels } from './channels'
 import { storeManager } from '../store/store'
 import { ProviderManager } from '../store/providers'
 import { AccountManager } from '../store/accounts'
 import { ProviderChecker } from '../providers/checker'
 import { CustomProviderManager } from '../providers/custom'
-import { getBuiltinProviders } from '../providers/builtin'
+import { getBuiltinProviders, getBuiltinProvider } from '../providers/builtin'
 import { oauthManager } from '../oauth/manager'
 import { ProxyServer } from '../proxy/server'
 import { proxyStatusManager } from '../proxy/status'
@@ -326,7 +327,29 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow | null): Pro
   })
 
   ipcMain.handle(IpcChannels.ACCOUNTS_VALIDATE_TOKEN, async (_, providerId: string, credentials: Record<string, string>) => {
-    const provider = ProviderManager.getById(providerId)
+    let provider = ProviderManager.getById(providerId)
+    
+    // If provider not in store, check builtin providers
+    if (!provider) {
+      const builtinConfig = getBuiltinProvider(providerId)
+      if (builtinConfig) {
+        provider = {
+          id: builtinConfig.id,
+          name: builtinConfig.name,
+          type: 'builtin',
+          authType: builtinConfig.authType,
+          apiEndpoint: builtinConfig.apiEndpoint,
+          headers: builtinConfig.headers,
+          enabled: true,
+          description: builtinConfig.description,
+          supportedModels: builtinConfig.supportedModels || [],
+          modelMappings: builtinConfig.modelMappings || {},
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        }
+      }
+    }
+    
     if (!provider) {
       return { valid: false, error: 'Provider not found' }
     }
@@ -385,7 +408,7 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow | null): Pro
         return { success: false, error: 'Provider not found' }
       }
 
-      // Support qwen-ai and minimax providers
+      // Support qwen-ai, minimax, zai, perplexity, deepseek, and glm providers
       if (provider.id === 'qwen-ai') {
         const { QwenAiAdapter } = await import('../proxy/adapters/qwen-ai')
         const adapter = new QwenAiAdapter(provider, account)
@@ -394,6 +417,26 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow | null): Pro
       } else if (provider.id === 'minimax') {
         const { MiniMaxAdapter } = await import('../proxy/adapters/minimax')
         const adapter = new MiniMaxAdapter(provider, account)
+        const success = await adapter.deleteAllChats()
+        return { success }
+      } else if (provider.id === 'zai') {
+        const { ZaiAdapter } = await import('../proxy/adapters/zai')
+        const adapter = new ZaiAdapter(provider, account)
+        const success = await adapter.deleteAllChats()
+        return { success }
+      } else if (provider.id === 'perplexity') {
+        const { PerplexityAdapter } = await import('../proxy/adapters/perplexity')
+        const adapter = new PerplexityAdapter(provider, account)
+        const success = await adapter.deleteAllChats()
+        return { success }
+      } else if (provider.id === 'deepseek') {
+        const { DeepSeekAdapter } = await import('../proxy/adapters/deepseek')
+        const adapter = new DeepSeekAdapter(provider, account)
+        const success = await adapter.deleteAllChats()
+        return { success }
+      } else if (provider.id === 'glm') {
+        const { GLMAdapter } = await import('../proxy/adapters/glm')
+        const adapter = new GLMAdapter(provider, account)
         const success = await adapter.deleteAllChats()
         return { success }
       } else {
@@ -527,6 +570,53 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow | null): Pro
 
   ipcMain.handle(IpcChannels.APP_GET_VERSION, async (): Promise<string> => {
     return app.getVersion()
+  })
+
+  ipcMain.handle(IpcChannels.APP_CHECK_UPDATE, async () => {
+    try {
+      const response = await axios.get('https://api.github.com/repos/xiaoY233/Chat2API/releases/latest', {
+        headers: {
+          'Accept': 'application/vnd.github.v3+json',
+          'User-Agent': 'Chat2API-Manager',
+        },
+        timeout: 10000,
+      })
+      const data = response.data
+      const latestVersion = data.tag_name?.replace(/^v/, '') || ''
+      const releaseUrl = data.html_url || 'https://github.com/xiaoY233/Chat2API/releases'
+      const currentVersion = app.getVersion()
+
+      // Simple semver comparison
+      const compareVersions = (v1: string, v2: string): number => {
+        const parts1 = v1.split('.').map(Number)
+        const parts2 = v2.split('.').map(Number)
+        const maxLength = Math.max(parts1.length, parts2.length)
+        for (let i = 0; i < maxLength; i++) {
+          const p1 = parts1[i] || 0
+          const p2 = parts2[i] || 0
+          if (p1 > p2) return 1
+          if (p1 < p2) return -1
+        }
+        return 0
+      }
+
+      const hasUpdate = latestVersion && compareVersions(latestVersion, currentVersion) > 0
+
+      return {
+        hasUpdate,
+        currentVersion,
+        latestVersion,
+        releaseUrl,
+      }
+    } catch (error) {
+      console.error('[App] Check update error:', error)
+      return {
+        hasUpdate: false,
+        currentVersion: app.getVersion(),
+        latestVersion: app.getVersion(),
+        error: error instanceof Error ? error.message : String(error),
+      }
+    }
   })
 
   ipcMain.handle(IpcChannels.APP_MINIMIZE, async (): Promise<void> => {
@@ -672,6 +762,47 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow | null): Pro
     ConfigManager.update({ managementApi: newManagementConfig })
     
     return newSecret
+  })
+
+  // ==================== Context Management Handlers ====================
+
+  ipcMain.handle(IpcChannels.CONTEXT_MANAGEMENT_GET_CONFIG, async () => {
+    const config = ConfigManager.get()
+    return config.contextManagement || {
+      enabled: true,
+      strategies: {
+        slidingWindow: { enabled: true, maxMessages: 20 },
+        tokenLimit: { enabled: false, maxTokens: 4000 },
+        summary: { enabled: false, keepRecentMessages: 20 },
+      },
+      executionOrder: ['slidingWindow', 'tokenLimit', 'summary'],
+    }
+  })
+
+  ipcMain.handle(IpcChannels.CONTEXT_MANAGEMENT_UPDATE_CONFIG, async (_, updates: Partial<any>) => {
+    const config = ConfigManager.get()
+    const defaultContextConfig = {
+      enabled: true,
+      strategies: {
+        slidingWindow: { enabled: true, maxMessages: 20 },
+        tokenLimit: { enabled: false, maxTokens: 4000 },
+        summary: { enabled: false, keepRecentMessages: 20 },
+      },
+      executionOrder: ['slidingWindow', 'tokenLimit', 'summary'],
+    }
+    const currentContextConfig = config.contextManagement || defaultContextConfig
+    const newContextConfig = {
+      ...currentContextConfig,
+      ...updates,
+      strategies: {
+        ...currentContextConfig.strategies,
+        ...(updates.strategies || {}),
+      },
+    }
+    
+    ConfigManager.update({ contextManagement: newContextConfig })
+    
+    return newContextConfig
   })
   
   oauthManager.on('progress', (event) => {

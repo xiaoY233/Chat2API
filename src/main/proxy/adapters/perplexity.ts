@@ -83,31 +83,35 @@ function extractQuery(messages: PerplexityMessage[]): string {
     }
   }
 
-  // Then, extract the last user message
-  let userQuery = ''
-  for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i].role === 'user') {
-      const content = messages[i].content
-      if (typeof content === 'string') {
-        userQuery = content
-      } else if (Array.isArray(content)) {
-        const texts = content
-          .filter((item: any) => item.type === 'text')
-          .map((item: any) => item.text)
-        userQuery = texts.join('\n')
-      }
-      break
+  // Build conversation history from all non-system messages
+  const conversationParts: string[] = []
+  for (const msg of messages) {
+    if (msg.role === 'system') continue
+    
+    let content = ''
+    if (typeof msg.content === 'string') {
+      content = msg.content
+    } else if (Array.isArray(msg.content)) {
+      const texts = msg.content
+        .filter((item: any) => item.type === 'text')
+        .map((item: any) => item.text)
+      content = texts.join('\n')
+    }
+    
+    if (content) {
+      const roleLabel = msg.role === 'user' ? 'User' : 'Assistant'
+      conversationParts.push(`[${roleLabel}]: ${content}`)
     }
   }
 
-  // Combine system prompt and user query
-  // Perplexity doesn't have a separate system prompt field,
-  // so we prepend it to the user query
-  if (systemPrompt && userQuery) {
-    return `${systemPrompt}\n\n${userQuery}`
+  const conversationHistory = conversationParts.join('\n\n')
+
+  // Combine system prompt and conversation history
+  if (systemPrompt && conversationHistory) {
+    return `${systemPrompt}\n\n---\n\n${conversationHistory}`
   }
   
-  return userQuery || systemPrompt
+  return conversationHistory || systemPrompt
 }
 
 function mapModel(model: string): string {
@@ -520,6 +524,78 @@ export class PerplexityAdapter {
       sessionCache.delete(cacheKey)
       return false
     }
+  }
+
+  async deleteAllChats(): Promise<boolean> {
+    const deleteUrl = `${PERPLEXITY_URL}/rest/thread/delete_all_threads?version=2.18&source=default`
+    
+    const headers: Record<string, string> = {
+      'Accept': '*/*',
+      'Accept-Encoding': 'gzip, deflate, br, zstd',
+      'Accept-Language': 'en-US,en;q=0.9',
+      'Content-Type': 'application/json',
+      'Cookie': this.buildCookieHeader(),
+      'Origin': PERPLEXITY_URL,
+      'Referer': `${PERPLEXITY_URL}/library`,
+      'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36',
+      'sec-ch-ua': '"Chromium";v="134", "Not:A-Brand";v="24", "Google Chrome";v="134"',
+      'sec-ch-ua-mobile': '?0',
+      'sec-ch-ua-platform': '"macOS"',
+      'sec-fetch-dest': 'empty',
+      'sec-fetch-mode': 'cors',
+      'sec-fetch-site': 'same-origin',
+      'x-app-apiclient': 'default',
+      'x-app-apiversion': '2.18',
+      'x-perplexity-request-endpoint': deleteUrl,
+      'x-perplexity-request-reason': 'threads-list',
+      'x-perplexity-request-try-number': '1',
+    }
+
+    return new Promise((resolve) => {
+      const request_ = net.request({
+        method: 'DELETE',
+        url: deleteUrl,
+      })
+
+      for (const [key, value] of Object.entries(headers)) {
+        request_.setHeader(key, value)
+      }
+
+      request_.on('response', (response) => {
+        const statusCode = response.statusCode
+        
+        let responseBody = ''
+        response.on('data', (chunk: Buffer) => {
+          responseBody += chunk.toString()
+        })
+        
+        response.on('end', () => {
+          if (statusCode && statusCode >= 200 && statusCode < 300) {
+            try {
+              const data = JSON.parse(responseBody)
+              if (data.status === 'success') {
+                sessionCache.delete(this.account.id)
+                resolve(true)
+              } else {
+                resolve(false)
+              }
+            } catch {
+              resolve(false)
+            }
+          } else {
+            resolve(false)
+          }
+        })
+      })
+
+      request_.on('error', (error) => {
+        console.error('[Perplexity] Delete all chats error:', error)
+        resolve(false)
+      })
+
+      request_.write(JSON.stringify({ delete_all: true }))
+      request_.end()
+    })
   }
 
   static isPerplexityProvider(provider: Provider): boolean {

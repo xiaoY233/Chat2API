@@ -1,6 +1,6 @@
 /**
  * Session Manager Module
- * Manages conversation sessions for multi-turn dialogue support
+ * Manages conversation sessions for stateless single-turn dialogue
  */
 
 import { storeManager } from '../store/store'
@@ -57,63 +57,23 @@ class SessionManagerClass {
     return newConfig
   }
 
-  isMultiTurnEnabled(): boolean {
-    const config = this.getSessionConfig()
-    return config.mode === 'multi'
-  }
-
   getOrCreateSession(options: CreateSessionOptions): SessionContext {
-    const { providerId, accountId, model, sessionType = 'chat' } = options
-    const config = this.getSessionConfig()
-
-    if (config.mode === 'single') {
-      // For single-turn mode, don't create session record
-      // Each request is independent, no need to track sessions
+    const { providerId, accountId, model } = options
+    const sessionConfig = this.getSessionConfig()
+    
+    if (sessionConfig.mode === 'single') {
       return {
-        sessionId: '',  // Empty session ID indicates no session tracking
+        sessionId: '',
         providerSessionId: undefined,
         parentMessageId: undefined,
         messages: [],
         isNew: true,
       }
     }
-
-    const existingSession = storeManager.getActiveSessionByProviderAccount(providerId, accountId)
+    
+    const existingSession = this.getActiveSession(providerId, accountId)
     
     if (existingSession) {
-      // Check if max messages per session reached
-      if (existingSession.messages.length >= config.maxMessagesPerSession) {
-        console.log('[SessionManager] Max messages per session reached, creating new session:', {
-          currentCount: existingSession.messages.length,
-          maxMessages: config.maxMessagesPerSession,
-        })
-        // Mark old session as expired and create new one
-        storeManager.updateSession(existingSession.id, { status: 'expired' })
-        
-        const newSession = this.createSession({
-          providerId,
-          accountId,
-          model,
-          sessionType,
-        })
-        
-        console.log('[SessionManager] Created new session after max messages:', newSession.id)
-        
-        return {
-          sessionId: newSession.id,
-          providerSessionId: undefined,
-          parentMessageId: undefined,
-          messages: [],
-          isNew: true,
-        }
-      }
-      
-      console.log('[SessionManager] Found existing session:', {
-        sessionId: existingSession.id,
-        providerSessionId: existingSession.providerSessionId,
-        parentMessageId: existingSession.parentMessageId,
-        messageCount: existingSession.messages.length,
-      })
       return {
         sessionId: existingSession.id,
         providerSessionId: existingSession.providerSessionId,
@@ -122,30 +82,18 @@ class SessionManagerClass {
         isNew: false,
       }
     }
-
-    const sessionsByAccount = storeManager.getSessionsByAccountId(accountId)
-    const activeSessionsByAccount = sessionsByAccount.filter(s => s.status === 'active')
     
-    if (activeSessionsByAccount.length >= config.maxSessionsPerAccount) {
-      const oldestSession = activeSessionsByAccount.sort((a, b) => a.lastActiveAt - b.lastActiveAt)[0]
-      storeManager.deleteSession(oldestSession.id)
-      console.log('[SessionManager] Removed oldest session to make room:', oldestSession.id)
-    }
-
     const newSession = this.createSession({
       providerId,
       accountId,
       model,
-      sessionType,
     })
-
-    console.log('[SessionManager] Created new multi-turn session:', newSession.id)
     
     return {
       sessionId: newSession.id,
-      providerSessionId: undefined,
-      parentMessageId: undefined,
-      messages: [],
+      providerSessionId: newSession.providerSessionId,
+      parentMessageId: newSession.parentMessageId,
+      messages: newSession.messages,
       isNew: true,
     }
   }
@@ -168,63 +116,6 @@ class SessionManagerClass {
     }
     
     storeManager.addSession(session)
-    return session
-  }
-
-  updateProviderSessionId(
-    sessionId: string, 
-    providerSessionId: string, 
-    parentMessageId?: string
-  ): SessionRecord | null {
-    if (!sessionId) return null
-    
-    const session = storeManager.updateProviderSessionId(sessionId, providerSessionId, parentMessageId)
-    if (session) {
-      console.log('[SessionManager] Updated provider session ID:', {
-        sessionId,
-        providerSessionId,
-        parentMessageId,
-      })
-    }
-    return session
-  }
-
-  updateParentMessageId(sessionId: string, parentMessageId: string): SessionRecord | null {
-    if (!sessionId) return null
-    
-    const session = storeManager.updateParentMessageId(sessionId, parentMessageId)
-    if (session) {
-      console.log('[SessionManager] Updated parent message ID:', {
-        sessionId,
-        parentMessageId,
-      })
-    }
-    return session
-  }
-
-  addMessage(sessionId: string, message: ChatMessage): SessionRecord | null {
-    if (!sessionId) return null
-    
-    const session = storeManager.addMessageToSession(sessionId, message)
-    if (session) {
-      console.log('[SessionManager] Added message to session:', {
-        sessionId,
-        role: message.role,
-        contentLength: typeof message.content === 'string' 
-          ? message.content.length 
-          : JSON.stringify(message.content).length,
-      })
-    }
-    return session
-  }
-
-  addMessages(sessionId: string, messages: ChatMessage[]): SessionRecord | null {
-    if (!sessionId) return null
-    
-    let session: SessionRecord | null = null
-    for (const message of messages) {
-      session = this.addMessage(sessionId, message)
-    }
     return session
   }
 
@@ -284,8 +175,6 @@ class SessionManagerClass {
 
   shouldDeleteAfterChat(): boolean {
     const config = this.getSessionConfig()
-    // Only delete after chat in single-turn mode with deleteAfterTimeout enabled
-    // In multi-turn mode, sessions are deleted by timeout cleaner
     return config.mode === 'single' && config.deleteAfterTimeout
   }
 

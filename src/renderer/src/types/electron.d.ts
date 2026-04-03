@@ -204,6 +204,7 @@ interface LogsAPI {
 
 interface AppAPI {
   getVersion: () => Promise<string>
+  checkUpdate: () => Promise<{ hasUpdate: boolean; currentVersion: string; latestVersion: string; releaseUrl?: string; error?: string }>
   minimize: () => Promise<void>
   maximize: () => Promise<void>
   close: () => Promise<void>
@@ -230,7 +231,7 @@ interface PromptsAPI {
 }
 
 interface SessionConfig {
-  mode: 'single' | 'multi'
+  mode: 'single'
   sessionTimeout: number
   maxMessagesPerSession: number
   deleteAfterTimeout: boolean

@@ -1,91 +1,69 @@
 /**
  * Prompt Signature Detection Module
- * Detects if tool prompts have been injected by various AI clients
+ * Re-exports from unified signatures module
  * 
- * This module now imports from the unified signatures module
- * to eliminate duplication and ensure consistency
+ * This module provides backward compatibility for existing imports
  */
 
 import { ChatMessage } from '../types'
 import {
-  TOOL_PROMPT_SIGNATURES,
-  TOOL_PROMPT_SECTION_MARKERS,
   ClientType,
   DetectionResult,
-  detectClientFromSignatures,
+  CLIENT_SIGNATURES,
+  GENERAL_TOOL_SIGNATURES,
+  detectClientFromContent,
   hasGeneralToolPromptSignature,
+  isKnownClient,
 } from '../constants/signatures'
 
-export type { ClientType, DetectionResult } from '../constants/signatures'
+// Re-export types
+export type { ClientType, DetectionResult }
 
-export {
-  TOOL_PROMPT_SIGNATURES,
-  TOOL_PROMPT_SECTION_MARKERS,
-  detectClientFromSignatures,
-  hasGeneralToolPromptSignature,
-}
+// Re-export constants
+export { CLIENT_SIGNATURES, GENERAL_TOOL_SIGNATURES }
 
+// Re-export functions
+export { detectClientFromContent, hasGeneralToolPromptSignature, isKnownClient }
+
+/**
+ * Detect client prompt type from messages
+ */
 export function detectClientPromptType(messages: ChatMessage[]): DetectionResult {
   const allContent = extractAllContent(messages)
   
   if (!allContent) {
-    return { clientType: 'unknown', confidence: 0, matchedSignatures: [] }
+    return {
+      clientType: 'unknown',
+      confidence: 0,
+      matchedSignatures: [],
+      toolCallFormat: 'bracket',
+      injectsPrompt: false,
+    }
   }
 
-  return detectClientFromSignatures(allContent)
+  return detectClientFromContent(allContent)
 }
 
+/**
+ * Check if any tool prompt has been injected
+ */
 export function hasAnyToolPromptInjected(messages: ChatMessage[]): boolean {
   const allContent = extractAllContent(messages)
-  
-  if (!allContent) {
-    return false
-  }
-
   return hasGeneralToolPromptSignature(allContent)
 }
 
-export function hasClientPromptInjected(
-  messages: ChatMessage[],
-  clientType: ClientType
-): boolean {
+/**
+ * Check if client has injected prompt
+ */
+export function hasClientPromptInjected(messages: ChatMessage[], clientType: ClientType): boolean {
   const allContent = extractAllContent(messages)
-  
-  if (!allContent) {
-    return false
-  }
-
-  const result = detectClientFromSignatures(allContent)
-  return result.clientType === clientType && result.confidence > 0
+  const result = detectClientFromContent(allContent)
+  return result.clientType === clientType && isKnownClient(clientType)
 }
 
-export function getMatchedSignatures(messages: ChatMessage[]): Map<ClientType, string[]> {
-  const allContent = extractAllContent(messages)
-  const result = new Map<ClientType, string[]>()
-
-  if (!allContent) {
-    return result
-  }
-
-  for (const [clientType, signatures] of Object.entries(TOOL_PROMPT_SIGNATURES.clients)) {
-    if (clientType === 'unknown') continue
-
-    const matched: string[] = []
-    
-    for (const sig of signatures) {
-      if (allContent.includes(sig)) {
-        matched.push(sig)
-      }
-    }
-
-    if (matched.length > 0) {
-      result.set(clientType as ClientType, matched)
-    }
-  }
-
-  return result
-}
-
+/**
+ * Extract all text content from messages
+ */
 function extractAllContent(messages: ChatMessage[]): string {
   const parts: string[] = []
 
@@ -98,7 +76,7 @@ function extractAllContent(messages: ChatMessage[]): string {
           if (typeof part === 'string') {
             parts.push(part)
           } else if (part && typeof part === 'object' && 'text' in part) {
-            parts.push(part.text)
+            parts.push((part as { text: string }).text)
           }
         }
       }
@@ -108,40 +86,18 @@ function extractAllContent(messages: ChatMessage[]): string {
   return parts.join('\n')
 }
 
-export function removeToolPromptSection(content: string): string {
-  let cleanedContent = content
-  
-  for (const [clientName, markers] of Object.entries(TOOL_PROMPT_SECTION_MARKERS)) {
-    const startIndex = cleanedContent.indexOf(markers.start)
-    const endIndex = cleanedContent.indexOf(markers.end)
-    
-    if (startIndex !== -1) {
-      if (endIndex !== -1 && endIndex > startIndex) {
-        cleanedContent = cleanedContent.slice(0, startIndex) + cleanedContent.slice(endIndex)
-        console.log(`[PromptSignatures] Removed ${clientName} tool prompt section`)
-      } else {
-        cleanedContent = cleanedContent.slice(0, startIndex)
-        console.log(`[PromptSignatures] Removed ${clientName} tool prompt section (no end marker)`)
-      }
-    }
-  }
-  
-  return cleanedContent.trim()
-}
-
+/**
+ * Clean tool prompts from messages (backward compatibility)
+ */
 export function cleanClientToolPrompts(messages: ChatMessage[]): ChatMessage[] {
-  return messages.map(msg => {
-    if (msg.role === 'system' && typeof msg.content === 'string') {
-      const cleanedContent = removeToolPromptSection(msg.content)
-      if (cleanedContent !== msg.content) {
-        console.log('[PromptSignatures] Cleaned system message, removed tool prompt section')
-        return { ...msg, content: cleanedContent }
-      }
-    }
-    return msg
-  })
+  // Detection and cleaning is now handled by clientDetector
+  // This function is kept for backward compatibility
+  return messages
 }
 
+/**
+ * Check if tool prompt is injected (backward compatibility)
+ */
 export function hasToolPromptInjected(messages: ChatMessage[]): boolean {
   return hasAnyToolPromptInjected(messages)
 }

@@ -185,18 +185,16 @@ export interface SystemPrompt {
 }
 
 export interface ToolPromptConfig {
-  mode: 'always' | 'smart' | 'never' | 'auto'
-  smartThreshold: number
-  keywords: string[]
-  clientDetection: boolean
-  preferredVariant?: string
-  skipKnownClients: string[]
-  protocolFormat: 'bracket' | 'xml'
-  clientInjectionBehavior?: 'skip' | 'replace' | 'append'
+  mode: 'auto' | 'always' | 'never'
+  defaultFormat: 'bracket' | 'xml'
+  customPromptTemplate?: string
+  enableToolCallParsing: boolean
 }
 
+export type SessionMode = 'single'
+
 export interface SessionConfig {
-  mode: 'single' | 'multi'
+  mode: SessionMode
   sessionTimeout: number
   maxMessagesPerSession: number
   deleteAfterTimeout: boolean

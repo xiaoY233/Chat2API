@@ -320,7 +320,9 @@ export class KimiAdapter {
 
     // Determine if thinking and web search should be enabled
     // Priority: explicit parameters > model name detection
-    const modelLower = request.model.toLowerCase()
+    // Use originalModel for feature detection (preserves user's intent before mapping)
+    const modelForDetection = request.originalModel || request.model
+    const modelLower = modelForDetection.toLowerCase()
     
     let enableThinking = request.enableThinking ?? false
     let enableWebSearch = request.enableWebSearch ?? false
@@ -423,6 +425,8 @@ export class KimiAdapter {
   }
 }
 
+const STAGE_NAME_THINKING = 'STAGE_NAME_THINKING'
+
 export class KimiStreamHandler {
   private model: string
   private conversationId: string
@@ -431,6 +435,8 @@ export class KimiStreamHandler {
   private realChatId: string | null = null
   private lastMessageId: string | null = null
   private hasError: boolean = false
+  private currentPhase: 'thinking' | 'answer' | undefined = undefined
+  private reasoningBuffer: string = ''
 
   constructor(model: string, conversationId: string, enableThinking: boolean = false) {
     this.model = model
@@ -458,6 +464,42 @@ export class KimiStreamHandler {
 
   hasSessionError(): boolean {
     return this.hasError
+  }
+
+  private detectMultiStage(data: any): 'thinking' | 'answer' | undefined {
+    if (!data.block?.multiStage?.stages || !Array.isArray(data.block.multiStage.stages)) {
+      return undefined
+    }
+    
+    const stages = data.block.multiStage.stages
+    if (stages.length === 0) {
+      return undefined
+    }
+    
+    const firstStage = stages[0]
+    if (firstStage?.name === STAGE_NAME_THINKING) {
+      return firstStage.status === 'completed' ? 'answer' : 'thinking'
+    }
+    
+    return undefined
+  }
+
+  private isThinkingMask(mask: string | undefined): boolean {
+    if (!mask) return false
+    return mask.includes('block.think')
+  }
+
+  private isAnswerMask(mask: string | undefined): boolean {
+    if (!mask) return false
+    return mask.includes('block.text')
+  }
+
+  private extractThinkContent(data: any): string | null {
+    return data.block?.think?.content || null
+  }
+
+  private extractTextContent(data: any): string | null {
+    return data.block?.text?.content || null
   }
 
   async handleStream(stream: any): Promise<PassThrough> {
@@ -553,42 +595,99 @@ export class KimiStreamHandler {
   ) {
     if (data.heartbeat) return
 
-    // Extract real chat_id from data.chat.id (this is the correct chat_id for deletion)
     if (data.chat?.id && !this.realChatId) {
       this.realChatId = data.chat.id
       console.log('[Kimi] Extracted real chat_id from chat.id:', this.realChatId)
     }
 
-    // Extract message ID from assistant message (for parent_id in next request)
     if (data.message?.id && data.message?.role === 'assistant' && !this.lastMessageId) {
       this.lastMessageId = data.message.id
       console.log('[Kimi] Extracted assistant message id:', this.lastMessageId)
     }
 
-    // Send role on first content
-    if (!getSentRole() && (data.op === 'set' || data.op === 'append') && data.block?.text?.content) {
-      transStream.write(`data: ${JSON.stringify({
-        id: this.getConversationId(),
-        model: this.model,
-        object: 'chat.completion.chunk',
-        choices: [{ index: 0, delta: { role: 'assistant' }, finish_reason: null }],
-        created,
-      })}\n\n`)
-      setSentRole(true)
+    const multiStagePhase = this.detectMultiStage(data)
+    if (multiStagePhase) {
+      this.currentPhase = multiStagePhase
+      console.log('[Kimi] Detected multiStage phase:', this.currentPhase)
     }
 
-    // Handle text content
-    if (data.op === 'set' && data.block?.text?.content) {
-      const content = data.block.text.content
-      this.sendChunk(transStream, content, created)
+    if (data.block?.text?.flags === 'thinking') {
+      this.currentPhase = 'thinking'
+    } else if (data.block?.text?.flags === 'answer') {
+      this.currentPhase = 'answer'
     }
 
-    if (data.op === 'append' && data.block?.text?.content) {
-      const content = data.block.text.content
-      this.sendChunk(transStream, content, created)
+    if ((data.op === 'set' || data.op === 'append')) {
+      const mask = data.mask
+      
+      if (this.isThinkingMask(mask)) {
+        const thinkContent = this.extractThinkContent(data)
+        if (thinkContent) {
+          if (!getSentRole()) {
+            transStream.write(`data: ${JSON.stringify({
+              id: this.getConversationId(),
+              model: this.model,
+              object: 'chat.completion.chunk',
+              choices: [{ index: 0, delta: { role: 'assistant' }, finish_reason: null }],
+              created,
+            })}\n\n`)
+            setSentRole(true)
+          }
+          
+          this.reasoningBuffer += thinkContent
+          transStream.write(`data: ${JSON.stringify({
+            id: this.getConversationId(),
+            model: this.model,
+            object: 'chat.completion.chunk',
+            choices: [{ index: 0, delta: { reasoning_content: thinkContent }, finish_reason: null }],
+            created,
+          })}\n\n`)
+        }
+      } else if (this.isAnswerMask(mask)) {
+        const textContent = this.extractTextContent(data)
+        if (textContent) {
+          if (!getSentRole()) {
+            transStream.write(`data: ${JSON.stringify({
+              id: this.getConversationId(),
+              model: this.model,
+              object: 'chat.completion.chunk',
+              choices: [{ index: 0, delta: { role: 'assistant' }, finish_reason: null }],
+              created,
+            })}\n\n`)
+            setSentRole(true)
+          }
+          
+          this.sendChunk(transStream, textContent, created)
+        }
+      } else if (data.block?.text?.content) {
+        const content = data.block.text.content
+        
+        if (!getSentRole()) {
+          transStream.write(`data: ${JSON.stringify({
+            id: this.getConversationId(),
+            model: this.model,
+            object: 'chat.completion.chunk',
+            choices: [{ index: 0, delta: { role: 'assistant' }, finish_reason: null }],
+            created,
+          })}\n\n`)
+          setSentRole(true)
+        }
+        
+        if (this.currentPhase === 'thinking') {
+          this.reasoningBuffer += content
+          transStream.write(`data: ${JSON.stringify({
+            id: this.getConversationId(),
+            model: this.model,
+            object: 'chat.completion.chunk',
+            choices: [{ index: 0, delta: { reasoning_content: content }, finish_reason: null }],
+            created,
+          })}\n\n`)
+        } else {
+          this.sendChunk(transStream, content, created)
+        }
+      }
     }
 
-    // Handle completion
     if (data.done !== undefined) {
       transStream.write(`data: ${JSON.stringify({
         id: this.getConversationId(),
@@ -632,8 +731,6 @@ export class KimiStreamHandler {
     let content = ''
     let reasoningContent = ''
     let buffer = Buffer.alloc(0)
-    // Track thinking phase based on explicit flags only
-    // undefined = not yet determined, 'thinking' = in thinking phase, 'answer' = in answer phase
     let currentPhase: 'thinking' | 'answer' | undefined = undefined
 
     return new Promise((resolve, reject) => {
@@ -641,7 +738,6 @@ export class KimiStreamHandler {
         buffer = Buffer.concat([buffer, chunk])
 
         let offset = 0
-        // gRPC-Web frame format: 1 byte flag + 4 bytes length (big-endian) + payload
         while (offset + 5 <= buffer.length) {
           const flag = buffer.readUInt8(offset)
           const length = buffer.readUInt32BE(offset + 1)
@@ -657,54 +753,57 @@ export class KimiStreamHandler {
             if (text.trim()) {
               const data = JSON.parse(text)
 
-              // Check for error response
               if (data.error) {
                 reject(new Error(`Kimi API Error: ${data.error.message || JSON.stringify(data.error)}`))
                 return
               }
 
-              // Extract real chat_id from data.chat.id
               if (data.chat?.id && !this.realChatId) {
                 this.realChatId = data.chat.id
                 console.log('[Kimi] Non-stream: Extracted real chat_id from chat.id:', this.realChatId)
               }
 
-              // Extract message ID from assistant message
               if (data.message?.id && data.message?.role === 'assistant' && !this.lastMessageId) {
                 this.lastMessageId = data.message.id
                 console.log('[Kimi] Non-stream: Extracted assistant message id:', this.lastMessageId)
               }
 
-              // Check for thinking flag in block
-              // Update phase based on explicit flags from Kimi API
+              const multiStagePhase = this.detectMultiStage(data)
+              if (multiStagePhase) {
+                currentPhase = multiStagePhase
+                console.log('[Kimi] Non-stream: Detected multiStage phase:', currentPhase)
+              }
+
               if (data.block?.text?.flags === 'thinking') {
                 currentPhase = 'thinking'
               } else if (data.block?.text?.flags === 'answer') {
                 currentPhase = 'answer'
               }
 
-              if (data.op === 'set' && data.block?.text?.content) {
-                // Only put content in reasoning_content if explicitly marked as 'thinking'
-                if (currentPhase === 'thinking') {
-                  reasoningContent += data.block.text.content
-                } else {
-                  // 'answer' phase or undefined phase goes to normal content
-                  content += data.block.text.content
-                }
-              }
-
-              if (data.op === 'append' && data.block?.text?.content) {
-                // Only put content in reasoning_content if explicitly marked as 'thinking'
-                if (currentPhase === 'thinking') {
-                  reasoningContent += data.block.text.content
-                } else {
-                  // 'answer' phase or undefined phase goes to normal content
-                  content += data.block.text.content
+              if ((data.op === 'set' || data.op === 'append')) {
+                const mask = data.mask
+                
+                if (this.isThinkingMask(mask)) {
+                  const thinkContent = this.extractThinkContent(data)
+                  if (thinkContent) {
+                    reasoningContent += thinkContent
+                  }
+                } else if (this.isAnswerMask(mask)) {
+                  const textContent = this.extractTextContent(data)
+                  if (textContent) {
+                    content += textContent
+                  }
+                } else if (data.block?.text?.content) {
+                  const textContent = data.block.text.content
+                  if (currentPhase === 'thinking') {
+                    reasoningContent += textContent
+                  } else {
+                    content += textContent
+                  }
                 }
               }
 
               if (data.done !== undefined) {
-                // Parse tool calls from accumulated content
                 const { content: cleanContent, toolCalls } = parseToolCallsFromText(content, 'kimi')
 
                 const message: any = {
@@ -746,7 +845,6 @@ export class KimiStreamHandler {
 
       stream.once('error', reject)
       stream.once('close', () => {
-        // Parse tool calls from accumulated content
         const { content: cleanContent, toolCalls } = parseToolCallsFromText(content, 'kimi')
 
         const message: any = {

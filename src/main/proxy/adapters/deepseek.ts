@@ -456,6 +456,36 @@ ${message.content || ''}
     return { response, sessionId }
   }
 
+  async deleteAllChats(): Promise<boolean> {
+    try {
+      const token = await this.acquireToken()
+      const result = await axios.post(
+        `${DEEPSEEK_API_BASE}/v0/chat_session/delete_all`,
+        {},
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            ...FAKE_HEADERS,
+          },
+          timeout: 30000,
+          validateStatus: () => true,
+        }
+      )
+
+      console.log('[DeepSeek] Delete all chats response:', JSON.stringify(result.data, null, 2))
+
+      const success = result.status === 200 && result.data?.code === 0
+      if (success) {
+        sessionCache.clear()
+        console.log('[DeepSeek] All chats deleted')
+      }
+      return success
+    } catch (error) {
+      console.error('[DeepSeek] Failed to delete all chats:', error)
+      return false
+    }
+  }
+
   static isDeepSeekProvider(provider: Provider): boolean {
     return provider.id === 'deepseek' || provider.apiEndpoint.includes('deepseek.com')
   }

@@ -41,16 +41,11 @@ export function About() {
   const handleCheckAppUpdate = async () => {
     setAppUpdateStatus({ checking: true })
     try {
-      await new Promise((resolve) => setTimeout(resolve, 1500))
-      const latestVersion = appVersion
+      // Use main process to check update (avoids CORS issues)
+      const result = await window.electronAPI.app.checkUpdate()
       setAppUpdateStatus({
         checking: false,
-        result: {
-          hasUpdate: false,
-          currentVersion: appVersion,
-          latestVersion,
-          releaseUrl: 'https://github.com/xiaoY233/Chat2API/releases',
-        },
+        result,
       })
     } catch (error) {
       setAppUpdateStatus({

@@ -520,7 +520,9 @@ GLM STRICT RULES:
     }
 
     // Fallback: check model name for backward compatibility
-    const modelLower = request.model.toLowerCase()
+    // Use originalModel for feature detection (preserves user's intent before mapping)
+    const modelForDetection = request.originalModel || request.model
+    const modelLower = modelForDetection.toLowerCase()
     if (!chatMode && (modelLower.includes('think') || modelLower.includes('zero'))) {
       chatMode = 'zero'
       console.log('[GLM] Using reasoning mode (from model name)')
@@ -608,6 +610,99 @@ GLM STRICT RULES:
       return true
     } catch (error) {
       console.error('[GLM] Failed to delete conversation:', error)
+      return false
+    }
+  }
+
+  async deleteAllChats(): Promise<boolean> {
+    try {
+      const token = await this.acquireToken()
+
+      // Step 1: Get all conversations (handle pagination)
+      const allConversationIds: string[] = []
+      let page = 1
+      let hasMore = true
+
+      while (hasMore) {
+        const sign = generateSign()
+        const listResponse = await axios.post(
+          `${GLM_API_BASE}/mainchat-api/conversation/recent_list`,
+          { page, page_size: 100 },
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+              Referer: 'https://chatglm.cn/main/alltoolsdetail',
+              'X-Device-Id': uuid(),
+              'X-Request-Id': uuid(),
+              'X-Sign': sign.sign,
+              'X-Timestamp': sign.timestamp,
+              'X-Nonce': sign.nonce,
+              ...FAKE_HEADERS,
+            },
+            timeout: 30000,
+            validateStatus: () => true,
+          }
+        )
+
+        console.log('[GLM] Get conversation list page', page, 'response:', JSON.stringify(listResponse.data, null, 2))
+
+        const { status, result } = listResponse.data || {}
+        if (listResponse.status !== 200 || status !== 0) {
+          console.error('[GLM] Failed to get conversation list')
+          return false
+        }
+
+        const conversationList = result?.conversation_list || []
+        for (const c of conversationList) {
+          allConversationIds.push(c.conversation_id)
+        }
+
+        hasMore = result?.has_more || false
+        page++
+
+        if (conversationList.length === 0) {
+          break
+        }
+      }
+
+      if (allConversationIds.length === 0) {
+        console.log('[GLM] No conversations to delete')
+        return true
+      }
+
+      console.log('[GLM] Found', allConversationIds.length, 'conversations to delete')
+
+      // Step 2: Bulk delete conversations
+      const sign = generateSign()
+      const deleteResponse = await axios.post(
+        `${GLM_API_BASE}/mainchat-api/conversation/bulk_delete`,
+        { conversation_ids: allConversationIds },
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Referer: 'https://chatglm.cn/main/alltoolsdetail',
+            'X-Device-Id': uuid(),
+            'X-Request-Id': uuid(),
+            'X-Sign': sign.sign,
+            'X-Timestamp': sign.timestamp,
+            'X-Nonce': sign.nonce,
+            ...FAKE_HEADERS,
+          },
+          timeout: 60000,
+          validateStatus: () => true,
+        }
+      )
+
+      console.log('[GLM] Bulk delete response:', JSON.stringify(deleteResponse.data, null, 2))
+
+      const deleteResult = deleteResponse.data || {}
+      const success = deleteResponse.status === 200 && deleteResult.status === 0
+      if (success) {
+        console.log('[GLM] All chats deleted')
+      }
+      return success
+    } catch (error) {
+      console.error('[GLM] Failed to delete all chats:', error)
       return false
     }
   }
@@ -876,8 +971,16 @@ export class GLMStreamHandler {
 
             if (result.status !== 'finish') {
               if (result.parts) {
-                cachedParts.length = 0
-                cachedParts.push(...result.parts)
+                // Accumulate parts (same as handleStream), don't replace
+                // GLM sends incremental parts, each event only contains new content
+                result.parts.forEach((part: any) => {
+                  const index = cachedParts.findIndex((p) => p.logic_id === part.logic_id)
+                  if (index !== -1) {
+                    cachedParts[index] = part
+                  } else {
+                    cachedParts.push(part)
+                  }
+                })
               }
             } else {
               const searchMap = new Map<string, any>()

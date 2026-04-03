@@ -71,6 +71,7 @@ export const IpcChannels = {
   STATISTICS_GET_TODAY: 'statistics:getToday',
 
   APP_GET_VERSION: 'app:getVersion',
+  APP_CHECK_UPDATE: 'app:checkUpdate',
   APP_MINIMIZE: 'app:minimize',
   APP_MAXIMIZE: 'app:maximize',
   APP_CLOSE: 'app:close',
@@ -101,6 +102,9 @@ export const IpcChannels = {
   MANAGEMENT_API_GET_CONFIG: 'managementApi:getConfig',
   MANAGEMENT_API_UPDATE_CONFIG: 'managementApi:updateConfig',
   MANAGEMENT_API_GENERATE_SECRET: 'managementApi:generateSecret',
+
+  CONTEXT_MANAGEMENT_GET_CONFIG: 'contextManagement:getConfig',
+  CONTEXT_MANAGEMENT_UPDATE_CONFIG: 'contextManagement:updateConfig',
 } as const
 
 export type IpcChannel = (typeof IpcChannels)[keyof typeof IpcChannels]

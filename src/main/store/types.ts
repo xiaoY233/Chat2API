@@ -205,6 +205,8 @@ export interface AppConfig {
   toolPromptConfig: ToolPromptConfig
   /** Management API configuration */
   managementApi: ManagementApiConfig
+  /** Context management configuration */
+  contextManagement: ContextManagementConfig
 }
 
 /**
@@ -220,9 +222,60 @@ export type SessionStatus = 'active' | 'expired' | 'deleted'
 /**
  * Session Mode Enum
  * - single: Single-turn mode, session deleted after each chat
- * - multi: Multi-turn mode, session persists until timeout or manual deletion
  */
-export type SessionMode = 'single' | 'multi'
+export type SessionMode = 'single'
+
+/**
+ * Sliding Window Configuration Interface
+ * Controls message count-based context trimming
+ */
+export interface SlidingWindowConfig {
+  /** Whether sliding window strategy is enabled */
+  enabled: boolean
+  /** Maximum number of messages to keep */
+  maxMessages: number
+}
+
+/**
+ * Token Limit Configuration Interface
+ * Controls token count-based context trimming
+ */
+export interface TokenLimitConfig {
+  /** Whether token limit strategy is enabled */
+  enabled: boolean
+  /** Maximum number of tokens to keep */
+  maxTokens: number
+}
+
+/**
+ * Summary Configuration Interface
+ * Controls context summarization strategy
+ */
+export interface SummaryConfig {
+  /** Whether summary strategy is enabled */
+  enabled: boolean
+  /** Number of recent messages to keep after summarization */
+  keepRecentMessages: number
+  /** Custom summary prompt template (optional) */
+  summaryPrompt?: string
+}
+
+/**
+ * Context Management Configuration Interface
+ * Controls how conversation context is managed and trimmed
+ */
+export interface ContextManagementConfig {
+  /** Whether context management is enabled */
+  enabled: boolean
+  /** Strategy configurations */
+  strategies: {
+    slidingWindow: SlidingWindowConfig
+    tokenLimit: TokenLimitConfig
+    summary: SummaryConfig
+  }
+  /** Execution order of strategies */
+  executionOrder: ('slidingWindow' | 'tokenLimit' | 'summary')[]
+}
 
 /**
  * Chat Message Interface
@@ -293,41 +346,27 @@ export interface SessionConfig {
 }
 
 /**
- * Injection Strategy
+ * Injection Strategy (Simplified)
  * Controls whether to inject tool prompts
+ * - auto: Detect client automatically, skip for known clients (default)
+ * - always: Always inject tool prompts
+ * - never: Never inject tool prompts
  */
-export type InjectionStrategy = 'always' | 'smart' | 'never' | 'auto'
+export type InjectionStrategy = 'auto' | 'always' | 'never'
 
 /**
- * Client Injection Behavior
- * Controls how to handle existing client-injected prompts
- * - skip: Skip injection when client prompt detected (default)
- * - clean: Clean client prompt and re-inject
- * - append: Append new prompt (may cause duplicates)
- */
-export type ClientInjectionBehavior = 'skip' | 'clean' | 'append'
-
-/**
- * Tool Prompt Configuration Interface
+ * Tool Prompt Configuration Interface (Simplified)
  * Controls how tool prompts are injected for models without native function calling
  */
 export interface ToolPromptConfig {
-  /** Injection strategy: 'always' injects for all requests, 'smart' only for complex queries, 'never' disables injection, 'auto' detects client automatically */
+  /** Injection mode: 'auto' detects client, 'always' always injects, 'never' disables injection */
   mode: InjectionStrategy
-  /** Message length threshold for smart mode (default 50) */
-  smartThreshold: number
-  /** Keywords that trigger injection in smart mode */
-  keywords: string[]
-  /** Enable client detection to skip injection for known clients */
-  clientDetection: boolean
-  /** Preferred prompt variant ID */
-  preferredVariant?: string
-  /** Clients to skip injection for */
-  skipKnownClients: string[]
-  /** Protocol format: 'bracket' for [function_calls] format, 'xml' for <tool_use> format */
-  protocolFormat: 'bracket' | 'xml'
-  /** How to handle existing client-injected prompts (default: 'skip') */
-  clientInjectionBehavior?: ClientInjectionBehavior
+  /** Default protocol format: 'bracket' for [function_calls] format, 'xml' for <tool_use> format */
+  defaultFormat: 'bracket' | 'xml'
+  /** Custom prompt template (optional). Supports variables: {{tools}}, {{tool_names}}, {{format}} */
+  customPromptTemplate?: string
+  /** Whether to enable tool call parsing from model output (default: true) */
+  enableToolCallParsing: boolean
 }
 
 /**
@@ -573,7 +612,7 @@ export const DEFAULT_SESSION_CONFIG: SessionConfig = {
   mode: 'single',
   sessionTimeout: 30,
   maxMessagesPerSession: 50,
-  deleteAfterTimeout: true,
+  deleteAfterTimeout: false,
   maxSessionsPerAccount: 3,
 }
 
@@ -596,13 +635,10 @@ export const DEFAULT_STATISTICS: PersistentStatistics = {
  * Default Tool Prompt Configuration
  */
 export const DEFAULT_TOOL_PROMPT_CONFIG: ToolPromptConfig = {
-  mode: 'smart',
-  smartThreshold: 50,
-  keywords: ['search', 'find', 'get', 'call', 'use', 'tool', 'query', 'fetch', 'read', 'write', 'list', 'delete', 'update', 'create'],
-  clientDetection: true,
-  skipKnownClients: ['cline', 'kilocode', 'rooCode', 'vscodeCopilot', 'cherryStudio'],
-  protocolFormat: 'bracket',
-  clientInjectionBehavior: 'skip',
+  mode: 'auto',
+  defaultFormat: 'bracket',
+  customPromptTemplate: undefined,
+  enableToolCallParsing: true,
 }
 
 /**
@@ -611,6 +647,19 @@ export const DEFAULT_TOOL_PROMPT_CONFIG: ToolPromptConfig = {
 export const DEFAULT_MANAGEMENT_API_CONFIG: ManagementApiConfig = {
   enableManagementApi: false,
   managementApiSecret: '',
+}
+
+/**
+ * Default Context Management Configuration
+ */
+export const DEFAULT_CONTEXT_MANAGEMENT_CONFIG: ContextManagementConfig = {
+  enabled: false,
+  strategies: {
+    slidingWindow: { enabled: true, maxMessages: 20 },
+    tokenLimit: { enabled: false, maxTokens: 4000 },
+    summary: { enabled: false, keepRecentMessages: 20 },
+  },
+  executionOrder: ['slidingWindow', 'tokenLimit', 'summary'],
 }
 
 /**
@@ -635,6 +684,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   sessionConfig: DEFAULT_SESSION_CONFIG,
   toolPromptConfig: DEFAULT_TOOL_PROMPT_CONFIG,
   managementApi: DEFAULT_MANAGEMENT_API_CONFIG,
+  contextManagement: DEFAULT_CONTEXT_MANAGEMENT_CONFIG,
 }
 
 /**
@@ -693,7 +743,7 @@ export const BUILTIN_PROVIDERS: BuiltinProviderConfig[] = [
       'Referer': 'https://chatglm.cn/',
     },
     enabled: true,
-    description: 'Zhipu Qingyan AI assistant, supports GLM-5 flagship model, deep thinking and video generation',
+    description: 'Zhipu Qingyan AI assistant, supports GLM-5 flagship model, deep thinking and web search',
     supportedModels: ['GLM-5'],
     modelMappings: {
       'GLM-5': 'glm-5',
@@ -877,12 +927,23 @@ export const BUILTIN_PROVIDERS: BuiltinProviderConfig[] = [
     },
     enabled: true,
     description: 'Z.ai - Free AI Chatbot powered by GLM-5 and GLM-4.7',
-    supportedModels: ['GLM-5', 'GLM-4.7', 'GLM-4.6V', 'GLM-4.6'],
+    supportedModels: [
+      'GLM-5-Turbo',
+      'glm-5',
+      'glm-4.7',
+      'glm-4.6v',
+      'glm-4.6',
+      'glm-4.5v',
+      'glm-4.5-air',
+    ],
     modelMappings: {
-      'GLM-5': 'glm-5',
-      'GLM-4.7': 'glm-4.7',
-      'GLM-4.6V': 'glm-4.6v',
-      'GLM-4.6': 'glm-4.6',
+      'GLM-5-Turbo': 'GLM-5-Turbo',
+      'glm-5': 'glm-5',
+      'glm-4.7': 'glm-4.7',
+      'glm-4.6v': 'glm-4.6v',
+      'glm-4.6': 'glm-4.6v',
+      'glm-4.5v': 'glm-4.5v',
+      'glm-4.5-air': 'glm-4.5-air',
     },
     credentialFields: [
       {
@@ -891,7 +952,7 @@ export const BUILTIN_PROVIDERS: BuiltinProviderConfig[] = [
         type: 'password',
         required: true,
         placeholder: 'Enter Z.ai JWT Token',
-        helpText: 'Get token from Z.ai cookie (token) or localStorage',
+        helpText: 'Get token from Z.ai web version, found in browser DevTools Application -> Cookie, starts with "eyJ..."',
       },
     ],
     tokenCheckEndpoint: '/api/v1/users/user/settings',

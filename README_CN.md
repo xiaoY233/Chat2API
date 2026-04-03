@@ -32,7 +32,7 @@
 
 - OpenAI 兼容 API：提供标准 OpenAI 兼容接口，无缝对接现有工具
 - 多服务商支持：支持 DeepSeek、GLM、Kimi、MiniMax、Perplexity 🆕、Qwen、Z.ai 等
-- 🆕 多轮对话支持：完整支持多轮对话，提供会话管理和上下文保持功能
+- 🆕 上下文管理：智能对话上下文管理，支持滑动窗口、Token 限制和总结压缩策略
 - 🆕 工具调用支持：通过提示词工程为所有模型提供通用工具调用能力，兼容 Cherry Studio、Kilo Code 等客户端
 - 🆕 模型映射：灵活的模型名称映射，支持通配符和首选服务商/账户选择
 - 🆕 自定义参数：支持自定义 HTTP Header 开启联网搜索、深度思考、深度研究等功能
@@ -165,17 +165,17 @@ print(response.choices[0].message.content)
 
 ## 📸 截图
 
-| 仪表盘                                                 | 服务商                                                 |
-| --------------------------------------------------- | --------------------------------------------------- |
-| !\[Dashboard]\(docs/screenshots/dashboard.png null) | !\[Providers]\(docs/screenshots/providers.png null) |
+| 仪表盘 | 服务商 |
+|--------|--------|
+| ![Dashboard](docs/screenshots/dashboard.png) | ![Providers](docs/screenshots/providers.png) |
 
-| 代理设置                                        | API Key                                           |
-| ------------------------------------------- | ------------------------------------------------- |
-| !\[Proxy]\(docs/screenshots/proxy.png null) | !\[API Keys]\(docs/screenshots/api-keys.png null) |
+| 代理设置 | API Key |
+|----------|---------|
+| ![Proxy](docs/screenshots/proxy.png) | ![API Keys](docs/screenshots/api-keys.png) |
 
-| 模型管理                                          | 会话管理                                            |
-| --------------------------------------------- | ----------------------------------------------- |
-| !\[Models]\(docs/screenshots/models.png null) | !\[Session]\(docs/screenshots/Session.png null) |
+| 模型管理 | 会话管理 |
+|----------|----------|
+| ![Models](docs/screenshots/models.png) | ![Session](docs/screenshots/Session.png) |
 
 ## ⚙️ 设置选项
 

@@ -1,5 +1,6 @@
 import { useTranslation } from 'react-i18next'
 import { SessionManagement as SessionManagementComponent } from '@/components/proxy'
+import { ContextManagement } from '@/components/proxy/ContextManagement'
 
 export function SessionManagement() {
   const { t } = useTranslation()
@@ -12,6 +13,7 @@ export function SessionManagement() {
       </div>
 
       <SessionManagementComponent />
+      <ContextManagement />
     </div>
   )
 }

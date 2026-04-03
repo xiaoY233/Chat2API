@@ -4,6 +4,15 @@ import { createWindow, getMainWindow, loadUrl, loadFile, openDevTools } from './
 import { createTrayManager, TrayManager } from './tray/TrayManager'
 import { registerIpcHandlers } from './ipc/handlers'
 
+// Prevent uncaught exceptions from crashing the app
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught Exception:', error)
+})
+
+process.on('unhandledRejection', (reason) => {
+  console.error('Unhandled Rejection:', reason)
+})
+
 // Workaround for V8 JIT compiler crash on macOS ARM64 (Electron 33 bug)
 // Completely disable JIT compilation to prevent EXC_BAD_ACCESS crashes
 // This trades some performance for stability

@@ -14,7 +14,7 @@ import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Check, Plus, ArrowRight, Loader2, ExternalLink, AlertCircle, CheckCircle2, ArrowLeft, Info } from 'lucide-react'
+import { Check, Plus, ArrowRight, Loader2, ExternalLink, AlertCircle, CheckCircle2, ArrowLeft, Info, Eye, EyeOff, Copy } from 'lucide-react'
 import type { BuiltinProviderConfig, ProviderVendor } from '@/types/electron'
 import { cn } from '@/lib/utils'
 import deepseekIcon from '@/assets/providers/deepseek.svg'
@@ -134,6 +134,28 @@ export function AddProviderDialog({
     }
   }>({})
   const [oauthStatus, setOAuthStatus] = useState<string>('')
+  const [visibleFields, setVisibleFields] = useState<Record<string, boolean>>({})
+  const [copiedFields, setCopiedFields] = useState<Record<string, boolean>>({})
+
+  const toggleFieldVisibility = (fieldName: string) => {
+    setVisibleFields(prev => ({
+      ...prev,
+      [fieldName]: !prev[fieldName]
+    }))
+  }
+
+  const copyToClipboard = async (fieldName: string, value: string) => {
+    if (!value) return
+    try {
+      await navigator.clipboard.writeText(value)
+      setCopiedFields(prev => ({ ...prev, [fieldName]: true }))
+      setTimeout(() => {
+        setCopiedFields(prev => ({ ...prev, [fieldName]: false }))
+      }, 2000)
+    } catch (err) {
+      console.error('Failed to copy:', err)
+    }
+  }
 
   const DEFAULT_BUILTIN_PROVIDERS: BuiltinProviderConfig[] = [
     {
@@ -380,6 +402,8 @@ export function AddProviderDialog({
       setActiveTab('manual')
       setIsOAuthLoading(false)
       setOAuthStatus('')
+      setVisibleFields({})
+      setCopiedFields({})
     }
   }, [open])
 
@@ -604,6 +628,10 @@ export function AddProviderDialog({
           }
 
           const translated = getFieldTranslation()
+          const isPasswordField = field.type === 'password'
+          const isVisible = visibleFields[field.name]
+          const isCopied = copiedFields[field.name]
+          const fieldValue = credentials[field.name] || ''
 
           return (
             <div key={field.name} className="space-y-2">
@@ -614,19 +642,90 @@ export function AddProviderDialog({
                 )}
               </div>
               {field.type === 'textarea' ? (
-                <textarea
-                  id={field.name}
-                  className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                  placeholder={translated.placeholder}
-                  value={credentials[field.name] || ''}
-                  onChange={(e) => handleCredentialChange(field.name, e.target.value)}
-                />
+                <div className="relative">
+                  <textarea
+                    id={field.name}
+                    className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 pr-20"
+                    placeholder={translated.placeholder}
+                    value={fieldValue}
+                    onChange={(e) => handleCredentialChange(field.name, e.target.value)}
+                  />
+                  <div className="absolute right-1 top-1 flex gap-0.5">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 w-7 p-0"
+                      onClick={() => copyToClipboard(field.name, fieldValue)}
+                      disabled={!fieldValue}
+                    >
+                      {isCopied ? (
+                        <Check className="h-4 w-4 text-green-500" />
+                      ) : (
+                        <Copy className="h-4 w-4 text-muted-foreground" />
+                      )}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 w-7 p-0"
+                      onClick={() => toggleFieldVisibility(field.name)}
+                    >
+                      {isVisible ? (
+                        <EyeOff className="h-4 w-4 text-muted-foreground" />
+                      ) : (
+                        <Eye className="h-4 w-4 text-muted-foreground" />
+                      )}
+                    </Button>
+                  </div>
+                </div>
+              ) : isPasswordField ? (
+                <div className="relative">
+                  <Input
+                    id={field.name}
+                    type={isVisible ? 'text' : 'password'}
+                    placeholder={translated.placeholder}
+                    value={fieldValue}
+                    onChange={(e) => handleCredentialChange(field.name, e.target.value)}
+                    className="pr-20"
+                  />
+                  <div className="absolute right-1 top-1/2 -translate-y-1/2 flex gap-0.5">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 w-7 p-0"
+                      onClick={() => copyToClipboard(field.name, fieldValue)}
+                      disabled={!fieldValue}
+                    >
+                      {isCopied ? (
+                        <Check className="h-4 w-4 text-green-500" />
+                      ) : (
+                        <Copy className="h-4 w-4 text-muted-foreground" />
+                      )}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 w-7 p-0"
+                      onClick={() => toggleFieldVisibility(field.name)}
+                    >
+                      {isVisible ? (
+                        <EyeOff className="h-4 w-4 text-muted-foreground" />
+                      ) : (
+                        <Eye className="h-4 w-4 text-muted-foreground" />
+                      )}
+                    </Button>
+                  </div>
+                </div>
               ) : (
                 <Input
                   id={field.name}
                   type={field.type}
                   placeholder={translated.placeholder}
-                  value={credentials[field.name] || ''}
+                  value={fieldValue}
                   onChange={(e) => handleCredentialChange(field.name, e.target.value)}
                 />
               )}

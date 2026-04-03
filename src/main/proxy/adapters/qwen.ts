@@ -163,7 +163,9 @@ export class QwenAdapter {
     
     // Determine if thinking and web search should be enabled
     // Priority: explicit parameters > model name detection
-    const modelLower = request.model.toLowerCase()
+    // Use originalModel for feature detection (preserves user's intent before mapping)
+    const modelForDetection = request.originalModel || request.model
+    const modelLower = modelForDetection.toLowerCase()
     
     let enableThinking = request.enableThinking ?? false
     let enableWebSearch = request.enableWebSearch ?? false
@@ -477,48 +479,76 @@ export class QwenStreamHandler {
             }
 
             if (result.data?.messages) {
+              // First pass: collect thinking content and answer content
+              // Strategy: only use deep_think type to avoid duplicate content from multimodal_chat_think
+              let eventThinkingContent = ''
+              let eventThinkingType = ''
+              const eventMessages: Array<{ msg: any, hasMultiLoad: boolean }> = []
+
               for (const msg of result.data.messages) {
                 console.log('[Qwen] Message detail:', JSON.stringify(msg).substring(0, 500))
 
-                // Handle thinking content from meta_data.multi_load
+                // Collect thinking content from meta_data.multi_load
                 const metaData = msg.meta_data || {}
                 const multiLoad = metaData.multi_load || []
+                let msgHasMultiLoad = false
                 for (const load of multiLoad) {
-                  // Handle both deep_think and multimodal_chat_think types
-                  if ((load.type === 'deep_think' || load.type === 'multimodal_chat_think') && load.content) {
-                    // deep_think uses think_content, multimodal_chat_think uses content directly
+                  if (load.type === 'deep_think' && load.content) {
+                    // Only use deep_think type for thinking content
+                    // multimodal_chat_think may contain slightly different content causing duplicates
                     const newThinkingContent = load.content.think_content || load.content.content || ''
-                    // Only process if there's new content and it's not just a period
-                    if (newThinkingContent.length > this.thinkingContent.length) {
-                      const chunk = newThinkingContent.substring(this.thinkingContent.length)
-                      this.thinkingContent = newThinkingContent
-                      console.log('[Qwen] Thinking chunk, length:', chunk.length, 'content:', chunk.substring(0, 50))
-
-                      // Skip if chunk is just punctuation or whitespace
-                      if (chunk.trim() && chunk.trim() !== '。' && chunk.trim() !== '.') {
-                        // Send reasoning_content delta
-                        if (!this.sentThinkingRole) {
-                          transStream.write(`data: ${JSON.stringify({
-                            id: this.responseId || this.sessionId,
-                            model: this.model,
-                            object: 'chat.completion.chunk',
-                            choices: [{ index: 0, delta: { role: 'assistant' }, finish_reason: null }],
-                            created: this.created,
-                          })}\n\n`)
-                          this.sentThinkingRole = true
-                        }
-
-                        transStream.write(`data: ${JSON.stringify({
-                          id: this.responseId || this.sessionId,
-                          model: this.model,
-                          object: 'chat.completion.chunk',
-                          choices: [{ index: 0, delta: { reasoning_content: chunk }, finish_reason: null }],
-                          created: this.created,
-                        })}\n\n`)
+                    if (newThinkingContent.length > eventThinkingContent.length) {
+                      eventThinkingContent = newThinkingContent
+                      eventThinkingType = load.type
+                    }
+                    msgHasMultiLoad = true
+                  } else if (load.type === 'multimodal_chat_think') {
+                    // Only fall back to multimodal_chat_think if no deep_think exists in this event
+                    if (!msgHasMultiLoad && load.content) {
+                      const newThinkingContent = load.content.think_content || load.content.content || ''
+                      if (newThinkingContent.length > eventThinkingContent.length) {
+                        eventThinkingContent = newThinkingContent
+                        eventThinkingType = load.type
                       }
+                      msgHasMultiLoad = true
                     }
                   }
                 }
+                eventMessages.push({ msg, hasMultiLoad: msgHasMultiLoad })
+              }
+
+              // Process thinking content (once per event, only before answer phase starts)
+              // Once answer content has been sent (sentRole), stop emitting reasoning_content
+              if (!this.sentRole && eventThinkingContent.length > this.thinkingContent.length) {
+                const chunk = eventThinkingContent.substring(this.thinkingContent.length)
+                this.thinkingContent = eventThinkingContent
+                console.log('[Qwen] Thinking chunk, length:', chunk.length, 'content:', chunk.substring(0, 50), 'type:', eventThinkingType, 'prev:', this.thinkingContent.length - chunk.length, '->', this.thinkingContent.length)
+
+                if (chunk.trim()) {
+                  // Send reasoning_content delta
+                  if (!this.sentThinkingRole) {
+                    transStream.write(`data: ${JSON.stringify({
+                      id: this.responseId || this.sessionId,
+                      model: this.model,
+                      object: 'chat.completion.chunk',
+                      choices: [{ index: 0, delta: { role: 'assistant' }, finish_reason: null }],
+                      created: this.created,
+                    })}\n\n`)
+                    this.sentThinkingRole = true
+                  }
+
+                  transStream.write(`data: ${JSON.stringify({
+                    id: this.responseId || this.sessionId,
+                    model: this.model,
+                    object: 'chat.completion.chunk',
+                    choices: [{ index: 0, delta: { reasoning_content: chunk }, finish_reason: null }],
+                    created: this.created,
+                  })}\n\n`)
+                }
+              }
+
+              // Second pass: process answer content and completion status
+              for (const { msg } of eventMessages) {
                 
                 // Filter out [(deep_think)] and [(multimodal_chat_think_*)] markers from content
                 if ((msg.mime_type === 'text/plain' || msg.mime_type === 'multi_load/iframe') && msg.content) {
@@ -788,16 +818,29 @@ export class QwenStreamHandler {
               if (result.data?.messages) {
                 for (const msg of result.data.messages) {
                   // Handle thinking content from meta_data.multi_load
+                  // Strategy: prefer deep_think, fall back to multimodal_chat_think only if no deep_think
                   const metaData = msg.meta_data || {}
                   const multiLoad = metaData.multi_load || []
+                  let hasDeepThink = false
                   for (const load of multiLoad) {
-                    // Handle both deep_think and multimodal_chat_think types
-                    if ((load.type === 'deep_think' || load.type === 'multimodal_chat_think') && load.content) {
-                      // deep_think uses think_content, multimodal_chat_think uses content directly
+                    if (load.type === 'deep_think' && load.content) {
                       const thinkContent = load.content.think_content || load.content.content || ''
                       if (thinkContent && thinkContent.length > thinkingAccumulator.length) {
                         thinkingAccumulator = thinkContent
-                        console.log('[Qwen] Non-stream: Thinking content length:', thinkingAccumulator.length, 'type:', load.type)
+                        console.log('[Qwen] Non-stream: Thinking content length:', thinkingAccumulator.length, 'type: deep_think')
+                      }
+                      hasDeepThink = true
+                    }
+                  }
+                  // Fall back to multimodal_chat_think only if no deep_think found
+                  if (!hasDeepThink) {
+                    for (const load of multiLoad) {
+                      if (load.type === 'multimodal_chat_think' && load.content) {
+                        const thinkContent = load.content.think_content || load.content.content || ''
+                        if (thinkContent && thinkContent.length > thinkingAccumulator.length) {
+                          thinkingAccumulator = thinkContent
+                          console.log('[Qwen] Non-stream: Thinking content length:', thinkingAccumulator.length, 'type: multimodal_chat_think (fallback)')
+                        }
                       }
                     }
                   }

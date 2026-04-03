@@ -155,9 +155,37 @@ export class LoadBalancer {
     // Check global model mappings
     const config = storeManager.getConfig()
     const globalMapping = config.modelMappings[model]
-    if (globalMapping && (!globalMapping.preferredProviderId || globalMapping.preferredProviderId === provider.id)) {
-      console.log(`[LoadBalancer] Model "${model}" found in global model mappings for provider ${provider.name}`)
-      return true
+    if (globalMapping) {
+      // If preferredProviderId is set, only match that provider
+      if (globalMapping.preferredProviderId) {
+        if (globalMapping.preferredProviderId === provider.id) {
+          console.log(`[LoadBalancer] Model "${model}" matched preferred provider ${provider.name}`)
+          return true
+        }
+        return false
+      }
+      
+      // If no preferredProviderId, check if provider supports the actualModel
+      const actualModel = globalMapping.actualModel
+      const normalizedActualModel = actualModel.toLowerCase()
+      const actualSupported = provider.supportedModels.some(m => {
+        const normalizedSupported = m.toLowerCase()
+        if (normalizedSupported.endsWith('*')) {
+          return normalizedActualModel.startsWith(normalizedSupported.slice(0, -1))
+        }
+        return normalizedSupported === normalizedActualModel
+      })
+      
+      if (actualSupported) {
+        console.log(`[LoadBalancer] Model "${model}" (actualModel: "${actualModel}") supported by ${provider.name}`)
+        return true
+      }
+      
+      // Also check provider's model mappings for actualModel
+      if (provider.modelMappings && provider.modelMappings[actualModel]) {
+        console.log(`[LoadBalancer] Model "${model}" (actualModel: "${actualModel}") found in provider model mappings`)
+        return true
+      }
     }
     
     console.log(`[LoadBalancer] Provider ${provider.name} does not support model ${model}, supported models:`, provider.supportedModels)

@@ -4,9 +4,18 @@
  */
 
 import { ChatCompletionTool, ChatMessage } from '../types'
-import { TOOL_PROMPT_SIGNATURES, hasGeneralToolPromptSignature } from '../constants/signatures'
+import { CLIENT_SIGNATURES, GENERAL_TOOL_SIGNATURES, hasGeneralToolPromptSignature } from '../constants/signatures'
 
-export { TOOL_PROMPT_SIGNATURES }
+// Re-export for backward compatibility
+export const TOOL_PROMPT_SIGNATURES = {
+  general: GENERAL_TOOL_SIGNATURES,
+  clients: Object.fromEntries(
+    Object.entries(CLIENT_SIGNATURES).map(([key, value]) => [
+      key,
+      value.detectPatterns,
+    ])
+  ),
+}
 
 export function hasToolPromptInjected(messages: ChatMessage[]): boolean {
   for (const msg of messages) {

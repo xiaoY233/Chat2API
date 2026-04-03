@@ -1,7 +1,6 @@
 /**
  * Unified Signature Definitions
  * Central definition for all tool prompt signatures
- * Eliminates duplication across tools.ts, promptSignatures.ts, and DefaultPromptAdapter.ts
  */
 
 /**
@@ -9,12 +8,12 @@
  */
 export type ClientType =
   | 'cline'
-  | 'kilocode'
   | 'rooCode'
-  | 'vscodeCopilot'
+  | 'claudeCode'
   | 'cherryStudio'
-  | 'anthropic'
-  | 'openai'
+  | 'kilocode'
+  | 'codexCli'
+  | 'vscodeAgent'
   | 'unknown'
 
 /**
@@ -23,121 +22,154 @@ export type ClientType =
 export type ToolCallFormat = 'bracket' | 'xml' | 'anthropic' | 'json' | 'native'
 
 /**
- * Unified tool prompt signatures
+ * Client signature configuration
  */
-export const TOOL_PROMPT_SIGNATURES = {
-  /**
-   * General tool prompt signatures
-   * Used to detect if any tool prompt has been injected
-   */
-  general: [
-    '## Available Tools',
-    '## Tool Call Protocol',
-    '[function_calls]',
-    'TOOL_WRAP_HINT',
-    'You can invoke the following developer tools',
-    'Tool Call Formatting',
-  ],
+export interface ClientSignatureConfig {
+  id: ClientType
+  name: string
+  detectPatterns: string[]
+  toolCallFormat: ToolCallFormat
+  injectsPrompt: boolean
+  promptSectionMarkers?: {
+    start: string
+    end: string
+  }
+}
 
-  /**
-   * Client-specific signatures
-   * Used to detect which client has injected the prompt
-   */
-  clients: {
-    cline: [
+/**
+ * Client signature registry
+ * Each client has detection patterns and tool call format
+ */
+export const CLIENT_SIGNATURES: Record<ClientType, ClientSignatureConfig> = {
+  cline: {
+    id: 'cline',
+    name: 'Cline',
+    detectPatterns: [
       'TOOL USE',
       'When using tools, follow this format',
       'function_calls block',
       '## Tool Use',
       'When invoking a tool',
-      'tool_use_format',
-      '## Available Tools',
-      'Tool Call Protocol',
-      '[function_calls]',
-      'TOOL_WRAP_HINT',
     ],
-    kilocode: [
-      'You are Kilo',
-      '## Tools',
-      'Tool definitions:',
-      'You are an expert software engineer',
-      '## Tool Use',
-      'When using tools',
-    ],
-    rooCode: [
+    toolCallFormat: 'xml',
+    injectsPrompt: true,
+    promptSectionMarkers: {
+      start: 'TOOL USE',
+      end: "USER'S CURRENT REQUEST",
+    },
+  },
+  rooCode: {
+    id: 'rooCode',
+    name: 'RooCode',
+    detectPatterns: [
       '## Tool Use Guidelines',
       'TOOL USE',
-      'You have access to tools',
+      'You are Roo',
       '## Tool Use',
       'When invoking a tool',
-      'tool_use_format',
-      '## Capabilities',
-      '## Rules',
-      '## Objective',
     ],
-    vscodeCopilot: [
-      'You are an AI programming assistant',
-      'Copilot',
-      'tool_use_format',
-      'You have access to tools',
-      'When using tools',
-      '## Tools',
-      'VS Code',
+    toolCallFormat: 'xml',
+    injectsPrompt: true,
+  },
+  claudeCode: {
+    id: 'claudeCode',
+    name: 'Claude Code',
+    detectPatterns: [
+      'interactive CLI tool',
+      'Claude Code',
+      'You are an interactive CLI tool',
+      'claude-code',
     ],
-    cherryStudio: [
+    toolCallFormat: 'anthropic',
+    injectsPrompt: true,
+  },
+  cherryStudio: {
+    id: 'cherryStudio',
+    name: 'Cherry Studio',
+    detectPatterns: [
       'In this environment you have access to a set of tools',
-      'Tool Use Formatting',
+      '## Tool Use Available Tools',
       '<tool_use>',
       '<tool_use_result>',
-      '## Tool Use Available Tools',
-      'Tool Use Rules',
-      'Tool Use Examples',
     ],
-    anthropic: [
-      'In this environment you have access to tools',
-      '<antml:function_calls>',
-      'antml:function_calls',
-      'In this environment',
-      'you have access to a set of tools',
+    toolCallFormat: 'xml',
+    injectsPrompt: true,
+    promptSectionMarkers: {
+      start: 'In this environment you have access to a set of tools',
+      end: '# User Instructions',
+    },
+  },
+  kilocode: {
+    id: 'kilocode',
+    name: 'Kilocode',
+    detectPatterns: [
+      'You are Kilo',
+      'Kilo, the best coding agent',
+      '## Tools',
+      'Tool definitions:',
     ],
-    openai: [
-      'You are a helpful assistant',
-      'function_call',
-      'tool_calls',
-      'You have access to functions',
+    toolCallFormat: 'native',
+    injectsPrompt: true,
+  },
+  codexCli: {
+    id: 'codexCli',
+    name: 'Codex CLI',
+    detectPatterns: [
+      'Codex CLI',
+      'terminal-based coding assistant',
+      'open source project led by OpenAI',
+      'apply_patch',
     ],
-  } as Record<ClientType, string[]>,
-
-  /**
-   * Format-specific signatures
-   * Used to detect the output format of tool calls
-   */
-  formats: {
-    bracket: ['[function_calls]', '[call:', '[/function_calls]', '[/call]'],
-    xml: ['<tool_use>', '<name>', '<arguments>', '</tool_use>'],
-    anthropic: ['<antml:function_calls>', 'antml:invoke', '</antml:function_calls>'],
-    json: ['"tool_calls"', '"function"', '"arguments"'],
-  } as Record<ToolCallFormat, string[]>,
+    toolCallFormat: 'native',
+    injectsPrompt: true,
+  },
+  vscodeAgent: {
+    id: 'vscodeAgent',
+    name: 'VSCode Agent',
+    detectPatterns: [
+      'GitHub Copilot',
+      'AI programming assistant',
+      'VS Code Agent',
+    ],
+    toolCallFormat: 'native',
+    injectsPrompt: true,
+  },
+  unknown: {
+    id: 'unknown',
+    name: 'Unknown',
+    detectPatterns: [],
+    toolCallFormat: 'bracket',
+    injectsPrompt: false,
+  },
 }
 
 /**
- * Tool prompt section markers used by various clients
- * These mark the beginning and end of tool prompt sections
+ * General tool prompt signatures
+ * Used to detect if any tool prompt has been injected
  */
-export const TOOL_PROMPT_SECTION_MARKERS = {
-  cherryStudio: {
-    start: 'In this environment you have access to a set of tools',
-    end: '# User Instructions',
-  },
-  cline: {
-    start: 'TOOL USE',
-    end: "USER'S CURRENT REQUEST",
-  },
-  default: {
-    start: '## Available Tools',
-    end: 'When you receive a tool result',
-  },
-} as const
+export const GENERAL_TOOL_SIGNATURES = [
+  '## Available Tools',
+  '## Tool Call Protocol',
+  '[function_calls]',
+  'TOOL_WRAP_HINT',
+  'You can invoke the following developer tools',
+  'Tool Call Formatting',
+  'TOOL USE',
+  '## Tool Use',
+  '## Tools',
+]
+
+/**
+ * Format-specific signatures
+ * Used to detect the output format of tool calls
+ */
+export const FORMAT_SIGNATURES: Record<ToolCallFormat, string[]> = {
+  bracket: ['[function_calls]', '[call:', '[/function_calls]', '[/call]'],
+  xml: ['<tool_use>', '<name>', '<arguments>', '</tool_use>', '<tool_name>'],
+  anthropic: ['<antml:function_calls>', 'antml:invoke', '</antml:function_calls>'],
+  json: ['"tool_calls"', '"function"', '"arguments"'],
+  native: [],
+}
 
 /**
  * Detection result with confidence level
@@ -146,45 +178,50 @@ export interface DetectionResult {
   clientType: ClientType
   confidence: number
   matchedSignatures: string[]
+  toolCallFormat: ToolCallFormat
+  injectsPrompt: boolean
+}
+
+/**
+ * Tool source type
+ */
+export type ToolSource = 'openai' | 'mcp' | 'none'
+
+/**
+ * Tool detection result
+ */
+export interface ToolDetectionResult {
+  source: ToolSource
+  tools: any[] | null
+  hasMCPDefinitions: boolean
 }
 
 /**
  * Check if content contains any general tool prompt signature
  */
 export function hasGeneralToolPromptSignature(content: string): boolean {
-  return TOOL_PROMPT_SIGNATURES.general.some((sig) => content.includes(sig))
-}
-
-/**
- * Check if content contains any client-specific signature
- */
-export function hasClientSignature(content: string, clientType: ClientType): boolean {
-  if (clientType === 'unknown') return false
-  const signatures = TOOL_PROMPT_SIGNATURES.clients[clientType]
-  return signatures.some((sig) => content.includes(sig))
+  return GENERAL_TOOL_SIGNATURES.some((sig) => content.includes(sig))
 }
 
 /**
  * Detect client type from content
  */
-export function detectClientFromSignatures(content: string): {
-  clientType: ClientType
-  confidence: number
-  matchedSignatures: string[]
-} {
+export function detectClientFromContent(content: string): DetectionResult {
   const results: Array<{
     clientType: ClientType
     confidence: number
     matchedSignatures: string[]
   }> = []
 
-  for (const [clientType, signatures] of Object.entries(
-    TOOL_PROMPT_SIGNATURES.clients
-  )) {
-    const matchedSignatures = signatures.filter((sig) => content.includes(sig))
+  for (const [clientType, config] of Object.entries(CLIENT_SIGNATURES)) {
+    if (clientType === 'unknown') continue
+
+    const matchedSignatures = config.detectPatterns.filter((pattern) =>
+      content.includes(pattern)
+    )
 
     if (matchedSignatures.length > 0) {
-      const confidence = matchedSignatures.length / signatures.length
+      const confidence = matchedSignatures.length / config.detectPatterns.length
       results.push({
         clientType: clientType as ClientType,
         confidence,
@@ -194,20 +231,31 @@ export function detectClientFromSignatures(content: string): {
   }
 
   if (results.length === 0) {
-    return { clientType: 'unknown', confidence: 0, matchedSignatures: [] }
+    return {
+      clientType: 'unknown',
+      confidence: 0,
+      matchedSignatures: [],
+      toolCallFormat: 'bracket',
+      injectsPrompt: false,
+    }
   }
 
   results.sort((a, b) => b.confidence - a.confidence)
-  return results[0]
+  const bestMatch = results[0]
+  const config = CLIENT_SIGNATURES[bestMatch.clientType]
+
+  return {
+    ...bestMatch,
+    toolCallFormat: config.toolCallFormat,
+    injectsPrompt: config.injectsPrompt,
+  }
 }
 
 /**
  * Detect tool call format from content
  */
 export function detectToolCallFormat(content: string): ToolCallFormat {
-  for (const [format, signatures] of Object.entries(
-    TOOL_PROMPT_SIGNATURES.formats
-  )) {
+  for (const [format, signatures] of Object.entries(FORMAT_SIGNATURES)) {
     if (signatures.some((sig) => content.includes(sig))) {
       return format as ToolCallFormat
     }
@@ -216,10 +264,24 @@ export function detectToolCallFormat(content: string): ToolCallFormat {
 }
 
 /**
+ * Get client signature config by type
+ */
+export function getClientSignature(clientType: ClientType): ClientSignatureConfig {
+  return CLIENT_SIGNATURES[clientType] || CLIENT_SIGNATURES.unknown
+}
+
+/**
  * Get all known client types
  */
 export function getKnownClientTypes(): ClientType[] {
-  return Object.keys(TOOL_PROMPT_SIGNATURES.clients).filter(
+  return Object.keys(CLIENT_SIGNATURES).filter(
     (key) => key !== 'unknown'
   ) as ClientType[]
+}
+
+/**
+ * Check if client type is known
+ */
+export function isKnownClient(clientType: ClientType): boolean {
+  return clientType !== 'unknown'
 }

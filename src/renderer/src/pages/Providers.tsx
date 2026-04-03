@@ -545,8 +545,9 @@ export function Providers() {
           account={selectedAccount}
           provider={selectedProvider}
           onBack={handleBackToAccounts}
-          onEdit={() => {
-            setEditingAccount(selectedAccount)
+          onEdit={async () => {
+            const fullAccount = await window.electronAPI.accounts.getById(selectedAccount.id, true)
+            setEditingAccount(fullAccount || selectedAccount)
             setViewMode('accounts')
             setShowAddAccountDialog(true)
           }}

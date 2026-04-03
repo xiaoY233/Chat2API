@@ -63,6 +63,8 @@ export interface ChatMessageContent {
  */
 export interface ChatCompletionRequest {
   model: string
+  /** Original model name before mapping (used for feature detection like web search, thinking mode) */
+  originalModel?: string
   messages: ChatMessage[]
   temperature?: number
   top_p?: number

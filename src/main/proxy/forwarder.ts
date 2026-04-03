@@ -31,6 +31,11 @@ import { parseToolCalls } from './utils/toolParser/index'
 import { promptInjectionService } from './services/promptInjectionService'
 import { sessionManager } from './sessionManager'
 import { cleanClientToolPrompts } from './utils/promptSignatures'
+import {
+  createContextManagementService,
+  SummaryGenerator,
+  type ChatMessage as ContextChatMessage,
+} from './services/contextManagementService'
 
 function shouldDeleteSession(): boolean {
   return sessionManager.shouldDeleteAfterChat()
@@ -62,19 +67,10 @@ export class RequestForwarder {
       return { messages, tools }
     }
 
-    // 2. Check if we have tools to inject
-    const hasOpenAITools = tools && tools.length > 0
-    const hasMCPTools = this.hasMCPToolDefinitions(messages)
-    
-    // 3. No tools at all - return as-is
-    if (!hasOpenAITools && !hasMCPTools) {
-      return { messages, tools: undefined }
-    }
-
-    // 4. Delegate all injection logic to PromptInjectionService
-    // Pass empty array if no OpenAI tools, service will handle MCP tools
+    // 2. Delegate all injection logic to PromptInjectionService
     const result = promptInjectionService.process(messages, tools || [], model, provider?.id)
-    
+
+    // 3. Return processed messages with tools undefined (Web API doesn't support tools parameter)
     return { messages: result.messages, tools: undefined }
   }
 
@@ -265,6 +261,81 @@ CRITICAL RULES:
   }
 
   /**
+   * Create summary generator function for context management
+   * Uses the current provider and account to generate summaries
+   */
+  private createSummaryGenerator(
+    account: Account,
+    provider: Provider,
+    actualModel: string,
+    context: ProxyContext
+  ): SummaryGenerator {
+    return async (messages: ContextChatMessage[], prompt?: string): Promise<string> => {
+      try {
+        console.log('[SummaryGenerator] Generating summary for', messages.length, 'messages')
+
+        const summaryPrompt = prompt || 'Please summarize the following conversation concisely, keeping key information and context:'
+
+        const conversationText = messages
+          .map(msg => {
+            const role = msg.role.toUpperCase()
+            const content = typeof msg.content === 'string'
+              ? msg.content
+              : Array.isArray(msg.content)
+                ? msg.content
+                    .filter(part => part.type === 'text' && part.text)
+                    .map(part => part.text)
+                    .join('\n')
+                : ''
+            return `${role}: ${content}`
+          })
+          .join('\n\n')
+
+        const summaryRequest: ChatCompletionRequest = {
+          model: actualModel,
+          messages: [
+            {
+              role: 'system',
+              content: summaryPrompt,
+            },
+            {
+              role: 'user',
+              content: conversationText,
+            },
+          ],
+          stream: false,
+          temperature: 0.3,
+        }
+
+        const result = await this.doForward(
+          summaryRequest,
+          account,
+          provider,
+          actualModel,
+          context,
+          {
+            sessionId: '',
+            messages: [],
+            isNew: true,
+          }
+        )
+
+        if (result.success && result.body) {
+          const summaryContent = result.body.choices?.[0]?.message?.content || ''
+          console.log('[SummaryGenerator] Summary generated successfully, length:', summaryContent.length)
+          return summaryContent
+        }
+
+        console.warn('[SummaryGenerator] Failed to generate summary:', result.error)
+        return 'Failed to generate conversation summary.'
+      } catch (error) {
+        console.error('[SummaryGenerator] Error generating summary:', error)
+        return 'Failed to generate conversation summary due to an error.'
+      }
+    }
+  }
+
+  /**
    * Forward Chat Completions Request
    */
   async forwardChatCompletion(
@@ -291,37 +362,54 @@ CRITICAL RULES:
         await this.delay(5000)
       }
 
-      // When starting a new session, only send the last user message
-      // This prevents sending conversation history from the previous session
-      // BUT keep the system message (which contains tool definitions)
       let modifiedRequest = request
-      if (sessionContext.isNew && request.messages && request.messages.length > 0) {
-        const systemMessage = request.messages.find(m => m.role === 'system')
-        const lastUserMessage = request.messages[request.messages.length - 1]
-        const newMessages: any[] = []
-        
-        if (systemMessage) {
-          newMessages.push(systemMessage)
-        }
-        newMessages.push(lastUserMessage)
-        
-        modifiedRequest = {
-          ...request,
-          messages: newMessages
-        }
-        console.log('[Forwarder] New session detected, sending system message + last user message')
-      }
 
-      // Save user message to session (only for multi-turn mode and first attempt)
-      const isMultiTurnEnabled = sessionManager.isMultiTurnEnabled()
-      if (isMultiTurnEnabled && attempt === 0 && sessionContext.sessionId && request.messages && request.messages.length > 0) {
-        const lastUserMessage = request.messages[request.messages.length - 1]
-        if (lastUserMessage.role === 'user') {
-          sessionManager.addMessage(sessionContext.sessionId, {
-            role: lastUserMessage.role,
-            content: lastUserMessage.content || '',
+      if (config.contextManagement?.enabled && modifiedRequest.messages && modifiedRequest.messages.length > 0) {
+        try {
+          const summaryGenerator = this.createSummaryGenerator(
+            account,
+            provider,
+            actualModel,
+            context
+          )
+
+          const contextService = createContextManagementService(
+            config.contextManagement || {},
+            summaryGenerator
+          )
+
+          const originalCount = modifiedRequest.messages.length
+          const contextMessages: ContextChatMessage[] = modifiedRequest.messages.map(msg => ({
+            role: msg.role as 'user' | 'assistant' | 'system' | 'tool',
+            content: msg.content,
             timestamp: Date.now(),
-          })
+          }))
+
+          const processResult = await contextService.process(contextMessages)
+
+          if (processResult.finalCount !== originalCount) {
+            console.log(
+              `[Forwarder] Context management applied: ${originalCount} -> ${processResult.finalCount} messages`
+            )
+
+            processResult.strategyResults.forEach(result => {
+              if (result.trimmed) {
+                console.log(
+                  `[Forwarder] Strategy ${result.strategyName}: ${result.originalCount} -> ${result.processedCount} messages`
+                )
+              }
+            })
+
+            modifiedRequest = {
+              ...modifiedRequest,
+              messages: processResult.messages.map(msg => ({
+                role: msg.role,
+                content: msg.content,
+              })),
+            }
+          }
+        } catch (error) {
+          console.error('[Forwarder] Context management failed:', error)
         }
       }
 
@@ -329,18 +417,6 @@ CRITICAL RULES:
         const result = await this.doForward(modifiedRequest, account, provider, actualModel, context, sessionContext)
 
         if (result.success) {
-          if (result.providerSessionId) {
-            sessionManager.updateProviderSessionId(
-              sessionContext.sessionId,
-              result.providerSessionId
-            )
-          }
-          if (result.parentMessageId) {
-            sessionManager.updateParentMessageId(
-              sessionContext.sessionId,
-              result.parentMessageId
-            )
-          }
           return result
         }
 
@@ -500,11 +576,6 @@ CRITICAL RULES:
 
       const adapter = new DeepSeekAdapter(provider, account)
       
-      // Determine if we should reuse session
-      const isMultiTurn = sessionManager.isMultiTurnEnabled() && sessionContext && !sessionContext.isNew
-      const existingSessionId = sessionContext?.providerSessionId || ''
-      const parentMessageId = sessionContext?.parentMessageId || ''
-      
       const { response, sessionId } = await adapter.chatCompletion({
         model: request.model,
         messages: transformedRequest.messages as any,
@@ -512,9 +583,9 @@ CRITICAL RULES:
         temperature: transformedRequest.temperature,
         web_search: transformedRequest.web_search,
         reasoning_effort: transformedRequest.reasoning_effort,
-        isMultiTurn,
-        sessionId: existingSessionId,
-        parentMessageId,
+        isMultiTurn: false,
+        sessionId: '',
+        parentMessageId: '',
       })
 
       const latency = Date.now() - startTime
@@ -648,6 +719,7 @@ CRITICAL RULES:
       const adapter = new GLMAdapter(provider, account)
       const { response, conversationId } = await adapter.chatCompletion({
         model: actualModel,
+        originalModel: request.model,
         messages: transformedRequest.messages,
         stream: transformedRequest.stream,
         temperature: transformedRequest.temperature,
@@ -784,6 +856,7 @@ CRITICAL RULES:
       const adapter = new KimiAdapter(provider, account)
       const { response, conversationId } = await adapter.chatCompletion({
         model: actualModel,
+        originalModel: request.model,
         messages: transformed.messages,
         stream: request.stream,
         temperature: request.temperature,
@@ -929,6 +1002,7 @@ CRITICAL RULES:
       const adapter = new QwenAdapter(provider, account)
       const { response, sessionId, reqId } = await adapter.chatCompletion({
         model: actualModel,
+        originalModel: request.model,
         messages: transformedRequest.messages as any,
         stream: request.stream,
         temperature: request.temperature,
@@ -1049,6 +1123,7 @@ CRITICAL RULES:
       const adapter = new QwenAiAdapter(provider, account)
       const { response, chatId, parentId } = await adapter.chatCompletion({
         model: actualModel,
+        originalModel: request.model,
         messages: transformed.messages as any,
         stream: request.stream,
         temperature: request.temperature,
@@ -1171,6 +1246,7 @@ CRITICAL RULES:
       const adapter = new ZaiAdapter(provider, account)
       const { response, chatId, requestId } = await adapter.chatCompletion({
         model: actualModel,
+        originalModel: request.model,
         messages: transformed.messages as any,
         stream: request.stream,
         temperature: request.temperature,
@@ -1294,6 +1370,7 @@ CRITICAL RULES:
       const adapter = new MiniMaxAdapter(provider, account)
       const { response, stream, chatId } = await adapter.chatCompletion({
         model: actualModel,
+        originalModel: request.model,
         messages: transformed.messages as any,
         stream: request.stream,
         temperature: request.temperature,
@@ -1414,15 +1491,13 @@ CRITICAL RULES:
       
       const adapter = new PerplexityAdapter(provider, account)
       
-      const isMultiTurn = sessionManager.isMultiTurnEnabled() && sessionContext && !sessionContext.isNew
-      
       const { stream, sessionId } = await adapter.chatCompletion({
         model: actualModel,
         messages: transformed.messages as any,
         stream: request.stream,
         temperature: request.temperature,
-        isMultiTurn,
-        sessionId: sessionContext?.providerSessionId,
+        isMultiTurn: false,
+        sessionId: undefined,
       })
 
       const latency = Date.now() - startTime
