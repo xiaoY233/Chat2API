@@ -25,6 +25,11 @@ import {
   PersistentStatistics,
   DailyStatistics,
   DEFAULT_STATISTICS,
+  EffectiveModel,
+  ProviderModelOverrides,
+  DEFAULT_USER_MODEL_OVERRIDES,
+  UserModelOverrides,
+  CustomModel,
 } from './types'
 import { BUILTIN_PROMPTS } from '../data/builtin-prompts'
 import { IpcChannels } from '../ipc/channels'
@@ -179,6 +184,7 @@ class StoreManager {
       systemPrompts: [],
       sessions: [],
       statistics: DEFAULT_STATISTICS,
+      userModelOverrides: DEFAULT_USER_MODEL_OVERRIDES,
     }
   }
 
@@ -190,7 +196,6 @@ class StoreManager {
     const providers = this.store?.get('providers') || []
     const builtinIds = BUILTIN_PROVIDERS.map(p => p.id)
     
-    // Filter out built-in providers not in current built-in list, keep only custom providers
     const validProviders = providers.filter((p: Provider) => {
       if (p.type === 'builtin') {
         return builtinIds.includes(p.id)
@@ -198,18 +203,22 @@ class StoreManager {
       return true
     })
     
-    // Update built-in provider configuration fields (force update to keep synchronized)
-    // Note: supportedModels and modelMappings are NOT updated to preserve dynamic model updates
+    const userModelOverrides = this.store?.get('userModelOverrides') || {}
+    
     const updatedProviders = validProviders.map((p: Provider) => {
       if (p.type === 'builtin') {
         const builtinConfig = BUILTIN_PROVIDERS.find(bp => bp.id === p.id)
         if (builtinConfig) {
-        // Force update built-in provider key configuration, but preserve dynamic model list
+          const hasUserOverrides = userModelOverrides[p.id] && 
+            ((userModelOverrides[p.id].addedModels && userModelOverrides[p.id].addedModels.length > 0) ||
+             (userModelOverrides[p.id].excludedModels && userModelOverrides[p.id].excludedModels.length > 0))
+          
           return { 
             ...p, 
             apiEndpoint: builtinConfig.apiEndpoint,
             chatPath: builtinConfig.chatPath,
-            // supportedModels and modelMappings are NOT overwritten to preserve dynamic updates
+            supportedModels: hasUserOverrides ? p.supportedModels : builtinConfig.supportedModels,
+            modelMappings: hasUserOverrides ? p.modelMappings : builtinConfig.modelMappings,
             headers: builtinConfig.headers,
             description: builtinConfig.description,
           }
@@ -218,7 +227,6 @@ class StoreManager {
       return p
     })
     
-    // Always update storage to ensure built-in provider configuration is up-to-date
     this.store?.set('providers', updatedProviders)
   }
 
@@ -412,6 +420,32 @@ class StoreManager {
     this.store!.set('accounts', filteredAccounts)
     
     return true
+  }
+
+  // ==================== Model Overrides Operations ====================
+
+  /**
+   * Get Model Overrides for a Provider
+   * Returns user customizations to built-in provider models
+   */
+  getModelOverrides(providerId: string): ProviderModelOverrides | undefined {
+    this.ensureInitialized()
+    const userModelOverrides = this.store!.get('userModelOverrides') || DEFAULT_USER_MODEL_OVERRIDES
+    return userModelOverrides[providerId]
+  }
+
+  /**
+   * Check if Provider has Model Overrides
+   * Returns true if provider has user-added models or excluded models
+   */
+  hasModelOverrides(providerId: string): boolean {
+    const overrides = this.getModelOverrides(providerId)
+    if (!overrides) return false
+    
+    return (
+      (overrides.addedModels && overrides.addedModels.length > 0) ||
+      (overrides.excludedModels && overrides.excludedModels.length > 0)
+    )
   }
 
   // ==================== Account Operations ====================
@@ -1466,6 +1500,161 @@ class StoreManager {
     this.store!.set('sessions', [])
   }
 
+  // ==================== Model Management Operations ====================
+
+  /**
+   * Get User Model Overrides
+   */
+  private getUserModelOverrides(): UserModelOverrides {
+    this.ensureInitialized()
+    return this.store!.get('userModelOverrides') || DEFAULT_USER_MODEL_OVERRIDES
+  }
+
+  /**
+   * Set User Model Overrides
+   */
+  private setUserModelOverrides(overrides: UserModelOverrides): void {
+    this.ensureInitialized()
+    this.store!.set('userModelOverrides', overrides)
+  }
+
+  /**
+   * Get Provider Model Overrides
+   */
+  private getProviderModelOverrides(providerId: string): ProviderModelOverrides {
+    const overrides = this.getUserModelOverrides()
+    return overrides[providerId] || {
+      addedModels: [],
+      excludedModels: [],
+    }
+  }
+
+  /**
+   * Get Effective Models for a Provider
+   * Merges default models with user overrides
+   */
+  getEffectiveModels(providerId: string): EffectiveModel[] {
+    this.ensureInitialized()
+    
+    const provider = this.getProviderById(providerId)
+    if (!provider) {
+      return []
+    }
+
+    const defaultModels = provider.supportedModels || []
+    const modelMappings = provider.modelMappings || {}
+    const overrides = this.getProviderModelOverrides(providerId)
+
+    const effectiveModels: EffectiveModel[] = []
+
+    defaultModels.forEach(displayName => {
+      if (!overrides.excludedModels.includes(displayName)) {
+        const actualModelId = modelMappings[displayName] || displayName
+        effectiveModels.push({
+          displayName,
+          actualModelId,
+          isCustom: false,
+        })
+      }
+    })
+
+    overrides.addedModels.forEach(customModel => {
+      effectiveModels.push({
+        displayName: customModel.displayName,
+        actualModelId: customModel.actualModelId,
+        isCustom: true,
+      })
+    })
+
+    return effectiveModels
+  }
+
+  /**
+   * Add Custom Model to Provider
+   */
+  addCustomModel(providerId: string, model: CustomModel): EffectiveModel[] {
+    this.ensureInitialized()
+    
+    const overrides = this.getUserModelOverrides()
+    
+    if (!overrides[providerId]) {
+      overrides[providerId] = {
+        addedModels: [],
+        excludedModels: [],
+      }
+    }
+
+    const existingModel = overrides[providerId].addedModels.find(
+      m => m.displayName === model.displayName || m.actualModelId === model.actualModelId
+    )
+    
+    if (existingModel) {
+      throw new Error(`Model with display name "${model.displayName}" or actual ID "${model.actualModelId}" already exists`)
+    }
+
+    overrides[providerId].addedModels.push(model)
+    this.setUserModelOverrides(overrides)
+
+    return this.getEffectiveModels(providerId)
+  }
+
+  /**
+   * Remove Model from Provider
+   * For default models: add to excludedModels
+   * For custom models: remove from addedModels
+   */
+  removeModel(providerId: string, modelName: string): EffectiveModel[] {
+    this.ensureInitialized()
+    
+    const provider = this.getProviderById(providerId)
+    if (!provider) {
+      throw new Error('Provider not found')
+    }
+
+    const overrides = this.getUserModelOverrides()
+    
+    if (!overrides[providerId]) {
+      overrides[providerId] = {
+        addedModels: [],
+        excludedModels: [],
+      }
+    }
+
+    const defaultModels = provider.supportedModels || []
+    const isDefaultModel = defaultModels.includes(modelName)
+
+    if (isDefaultModel) {
+      if (!overrides[providerId].excludedModels.includes(modelName)) {
+        overrides[providerId].excludedModels.push(modelName)
+      }
+    } else {
+      overrides[providerId].addedModels = overrides[providerId].addedModels.filter(
+        m => m.displayName !== modelName
+      )
+    }
+
+    this.setUserModelOverrides(overrides)
+
+    return this.getEffectiveModels(providerId)
+  }
+
+  /**
+   * Reset Provider Models to Default
+   * Removes all user overrides for the provider
+   */
+  resetModels(providerId: string): EffectiveModel[] {
+    this.ensureInitialized()
+    
+    const overrides = this.getUserModelOverrides()
+    
+    if (overrides[providerId]) {
+      delete overrides[providerId]
+      this.setUserModelOverrides(overrides)
+    }
+
+    return this.getEffectiveModels(providerId)
+  }
+
   // ==================== Utility Methods ====================
 
   /**
@@ -1507,6 +1696,7 @@ class StoreManager {
     const systemPrompts = this.store!.get('systemPrompts') || []
     const sessions = this.store!.get('sessions') || []
     const statistics = this.store!.get('statistics') || DEFAULT_STATISTICS
+    const userModelOverrides = this.store!.get('userModelOverrides') || DEFAULT_USER_MODEL_OVERRIDES
     
     return {
       providers,
@@ -1517,6 +1707,7 @@ class StoreManager {
       systemPrompts,
       sessions,
       statistics,
+      userModelOverrides,
     }
   }
 

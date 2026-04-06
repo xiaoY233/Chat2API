@@ -20,6 +20,7 @@ import type {
   SystemPrompt,
   PromptType,
   ToolPromptConfig,
+  EffectiveModel,
 } from '../../../shared/types'
 
 export type { 
@@ -44,6 +45,7 @@ export type {
   SystemPrompt,
   PromptType,
   ToolPromptConfig,
+  EffectiveModel,
 }
 
 export interface CustomProviderFormData {
@@ -97,6 +99,27 @@ interface ProvidersAPI {
   duplicate: (id: string) => Promise<Provider>
   export: (id: string) => Promise<string>
   import: (jsonData: string) => Promise<Provider>
+  updateModels: (providerId: string) => Promise<{
+    success: boolean
+    modelsCount?: number
+    error?: string
+  }>
+  getEffectiveModels: (providerId: string) => Promise<EffectiveModel[]>
+  addCustomModel: (providerId: string, model: { displayName: string; actualModelId: string }) => Promise<{
+    success: boolean
+    models: EffectiveModel[]
+    error?: string
+  }>
+  removeModel: (providerId: string, modelName: string) => Promise<{
+    success: boolean
+    models: EffectiveModel[]
+    error?: string
+  }>
+  resetModels: (providerId: string) => Promise<{
+    success: boolean
+    models: EffectiveModel[]
+    error?: string
+  }>
 }
 
 interface AccountsAPI {

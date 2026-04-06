@@ -169,13 +169,14 @@ export class ModelMapper {
     }
 
     return providers.filter(provider => {
-      if (!provider.supportedModels || provider.supportedModels.length === 0) {
+      const effectiveModels = storeManager.getEffectiveModels(provider.id)
+      if (effectiveModels.length === 0) {
         return true
       }
 
       const normalizedModel = model.toLowerCase()
-      return provider.supportedModels.some(m => {
-        const normalizedSupported = m.toLowerCase()
+      return effectiveModels.some(m => {
+        const normalizedSupported = m.displayName.toLowerCase()
         if (normalizedSupported.endsWith('*')) {
           return normalizedModel.startsWith(normalizedSupported.slice(0, -1))
         }

@@ -129,13 +129,14 @@ export class LoadBalancer {
    * Check if provider supports model
    */
   private providerSupportsModel(provider: Provider, model: string): boolean {
-    if (!provider.supportedModels || provider.supportedModels.length === 0) {
+    const effectiveModels = storeManager.getEffectiveModels(provider.id)
+    if (effectiveModels.length === 0) {
       return true
     }
 
     const normalizedModel = model.toLowerCase()
-    const supported = provider.supportedModels.some(m => {
-      const normalizedSupported = m.toLowerCase()
+    const supported = effectiveModels.some(m => {
+      const normalizedSupported = m.displayName.toLowerCase()
       if (normalizedSupported.endsWith('*')) {
         return normalizedModel.startsWith(normalizedSupported.slice(0, -1))
       }
@@ -146,17 +147,9 @@ export class LoadBalancer {
       return true
     }
 
-    // Check if model is in provider's model mappings
-    if (provider.modelMappings && provider.modelMappings[model]) {
-      console.log(`[LoadBalancer] Model "${model}" found in provider model mappings`)
-      return true
-    }
-
-    // Check global model mappings
     const config = storeManager.getConfig()
     const globalMapping = config.modelMappings[model]
     if (globalMapping) {
-      // If preferredProviderId is set, only match that provider
       if (globalMapping.preferredProviderId) {
         if (globalMapping.preferredProviderId === provider.id) {
           console.log(`[LoadBalancer] Model "${model}" matched preferred provider ${provider.name}`)
@@ -165,11 +158,10 @@ export class LoadBalancer {
         return false
       }
       
-      // If no preferredProviderId, check if provider supports the actualModel
       const actualModel = globalMapping.actualModel
       const normalizedActualModel = actualModel.toLowerCase()
-      const actualSupported = provider.supportedModels.some(m => {
-        const normalizedSupported = m.toLowerCase()
+      const actualSupported = effectiveModels.some(m => {
+        const normalizedSupported = m.displayName.toLowerCase()
         if (normalizedSupported.endsWith('*')) {
           return normalizedActualModel.startsWith(normalizedSupported.slice(0, -1))
         }
@@ -180,15 +172,9 @@ export class LoadBalancer {
         console.log(`[LoadBalancer] Model "${model}" (actualModel: "${actualModel}") supported by ${provider.name}`)
         return true
       }
-      
-      // Also check provider's model mappings for actualModel
-      if (provider.modelMappings && provider.modelMappings[actualModel]) {
-        console.log(`[LoadBalancer] Model "${model}" (actualModel: "${actualModel}") found in provider model mappings`)
-        return true
-      }
     }
     
-    console.log(`[LoadBalancer] Provider ${provider.name} does not support model ${model}, supported models:`, provider.supportedModels)
+    console.log(`[LoadBalancer] Provider ${provider.name} does not support model ${model}`)
     return false
   }
 
@@ -212,16 +198,17 @@ export class LoadBalancer {
    */
   private mapModel(model: string, provider: Provider): string {
     console.log(`[LoadBalancer] mapModel called with model="${model}", provider="${provider.name}"`)
-    console.log(`[LoadBalancer] provider.modelMappings:`, provider.modelMappings)
     
-    // First check provider-level model mapping
-    if (provider.modelMappings && provider.modelMappings[model]) {
-      const mapped = provider.modelMappings[model]
-      console.log(`[LoadBalancer] Model mapped from "${model}" to "${mapped}" via provider mapping`)
-      return mapped
+    const effectiveModels = storeManager.getEffectiveModels(provider.id)
+    const effectiveModel = effectiveModels.find(m => 
+      m.displayName.toLowerCase() === model.toLowerCase()
+    )
+    
+    if (effectiveModel) {
+      console.log(`[LoadBalancer] Model mapped from "${model}" to "${effectiveModel.actualModelId}" via effective models`)
+      return effectiveModel.actualModelId
     }
 
-    // Then check global config model mapping
     const config = storeManager.getConfig()
     const mapping = config.modelMappings[model]
 
@@ -229,11 +216,12 @@ export class LoadBalancer {
       const actualModel = mapping.actualModel
       console.log(`[LoadBalancer] Model mapped from "${model}" to "${actualModel}" via global mapping`)
       
-      // After global mapping, check if provider has a mapping for the actual model
-      if (provider.modelMappings && provider.modelMappings[actualModel]) {
-        const finalModel = provider.modelMappings[actualModel]
-        console.log(`[LoadBalancer] Model further mapped from "${actualModel}" to "${finalModel}" via provider mapping`)
-        return finalModel
+      const actualEffectiveModel = effectiveModels.find(m => 
+        m.displayName.toLowerCase() === actualModel.toLowerCase()
+      )
+      if (actualEffectiveModel) {
+        console.log(`[LoadBalancer] Model further mapped from "${actualModel}" to "${actualEffectiveModel.actualModelId}" via effective models`)
+        return actualEffectiveModel.actualModelId
       }
       
       return actualModel
@@ -340,8 +328,9 @@ export class LoadBalancer {
       const accounts = storeManager.getAccountsByProviderId(provider.id)
         .filter(account => this.isAccountAvailable(account))
 
-      if (accounts.length > 0 && provider.supportedModels) {
-        provider.supportedModels.forEach(m => models.add(m))
+      if (accounts.length > 0) {
+        const effectiveModels = storeManager.getEffectiveModels(provider.id)
+        effectiveModels.forEach(m => models.add(m.displayName))
       }
     }
 

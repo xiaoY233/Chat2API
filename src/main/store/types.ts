@@ -576,6 +576,47 @@ export interface ValidationResult {
 }
 
 /**
+ * Custom Model Configuration
+ * User-defined model with display name and actual API model ID
+ */
+export interface CustomModel {
+  /** Model display name (used in AI client) */
+  displayName: string
+  /** Actual model ID (used in API call) */
+  actualModelId: string
+}
+
+/**
+ * User Model Overrides for a Provider
+ * Stores user customizations to built-in provider models
+ */
+export interface ProviderModelOverrides {
+  /** User added custom models */
+  addedModels: CustomModel[]
+  /** Excluded default model display names */
+  excludedModels: string[]
+}
+
+/**
+ * User Model Overrides
+ * Maps provider IDs to their model customizations
+ */
+export type UserModelOverrides = Record<string, ProviderModelOverrides>
+
+/**
+ * Effective Model Information
+ * Combined model info after merging defaults with user overrides
+ */
+export interface EffectiveModel {
+  /** Model display name (used in AI client) */
+  displayName: string
+  /** Actual model ID (used in API call) */
+  actualModelId: string
+  /** Whether this is a user-added custom model */
+  isCustom: boolean
+}
+
+/**
  * Storage Data Structure Interface
  */
 export interface StoreSchema {
@@ -595,6 +636,8 @@ export interface StoreSchema {
   sessions: SessionRecord[]
   /** Persistent statistics */
   statistics: PersistentStatistics
+  /** User model overrides for built-in providers */
+  userModelOverrides: UserModelOverrides
 }
 
 /**
@@ -621,6 +664,11 @@ export const DEFAULT_STATISTICS: PersistentStatistics = {
   accountUsage: {},
   dailyStats: {},
 }
+
+/**
+ * Default User Model Overrides
+ */
+export const DEFAULT_USER_MODEL_OVERRIDES: UserModelOverrides = {}
 
 /**
  * Default Tool Prompt Configuration
@@ -680,397 +728,6 @@ export const DEFAULT_CONFIG: AppConfig = {
 
 /**
  * Built-in Provider Configuration
+ * Re-exported from providers/builtin/index.ts to avoid duplication
  */
-export const BUILTIN_PROVIDERS: BuiltinProviderConfig[] = [
-  {
-    id: 'deepseek',
-    name: 'DeepSeek',
-    type: 'builtin',
-    authType: 'userToken',
-    apiEndpoint: 'https://chat.deepseek.com/api',
-    chatPath: '/v0/chat/completion',
-    headers: {
-      'Content-Type': 'application/json',
-      'Accept': '*/*',
-      'Origin': 'https://chat.deepseek.com',
-      'Referer': 'https://chat.deepseek.com/',
-    },
-    enabled: true,
-    description: 'DeepSeek intelligent dialogue assistant, supports deep thinking and web search',
-    supportedModels: [
-      'DeepSeek-V3.2',
-      'DeepSeek-Search',
-      'DeepSeek-R1',
-      'DeepSeek-R1-Search',
-    ],
-    modelMappings: {
-      'DeepSeek-V3.2': 'deepseek-chat',
-      'DeepSeek-Search': 'deepseek-chat',
-      'DeepSeek-R1': 'deepseek-chat',
-      'DeepSeek-R1-Search': 'deepseek-chat',
-    },
-    credentialFields: [
-      {
-        name: 'token',
-        label: 'User Token',
-        type: 'password',
-        required: true,
-        placeholder: 'Enter DeepSeek user token',
-        helpText: 'Authentication token obtained from DeepSeek web version',
-      },
-    ],
-  },
-  {
-    id: 'glm',
-    name: 'GLM (Zhipu Qingyan)',
-    type: 'builtin',
-    authType: 'refresh_token',
-    apiEndpoint: 'https://chatglm.cn/api',
-    chatPath: '/chatglm/backend-api/assistant/stream',
-    headers: {
-      'Content-Type': 'application/json',
-      'Accept': 'text/event-stream',
-      'Origin': 'https://chatglm.cn',
-      'Referer': 'https://chatglm.cn/',
-    },
-    enabled: true,
-    description: 'Zhipu Qingyan AI assistant, supports GLM-5 flagship model, deep thinking and web search',
-    supportedModels: ['GLM-5'],
-    modelMappings: {
-      'GLM-5': 'glm-5',
-    },
-    credentialFields: [
-      {
-        name: 'refresh_token',
-        label: 'Refresh Token',
-        type: 'password',
-        required: true,
-        placeholder: 'Enter chatglm_refresh_token',
-        helpText: 'Get chatglm_refresh_token from Zhipu Qingyan web version Cookie',
-      },
-    ],
-  },
-  {
-    id: 'kimi',
-    name: 'Kimi (Moonshot)',
-    type: 'builtin',
-    authType: 'jwt',
-    apiEndpoint: 'https://www.kimi.com',
-    chatPath: '/apiv2/kimi.gateway.chat.v1.ChatService/Chat',
-    headers: {
-      'Content-Type': 'application/connect+json',
-      'Accept': '*/*',
-      'Origin': 'https://www.kimi.com',
-      'Referer': 'https://www.kimi.com/',
-    },
-    enabled: true,
-    description: 'Kimi K2.5 AI assistant, supports thinking mode and web search',
-    supportedModels: ['Kimi-K2.5'],
-    credentialFields: [
-      {
-        name: 'token',
-        label: 'Access Token',
-        type: 'password',
-        required: true,
-        placeholder: 'Enter Kimi access token or refresh token',
-        helpText: 'Supports JWT Token or refresh_token',
-      },
-    ],
-  },
-  {
-    id: 'minimax',
-    name: 'MiniMax',
-    type: 'builtin',
-    authType: 'jwt',
-    apiEndpoint: 'https://agent.minimaxi.com',
-    chatPath: '/matrix/api/v1/chat/send_msg',
-    headers: {
-      'Content-Type': 'application/json',
-      'Accept': 'application/json',
-      'Origin': 'https://agent.minimaxi.com',
-      'Referer': 'https://agent.minimaxi.com/',
-    },
-    enabled: true,
-    description: 'MiniMax Agent - AI assistant with MCP multi-agent collaboration',
-    supportedModels: ['MiniMax-M2.5'],
-    credentialFields: [
-      {
-        name: 'token',
-        label: 'JWT Token',
-        type: 'password',
-        required: true,
-        placeholder: 'Enter MiniMax JWT Token or realUserID+JWTtoken',
-        helpText: 'Format: "realUserID+JWTtoken" or just JWT token',
-      },
-      {
-        name: 'realUserID',
-        label: 'Real User ID (Optional)',
-        type: 'text',
-        required: false,
-        placeholder: 'Enter Real User ID (optional)',
-        helpText: 'If provided, use this instead of JWT user ID',
-      },
-    ],
-  },
-  {
-    id: 'mimo',
-    name: 'Mimo',
-    type: 'builtin',
-    authType: 'cookie',
-    apiEndpoint: 'https://aistudio.xiaomimimo.com',
-    chatPath: '/open-apis/bot/chat',
-    headers: {
-      'Content-Type': 'application/json',
-      'Accept': '*/*',
-      'Origin': 'https://aistudio.xiaomimimo.com',
-      'Referer': 'https://aistudio.xiaomimimo.com/',
-      'X-Timezone': 'Asia/Shanghai',
-    },
-    enabled: true,
-    description: 'XiaomiMIMO - Xiaomi General Intelligence Foundation Model',
-    supportedModels: [
-      'mimo-v2-pro',
-      'mimo-v2-flash-studio',
-      'mimo-v2-omni',
-    ],
-    modelMappings: {
-      'mimo-v2-pro': 'mimo-v2-pro',
-      'mimo-v2-flash-studio': 'mimo-v2-flash-studio',
-      'mimo-v2-omni': 'mimo-v2-omni',
-    },
-    credentialFields: [
-      {
-        name: 'service_token',
-        label: 'Service Token',
-        type: 'password',
-        required: true,
-        placeholder: 'Enter serviceToken from Cookie',
-        helpText: 'Found in browser DevTools -> Application -> Cookies -> serviceToken',
-      },
-      {
-        name: 'user_id',
-        label: 'User ID',
-        type: 'text',
-        required: true,
-        placeholder: 'Enter userId from Cookie',
-        helpText: 'Found in browser DevTools -> Application -> Cookies -> userId',
-      },
-      {
-        name: 'ph_token',
-        label: 'PH Token',
-        type: 'password',
-        required: true,
-        placeholder: 'Enter xiaomichatbot_ph from Cookie',
-        helpText: 'Found in browser DevTools -> Application -> Cookies -> xiaomichatbot_ph',
-      },
-    ],
-  },
-  {
-    id: 'qwen',
-    name: 'Qwen',
-    type: 'builtin',
-    authType: 'tongyi_sso_ticket',
-    apiEndpoint: 'https://qianwen.biz.aliyun.com',
-    chatPath: '/dialog/conversation',
-    headers: {
-      'Content-Type': 'application/json',
-      'Accept': 'application/json, text/event-stream, text/plain, */*',
-      'Origin': 'https://tongyi.aliyun.com',
-      'Referer': 'https://tongyi.aliyun.com/',
-    },
-    enabled: true,
-    description: 'Qwen AI assistant by Alibaba Cloud',
-    supportedModels: [
-      'Qwen3.5-Plus',
-      'Qwen3-Max',
-      'Qwen3-Flash',
-      'Qwen3-Coder',
-      'Qwen3-Plus',
-      'qwen3-235b-a22b',
-      'qwen3-coder-plus',
-      'qwen3-30b-a3b',
-      'qwen-max-latest',
-    ],
-    modelMappings: {},
-    credentialFields: [
-      {
-        name: 'ticket',
-        label: 'SSO Ticket',
-        type: 'password',
-        required: true,
-        placeholder: 'Enter tongyi_sso_ticket',
-        helpText: 'SSO ticket obtained from www.qianwen.com, found in browser DevTools Application -> Cookies as tongyi_sso_ticket',
-      },
-    ],
-  },
-  {
-    id: 'qwen-ai',
-    name: 'Qwen AI (International)',
-    type: 'builtin',
-    authType: 'jwt',
-    apiEndpoint: 'https://chat.qwen.ai',
-    chatPath: '/api/v2/chat/completions',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-      source: 'web',
-    },
-    enabled: true,
-    description: 'Qwen AI international version (chat.qwen.ai)',
-    modelsApiEndpoint: 'https://chat.qwen.ai/api/models',
-    modelsApiHeaders: {
-      Accept: 'application/json, text/plain, */*',
-      Referer: 'https://chat.qwen.ai/',
-      source: 'web',
-      Version: '0.2.35',
-    },
-    supportedModels: [
-      'Qwen3.6-Plus',
-      'Qwen3.5-Plus',
-      'Qwen3.5-Omni-Plus',
-      'Qwen3.5-Flash',
-      'Qwen3.5-Max-Preview',
-      'Qwen3.6-Plus-Preview',
-      'Qwen3.5-397B-A17B',
-      'Qwen3.5-122B-A10B',
-      'Qwen3.5-Omni-Flash',
-      'Qwen3.5-27B',
-      'Qwen3.5-35B-A3B',
-      'Qwen3-Max',
-      'Qwen3-235B-A22B-2507',
-      'Qwen3-Coder',
-      'Qwen3-VL-235B-A22B',
-      'Qwen3-Omni-Flash',
-      'Qwen2.5-Max',
-    ],
-    modelMappings: {
-      'Qwen3.6-Plus': 'qwen3.6-plus',
-      'Qwen3.5-Plus': 'qwen3.5-plus',
-      'Qwen3.5-Omni-Plus': 'qwen3.5-omni-plus',
-      'Qwen3.5-Flash': 'qwen3.5-flash',
-      'Qwen3.5-Max-Preview': 'qwen3.5-max-2026-03-08',
-      'Qwen3.6-Plus-Preview': 'qwen3.6-plus-preview',
-      'Qwen3.5-397B-A17B': 'qwen3.5-397b-a17b',
-      'Qwen3.5-122B-A10B': 'qwen3.5-122b-a10b',
-      'Qwen3.5-Omni-Flash': 'qwen3.5-omni-flash',
-      'Qwen3.5-27B': 'qwen3.5-27b',
-      'Qwen3.5-35B-A3B': 'qwen3.5-35b-a3b',
-      'Qwen3-Max': 'qwen3-max-2026-01-23',
-      'Qwen3-235B-A22B-2507': 'qwen-plus-2025-07-28',
-      'Qwen3-Coder': 'qwen3-coder-plus',
-      'Qwen3-VL-235B-A22B': 'qwen3-vl-plus',
-      'Qwen3-Omni-Flash': 'qwen3-omni-flash-2025-12-01',
-      'Qwen2.5-Max': 'qwen-max-latest',
-    },
-    credentialFields: [
-      {
-        name: 'token',
-        label: 'Auth Token',
-        type: 'password',
-        required: true,
-        placeholder: 'Enter JWT token from chat.qwen.ai',
-        helpText: 'JWT token obtained from chat.qwen.ai Local Storage (key: "token")',
-      },
-      {
-        name: 'cookies',
-        label: 'Cookies (Optional)',
-        type: 'textarea',
-        required: false,
-        placeholder: 'Optional cookies for enhanced compatibility',
-        helpText: 'Full cookie string from browser DevTools (optional but recommended)',
-      },
-    ],
-  },
-  {
-    id: 'zai',
-    name: 'Z.ai',
-    type: 'builtin',
-    authType: 'token',
-    apiEndpoint: 'https://chat.z.ai/api',
-    chatPath: '/v2/chat/completions',
-    headers: {
-      'Content-Type': 'application/json',
-      'Accept': '*/*',
-      'Origin': 'https://chat.z.ai',
-      'Referer': 'https://chat.z.ai/',
-    },
-    enabled: true,
-    description: 'Z.ai - Free AI Chatbot powered by GLM-5 and GLM-4.7',
-    supportedModels: [
-      'GLM-5-Turbo',
-      'glm-5',
-      'glm-4.7',
-      'glm-4.6v',
-      'glm-4.6',
-      'glm-4.5v',
-      'glm-4.5-air',
-    ],
-    modelMappings: {
-      'GLM-5-Turbo': 'GLM-5-Turbo',
-      'glm-5': 'glm-5',
-      'glm-4.7': 'glm-4.7',
-      'glm-4.6v': 'glm-4.6v',
-      'glm-4.6': 'glm-4.6v',
-      'glm-4.5v': 'glm-4.5v',
-      'glm-4.5-air': 'glm-4.5-air',
-    },
-    credentialFields: [
-      {
-        name: 'token',
-        label: 'Access Token',
-        type: 'password',
-        required: true,
-        placeholder: 'Enter Z.ai JWT Token',
-        helpText: 'Get token from Z.ai web version, found in browser DevTools Application -> Cookie, starts with "eyJ..."',
-      },
-    ],
-    tokenCheckEndpoint: '/api/v1/users/user/settings',
-    tokenCheckMethod: 'GET',
-  },
-  {
-    id: 'perplexity',
-    name: 'Perplexity',
-    type: 'builtin',
-    authType: 'cookie',
-    apiEndpoint: 'https://www.perplexity.ai',
-    chatPath: '/rest/sse/perplexity_ask',
-    headers: {
-      'Content-Type': 'application/json',
-      'Accept': '*/*',
-      'Origin': 'https://www.perplexity.ai',
-      'Referer': 'https://www.perplexity.ai/',
-    },
-    enabled: true,
-    description: 'Perplexity AI search assistant with multi-model support and web search enhancement',
-    supportedModels: [
-      'Auto',
-      'Turbo',
-      'PPLX-Pro',
-      'GPT-5',
-      'Gemini-2.5-Pro',
-      'Claude-Sonnet-4',
-      'Claude-Opus-4',
-      'Nemotron',
-    ],
-    modelMappings: {
-      'Auto': 'auto',
-      'Turbo': 'turbo',
-      'PPLX-Pro': 'pplx_pro',
-      'GPT-5': 'gpt5',
-      'Gemini-2.5-Pro': 'gemini25pro',
-      'Claude-Sonnet-4': 'claude4sonnet',
-      'Claude-Opus-4': 'claude4opus',
-      'Nemotron': 'nemotron',
-    },
-    credentialFields: [
-      {
-        name: 'sessionToken',
-        label: 'Session Token',
-        type: 'password',
-        required: true,
-        placeholder: 'Enter Perplexity session token',
-        helpText: 'Automatically obtained from browser or manually enter __Secure-next-auth.session-token',
-      },
-    ],
-  },
-]
+export { builtinProviders as BUILTIN_PROVIDERS } from '../providers/builtin'

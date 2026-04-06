@@ -14,6 +14,7 @@ import type {
   AppConfig,
   SystemPrompt,
   PromptType,
+  EffectiveModel,
 } from '../shared/types'
 
 const proxyAPI = {
@@ -101,6 +102,30 @@ const providersAPI = {
     error?: string
   }> => 
     ipcRenderer.invoke(IpcChannels.PROVIDERS_UPDATE_MODELS, providerId),
+  
+  getEffectiveModels: (providerId: string): Promise<EffectiveModel[]> => 
+    ipcRenderer.invoke(IpcChannels.PROVIDERS_GET_EFFECTIVE_MODELS, providerId),
+  
+  addCustomModel: (providerId: string, model: { displayName: string; actualModelId: string }): Promise<{
+    success: boolean
+    models: EffectiveModel[]
+    error?: string
+  }> => 
+    ipcRenderer.invoke(IpcChannels.PROVIDERS_ADD_CUSTOM_MODEL, providerId, model),
+  
+  removeModel: (providerId: string, modelName: string): Promise<{
+    success: boolean
+    models: EffectiveModel[]
+    error?: string
+  }> => 
+    ipcRenderer.invoke(IpcChannels.PROVIDERS_REMOVE_MODEL, providerId, modelName),
+  
+  resetModels: (providerId: string): Promise<{
+    success: boolean
+    models: EffectiveModel[]
+    error?: string
+  }> => 
+    ipcRenderer.invoke(IpcChannels.PROVIDERS_RESET_MODELS, providerId),
 }
 
 const accountsAPI = {

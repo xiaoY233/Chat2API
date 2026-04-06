@@ -357,6 +357,123 @@ export class MimoAdapter {
 
     return { response, conversationId }
   }
+
+  private async getConversationList(pageNum: number = 1, pageSize: number = 100): Promise<{
+    conversationIds: string[]
+    hasMore: boolean
+  }> {
+    const { serviceToken, userId, phToken } = this.getCredentials()
+
+    if (!serviceToken || !userId || !phToken) {
+      throw new Error('Mimo credentials not configured')
+    }
+
+    const url = `${MIMO_API_BASE}/open-apis/chat/conversation/list?xiaomichatbot_ph=${encodeURIComponent(phToken)}`
+
+    const response = await axios.post(
+      url,
+      {
+        pageInfo: {
+          pageNum,
+          pageSize,
+        },
+      },
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          Cookie: `serviceToken=${serviceToken}; userId=${userId}; xiaomichatbot_ph=${phToken}`,
+          Origin: MIMO_API_BASE,
+          Referer: `${MIMO_API_BASE}/`,
+        },
+        timeout: 30000,
+        validateStatus: () => true,
+      }
+    )
+
+    console.log('[Mimo] Get conversation list page', pageNum, 'response:', JSON.stringify(response.data, null, 2))
+
+    const { code, data } = response.data || {}
+    if (response.status !== 200 || code !== 0) {
+      console.error('[Mimo] Failed to get conversation list')
+      return { conversationIds: [], hasMore: false }
+    }
+
+    const conversationList = data?.dataList || []
+    const conversationIds = conversationList.map((c: any) => c.conversationId).filter(Boolean)
+    const hasMore = conversationList.length >= pageSize
+
+    console.log('[Mimo] Found', conversationIds.length, 'conversations, hasMore:', hasMore)
+    return { conversationIds, hasMore }
+  }
+
+  private async deleteConversations(conversationIds: string[]): Promise<boolean> {
+    if (conversationIds.length === 0) {
+      return true
+    }
+
+    const { serviceToken, userId, phToken } = this.getCredentials()
+
+    if (!serviceToken || !userId || !phToken) {
+      throw new Error('Mimo credentials not configured')
+    }
+
+    const url = `${MIMO_API_BASE}/open-apis/chat/conversation/delete?xiaomichatbot_ph=${encodeURIComponent(phToken)}`
+
+    const response = await axios.post(
+      url,
+      conversationIds,
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          Cookie: `serviceToken=${serviceToken}; userId=${userId}; xiaomichatbot_ph=${phToken}`,
+          Origin: MIMO_API_BASE,
+          Referer: `${MIMO_API_BASE}/`,
+        },
+        timeout: 60000,
+        validateStatus: () => true,
+      }
+    )
+
+    console.log('[Mimo] Delete conversations response:', JSON.stringify(response.data, null, 2))
+
+    const { code } = response.data || {}
+    return response.status === 200 && code === 0
+  }
+
+  async deleteAllChats(): Promise<boolean> {
+    try {
+      const allConversationIds: string[] = []
+      let pageNum = 1
+      let hasMore = true
+
+      while (hasMore) {
+        const { conversationIds, hasMore: more } = await this.getConversationList(pageNum, 100)
+        allConversationIds.push(...conversationIds)
+        hasMore = more
+        pageNum++
+
+        if (conversationIds.length === 0) {
+          break
+        }
+      }
+
+      if (allConversationIds.length === 0) {
+        console.log('[Mimo] No conversations to delete')
+        return true
+      }
+
+      console.log('[Mimo] Found', allConversationIds.length, 'conversations to delete')
+
+      const success = await this.deleteConversations(allConversationIds)
+      if (success) {
+        console.log('[Mimo] All chats deleted')
+      }
+      return success
+    } catch (error) {
+      console.error('[Mimo] Failed to delete all chats:', error)
+      return false
+    }
+  }
 }
 
 export class MimoStreamHandler {

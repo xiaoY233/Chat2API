@@ -353,3 +353,9 @@ export interface ConfigUpdateRequest {
   toolPromptConfig?: ToolPromptConfig
   managementApi?: ManagementApiConfig
 }
+
+export interface EffectiveModel {
+  displayName: string
+  actualModelId: string
+  isCustom: boolean
+}

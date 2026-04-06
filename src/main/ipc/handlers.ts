@@ -355,23 +355,19 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow | null): Pro
         }
       }
 
-      // Try to get an active account for authentication (include credentials)
       const accounts = AccountManager.getByProviderId(providerId, true)
       const activeAccount = accounts.find(a => a.status === 'active')
       
-      // Build request headers with optional authentication
       const requestHeaders: Record<string, string> = {
         'Content-Type': 'application/json',
         Accept: 'application/json',
         ...modelsApiHeaders,
       }
       
-      // Add authorization header if account exists
       if (activeAccount?.credentials?.token) {
         requestHeaders['Authorization'] = `Bearer ${activeAccount.credentials.token}`
       }
       
-      // Add cookie header if account has cookies (required for qwen-ai)
       if (activeAccount?.credentials?.cookies) {
         requestHeaders['Cookie'] = activeAccount.credentials.cookies
       }
@@ -437,6 +433,63 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow | null): Pro
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Failed to update models',
+      }
+    }
+  })
+
+  ipcMain.handle(IpcChannels.PROVIDERS_GET_EFFECTIVE_MODELS, async (_, providerId: string) => {
+    try {
+      return storeManager.getEffectiveModels(providerId)
+    } catch (error) {
+      console.error('[IPC] Failed to get effective models:', error)
+      return []
+    }
+  })
+
+  ipcMain.handle(IpcChannels.PROVIDERS_ADD_CUSTOM_MODEL, async (_, providerId: string, model: { displayName: string; actualModelId: string }) => {
+    try {
+      return {
+        success: true,
+        models: storeManager.addCustomModel(providerId, model),
+      }
+    } catch (error) {
+      console.error('[IPC] Failed to add custom model:', error)
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to add custom model',
+        models: [],
+      }
+    }
+  })
+
+  ipcMain.handle(IpcChannels.PROVIDERS_REMOVE_MODEL, async (_, providerId: string, modelName: string) => {
+    try {
+      return {
+        success: true,
+        models: storeManager.removeModel(providerId, modelName),
+      }
+    } catch (error) {
+      console.error('[IPC] Failed to remove model:', error)
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to remove model',
+        models: [],
+      }
+    }
+  })
+
+  ipcMain.handle(IpcChannels.PROVIDERS_RESET_MODELS, async (_, providerId: string) => {
+    try {
+      return {
+        success: true,
+        models: storeManager.resetModels(providerId),
+      }
+    } catch (error) {
+      console.error('[IPC] Failed to reset models:', error)
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to reset models',
+        models: [],
       }
     }
   })
@@ -558,7 +611,7 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow | null): Pro
         return { success: false, error: 'Provider not found' }
       }
 
-      // Support qwen-ai, minimax, zai, perplexity, deepseek, and glm providers
+      // Support qwen-ai, minimax, zai, perplexity, deepseek, glm, and mimo providers
       if (provider.id === 'qwen-ai') {
         const { QwenAiAdapter } = await import('../proxy/adapters/qwen-ai')
         const adapter = new QwenAiAdapter(provider, account)
@@ -587,6 +640,11 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow | null): Pro
       } else if (provider.id === 'glm') {
         const { GLMAdapter } = await import('../proxy/adapters/glm')
         const adapter = new GLMAdapter(provider, account)
+        const success = await adapter.deleteAllChats()
+        return { success }
+      } else if (provider.id === 'mimo') {
+        const { MimoAdapter } = await import('../proxy/adapters/mimo')
+        const adapter = new MimoAdapter(provider, account)
         const success = await adapter.deleteAllChats()
         return { success }
       } else {

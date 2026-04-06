@@ -20,6 +20,7 @@ interface ProviderState {
   isLoading: boolean
   selectedProviderId: string | null
   selectedAccountId: string | null
+  modelsLastUpdated: number
   
   setProviders: (providers: Provider[]) => void
   setBuiltinProviders: (providers: BuiltinProviderConfig[]) => void
@@ -29,6 +30,7 @@ interface ProviderState {
   setIsLoading: (loading: boolean) => void
   setSelectedProviderId: (id: string | null) => void
   setSelectedAccountId: (id: string | null) => void
+  setModelsLastUpdated: (timestamp: number) => void
   
   addProvider: (provider: Provider) => void
   updateProvider: (id: string, updates: Partial<Provider>) => void
@@ -55,6 +57,7 @@ export const useProvidersStore = create<ProviderState>((set, get) => ({
   isLoading: false,
   selectedProviderId: null,
   selectedAccountId: null,
+  modelsLastUpdated: Date.now(),
   
   setProviders: (providers) => set({ providers }),
   setBuiltinProviders: (builtinProviders) => set({ builtinProviders }),
@@ -64,6 +67,7 @@ export const useProvidersStore = create<ProviderState>((set, get) => ({
   setIsLoading: (isLoading) => set({ isLoading }),
   setSelectedProviderId: (selectedProviderId) => set({ selectedProviderId }),
   setSelectedAccountId: (selectedAccountId) => set({ selectedAccountId }),
+  setModelsLastUpdated: (modelsLastUpdated) => set({ modelsLastUpdated }),
   
   addProvider: (provider) => set((state) => ({
     providers: [...state.providers, provider],

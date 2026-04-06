@@ -20,7 +20,8 @@ import {
   Plus,
   LogIn,
   Info,
-  Download
+  Download,
+  Settings
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { Provider, ProviderStatus } from '@/types/electron'
@@ -57,6 +58,7 @@ interface ProviderCardProps {
   onCheckStatus: (id: string) => void
   onManageAccounts: (id: string) => void
   onUpdateModels?: (id: string) => void
+  onManageModels?: (id: string) => void
   className?: string
 }
 
@@ -78,6 +80,7 @@ export function ProviderCard({
   onCheckStatus,
   onManageAccounts,
   onUpdateModels,
+  onManageModels,
   className,
 }: ProviderCardProps) {
   const { t } = useTranslation()
@@ -165,6 +168,12 @@ export function ProviderCard({
                 {t('providers.checkStatus')}
               </DropdownMenuItem>
               {isBuiltin && (
+                <DropdownMenuItem onClick={() => onManageModels?.(provider.id)}>
+                  <Settings className="mr-2 h-4 w-4" />
+                  {t('providers.manageModels')}
+                </DropdownMenuItem>
+              )}
+              {isBuiltin && (provider as any).modelsApiEndpoint && (
                 <DropdownMenuItem onClick={() => onUpdateModels?.(provider.id)}>
                   <Download className="mr-2 h-4 w-4" />
                   {t('providers.updateModels')}
