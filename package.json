@@ -115,7 +115,8 @@
     ],
     "asar": true,
     "asarUnpack": [
-      "**/*.node"
+      "**/*.node",
+      "**/node_modules/electron-updater/**/*"
     ],
     "fileAssociations": [
       {
