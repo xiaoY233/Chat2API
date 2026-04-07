@@ -149,16 +149,20 @@ export class InAppLoginManager extends EventEmitter {
         for (const cookieHeader of setCookieHeaders) {
           console.log('[InAppLogin] Set-Cookie header:', cookieHeader.substring(0, 100))
           
-          // Parse the cookie header
           const cookieParts = cookieHeader.split(';')
           const nameValue = cookieParts[0]?.trim()
           if (nameValue) {
             const equalIndex = nameValue.indexOf('=')
             if (equalIndex > 0) {
               const name = nameValue.substring(0, equalIndex)
-              const value = nameValue.substring(equalIndex + 1)
+              let value = nameValue.substring(equalIndex + 1)
               
-              // Check if this is a token we're looking for
+              // Remove surrounding quotes from the value (RFC 6265 allows quoted cookie values)
+              if (value.startsWith('"') && value.endsWith('"')) {
+                value = value.slice(1, -1)
+                console.log('[InAppLogin] Removed quotes from cookie value:', name)
+              }
+              
               for (const source of this.config!.tokenSources) {
                 if (source.type === 'cookie' && name === source.key) {
                   console.log('[InAppLogin] Found target cookie in Set-Cookie header:', name)
@@ -269,7 +273,7 @@ export class InAppLoginManager extends EventEmitter {
   private isValidToken(value: string): boolean {
     console.log('[InAppLogin] Checking token validity:', value.length, value.substring(0, 20))
     
-    if (!value || value.length < 20) {
+    if (!value || value.length < 5) {
       console.log('[InAppLogin] Token rejected: too short or empty')
       return false
     }
@@ -325,6 +329,20 @@ export class InAppLoginManager extends EventEmitter {
       return true
     }
     
+    // Accept Base64-encoded tokens (may contain = padding and /)
+    // This handles tokens like "SME5/AEwvmtjSu4XO18SYg=="
+    if (value.length >= 20 && /^[a-zA-Z0-9_\-+/]+=*$/.test(value)) {
+      console.log('[InAppLogin] Token accepted as Base64 token')
+      return true
+    }
+    
+    // Accept any token that looks like a valid string (at least 5 chars, no spaces)
+    // This handles short tokens like userId
+    if (value.length >= 5 && !/\s/.test(value)) {
+      console.log('[InAppLogin] Token accepted as generic token')
+      return true
+    }
+    
     console.log('[InAppLogin] Token rejected: does not match any pattern')
     return false
   }
@@ -371,11 +389,9 @@ export class InAppLoginManager extends EventEmitter {
         const value = await webContents.executeJavaScript(script)
         console.log('[InAppLogin] Got value from localStorage:', source.key, value ? value.substring(0, 50) + '...' : 'null')
 
-        // Handle user_detail_agent specially - it's a JSON object containing user info
         if (source.key === 'user_detail_agent' && value) {
           try {
             const parsed = JSON.parse(value)
-            // Use realUserID field if available, fallback to id field
             const realUserID = parsed.realUserID || parsed.id
             if (realUserID) {
               console.log('[InAppLogin] Found realUserID from user_detail_agent:', realUserID)
@@ -402,7 +418,6 @@ export class InAppLoginManager extends EventEmitter {
 
         if (tokenValue && typeof tokenValue === 'string' && this.isValidToken(tokenValue)) {
           console.log('[InAppLogin] Token found and valid from localStorage:', source.key)
-          // Map _token to token for consistency
           const emitKey = source.key === '_token' ? 'token' : source.key
           this.emit('tokenFound', { key: emitKey, value: tokenValue })
         }
@@ -411,22 +426,17 @@ export class InAppLoginManager extends EventEmitter {
       for (const source of cookieSources) {
         if (!this.loginSession) continue
 
-        // Get all cookies without filter
         const allCookies = await this.loginSession.cookies.get({})
         console.log('[InAppLogin] All cookies count:', allCookies.length)
         console.log('[InAppLogin] All cookies:', allCookies.map(c => `${c.name}=${c.value?.substring(0, 20)}...`))
         
-        // Also try getting cookies with domain filter for the target domain
-        // This is needed for HttpOnly + Secure cookies like __Secure-next-auth.session-token
         const targetDomains = this.config?.targetDomains || []
         let cookiesToSearch = allCookies
         
-        // Try to get cookies from target domains
         for (const domain of targetDomains) {
           try {
             const domainCookies = await this.loginSession.cookies.get({ domain })
             console.log(`[InAppLogin] Domain cookies for ${domain}:`, domainCookies.map(c => c.name))
-            // Merge domain cookies into the search list
             for (const dc of domainCookies) {
               if (!cookiesToSearch.find(c => c.name === dc.name)) {
                 cookiesToSearch.push(dc)
@@ -439,14 +449,12 @@ export class InAppLoginManager extends EventEmitter {
         
         console.log('[InAppLogin] Combined cookies to search:', cookiesToSearch.map(c => c.name))
 
-        // Find the cookie by name
         const cookie = cookiesToSearch.find(c => c.name === source.key)
         if (cookie) {
           console.log('[InAppLogin] Found cookie:', source.key, cookie.value ? cookie.value.substring(0, 50) + '...' : 'null')
 
           if (cookie.value && this.isValidToken(cookie.value)) {
-            console.log('[InAppLogin] Token found and valid from cookie:', source.key)
-            // Build all cookies object for Cloudflare-protected requests
+            console.log('[InAppLogin] Token found and valid from cookie:', source.key, 'emitting tokenFound event')
             const allCookiesObj: Record<string, string> = {}
             for (const c of cookiesToSearch) {
               if (c.value) {

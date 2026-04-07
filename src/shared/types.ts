@@ -5,7 +5,7 @@ export type ProviderStatus = 'online' | 'offline' | 'unknown'
 export type ProviderType = 'builtin' | 'custom'
 
 // Provider vendor type (for OAuth adapters)
-export type ProviderVendor = 'deepseek' | 'glm' | 'kimi' | 'minimax' | 'qwen' | 'qwen-ai' | 'zai' | 'perplexity' | 'custom'
+export type ProviderVendor = 'deepseek' | 'glm' | 'kimi' | 'mimo' | 'minimax' | 'qwen' | 'qwen-ai' | 'zai' | 'perplexity' | 'custom'
 
 export type AuthType = 
   | 'oauth' 
@@ -191,10 +191,7 @@ export interface ToolPromptConfig {
   enableToolCallParsing: boolean
 }
 
-export type SessionMode = 'single'
-
 export interface SessionConfig {
-  mode: SessionMode
   sessionTimeout: number
   maxMessagesPerSession: number
   deleteAfterTimeout: boolean
@@ -355,4 +352,10 @@ export interface ConfigUpdateRequest {
   sessionConfig?: SessionConfig
   toolPromptConfig?: ToolPromptConfig
   managementApi?: ManagementApiConfig
+}
+
+export interface EffectiveModel {
+  displayName: string
+  actualModelId: string
+  isCustom: boolean
 }

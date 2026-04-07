@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { Card, CardContent } from '@/components/ui/card'
@@ -8,15 +8,14 @@ export default function LogsPage() {
   const { t } = useTranslation()
   const [searchParams] = useSearchParams()
   const tabFromUrl = searchParams.get('tab')
-  const highlightFromUrl = searchParams.get('highlight')
   
-  const [activeTab, setActiveTab] = useState(tabFromUrl === 'request' ? 'request' : 'request')
+  const [, setActiveTab] = useState(tabFromUrl === 'request' ? 'request' : 'request')
   
   useEffect(() => {
     if (tabFromUrl === 'request') {
       setActiveTab('request')
     }
-  }, [tabFromUrl])
+  }, [tabFromUrl, setActiveTab])
 
   return (
     <div className="space-y-6">

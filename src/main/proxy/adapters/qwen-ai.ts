@@ -32,15 +32,7 @@ const DEFAULT_HEADERS = {
   Origin: 'https://chat.qwen.ai',
 }
 
-const MODEL_MAP: Record<string, string> = {
-  'Qwen3.5-Plus': 'qwen3.5-plus',
-  'Qwen3.5-397B-A17B': 'qwen3.5-397b-a17b',
-  'Qwen3-Max': 'qwen3-max',
-  'Qwen3-235B-A22B-2507': 'qwen3-235b-a22b-2507',
-  'Qwen3-Coder': 'qwen3-coder-plus',
-  'Qwen3-VL-235B-A22B': 'qwen3-vl-235b-a22b',
-  'Qwen3-Omni-Flash': 'qwen3-omni-flash',
-  'Qwen2.5-Max': 'qwen2.5-max',
+const MODEL_ALIASES: Record<string, string> = {
   qwen: 'qwen3-max',
   qwen3: 'qwen3-max',
   'qwen3.5': 'qwen3.5-plus',
@@ -57,20 +49,14 @@ interface QwenAiMessage {
 
 interface ChatCompletionRequest {
   model: string
+  /** Original model name before mapping (used for feature detection like thinking mode) */
+  originalModel?: string
   messages: QwenAiMessage[]
   stream?: boolean
   temperature?: number
   enable_thinking?: boolean
   thinking_budget?: number
   chatId?: string
-  isMultiTurn?: boolean
-  sessionContext?: {
-    sessionId: string
-    providerSessionId?: string
-    parentMessageId?: string
-    messages: any[]
-    isNew: boolean
-  }
 }
 
 function uuid(): string {
@@ -132,33 +118,33 @@ export class QwenAiAdapter {
   }
 
   mapModel(openaiModel: string): string {
-    // Support model name suffixes to control thinking mode:
-    // -thinking: Force enable thinking mode
-    // -fast: Force use fast mode (no thinking)
     let model = openaiModel
     let forceThinking: boolean | undefined
     
     if (model.endsWith('-thinking')) {
       forceThinking = true
-      model = model.slice(0, -9) // Remove -thinking suffix
+      model = model.slice(0, -9)
     } else if (model.endsWith('-fast')) {
       forceThinking = false
-      model = model.slice(0, -5) // Remove -fast suffix
+      model = model.slice(0, -5)
     }
     
-    // Store in instance for later use
     ;(this as any)._forceThinking = forceThinking
     
-    // Case-insensitive lookup in MODEL_MAP
     const lowerModel = model.toLowerCase()
-    for (const [key, value] of Object.entries(MODEL_MAP)) {
-      if (key.toLowerCase() === lowerModel) {
-        return value
+    
+    if (MODEL_ALIASES[lowerModel]) {
+      return MODEL_ALIASES[lowerModel]
+    }
+    
+    if (this.provider.modelMappings) {
+      for (const [key, value] of Object.entries(this.provider.modelMappings)) {
+        if (key.toLowerCase() === lowerModel) {
+          return value
+        }
       }
     }
     
-    // If the model is already in the expected format (lowercase with hyphens), pass through
-    // e.g. qwen3.5-plus from external model mapping
     return model
   }
 
@@ -270,9 +256,6 @@ export class QwenAiAdapter {
       forceThinking = (this as any)._forceThinking
     }
 
-    // Use session context passed from forwarder (avoid duplicate getOrCreateSession calls)
-    const sessionContext = request.sessionContext
-    
     // Always create a new chat (single-turn mode only)
     const chatId = await this.createChat(modelId, 'OpenAI_API_Chat')
     console.log('[QwenAI] Created new chat:', chatId)

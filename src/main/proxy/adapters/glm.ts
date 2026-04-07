@@ -68,6 +68,7 @@ interface GLMMessage {
 
 interface ChatCompletionRequest {
   model: string
+  originalModel?: string
   messages: GLMMessage[]
   stream?: boolean
   temperature?: number
@@ -76,15 +77,6 @@ interface ChatCompletionRequest {
   deep_research?: boolean
   tools?: any[]
   tool_choice?: any
-  conversationId?: string
-  isMultiTurn?: boolean
-  sessionContext?: {
-    sessionId: string
-    providerSessionId?: string
-    parentMessageId?: string
-    messages: any[]
-    isNew: boolean
-  }
 }
 
 const tokenCache = new Map<string, TokenInfo>()
@@ -487,17 +479,7 @@ GLM STRICT RULES:
       }
     }
 
-    // Determine multi-turn mode before preparing messages
-    // Use session context passed from forwarder
-    const sessionContext = request.sessionContext
-    const isMultiTurnMode = sessionContext && !sessionContext.isNew
-    
-    // Use providerSessionId (existing conversation_id) if available
-    const existingConversationId = sessionContext?.providerSessionId || ''
-    
-    console.log('[GLM] conversationId:', existingConversationId || '(new)', 'isMultiTurn:', isMultiTurnMode)
-
-    const preparedMessages = this.messagesToPrompt(messages, refs, toolsPrompt, isMultiTurnMode)
+    const preparedMessages = this.messagesToPrompt(messages, refs, toolsPrompt, false)
 
     let assistantId = DEFAULT_ASSISTANT_ID
     let chatMode = ''
@@ -543,7 +525,7 @@ GLM STRICT RULES:
       `${GLM_API_BASE}/backend-api/assistant/stream`,
       {
         assistant_id: assistantId,
-        conversation_id: existingConversationId,
+        conversation_id: '',
         project_id: '',
         chat_type: 'user_chat',
         messages: preparedMessages,

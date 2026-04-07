@@ -16,7 +16,8 @@ export default defineConfig({
           'js-sha3',
           'mime-types',
           'zstd-codec',
-          'electron-store'
+          'electron-store',
+          'electron-updater'
         ]
       })
     ],

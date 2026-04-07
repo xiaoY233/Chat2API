@@ -19,7 +19,9 @@ import {
   Users,
   Plus,
   LogIn,
-  Info
+  Info,
+  Download,
+  Settings
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { Provider, ProviderStatus } from '@/types/electron'
@@ -30,12 +32,14 @@ import minimaxIcon from '@/assets/providers/minimax.svg'
 import perplexityIcon from '@/assets/providers/perplexity.svg'
 import qwenIcon from '@/assets/providers/qwen.svg'
 import zaiIcon from '@/assets/providers/zai.svg'
+import mimoIcon from '@/assets/providers/mimo.svg'
 
 const providerIcons: Record<string, string> = {
   deepseek: deepseekIcon,
   glm: glmIcon,
   kimi: kimiIcon,
   minimax: minimaxIcon,
+  mimo: mimoIcon,
   perplexity: perplexityIcon,
   qwen: qwenIcon,
   'qwen-ai': qwenIcon,
@@ -53,6 +57,8 @@ interface ProviderCardProps {
   onDuplicate: (id: string) => void
   onCheckStatus: (id: string) => void
   onManageAccounts: (id: string) => void
+  onUpdateModels?: (id: string) => void
+  onManageModels?: (id: string) => void
   className?: string
 }
 
@@ -73,6 +79,8 @@ export function ProviderCard({
   onDuplicate,
   onCheckStatus,
   onManageAccounts,
+  onUpdateModels,
+  onManageModels,
   className,
 }: ProviderCardProps) {
   const { t } = useTranslation()
@@ -159,6 +167,18 @@ export function ProviderCard({
                 <RefreshCw className="mr-2 h-4 w-4" />
                 {t('providers.checkStatus')}
               </DropdownMenuItem>
+              {isBuiltin && (
+                <DropdownMenuItem onClick={() => onManageModels?.(provider.id)}>
+                  <Settings className="mr-2 h-4 w-4" />
+                  {t('providers.manageModels')}
+                </DropdownMenuItem>
+              )}
+              {isBuiltin && (provider as any).modelsApiEndpoint && (
+                <DropdownMenuItem onClick={() => onUpdateModels?.(provider.id)}>
+                  <Download className="mr-2 h-4 w-4" />
+                  {t('providers.updateModels')}
+                </DropdownMenuItem>
+              )}
               {!isBuiltin && (
                 <>
                   <DropdownMenuSeparator />

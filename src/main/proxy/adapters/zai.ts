@@ -95,14 +95,6 @@ interface ChatCompletionRequest {
   reasoning_effort?: 'low' | 'medium' | 'high' | boolean
   chatId?: string
   parentMessageId?: string
-  isMultiTurn?: boolean
-  sessionContext?: {
-    sessionId: string
-    providerSessionId?: string
-    parentMessageId?: string
-    messages: any[]
-    isNew: boolean
-  }
 }
 
 function uuid(separator: boolean = true): string {
@@ -342,7 +334,6 @@ export class ZaiAdapter {
     const userId = this.extractUserIDFromToken(token)
     
     console.log('[Z.ai] chatCompletion called with request.model:', request.model)
-    console.log('[Z.ai] sessionContext:', request.sessionContext)
     
     // Z.ai API requires specific model name casing:
     // - GLM-5-Turbo: uppercase (only this one needs uppercase)
@@ -400,36 +391,12 @@ export class ZaiAdapter {
     
     const signaturePrompt = this.extractLastUserMessage(processedMessages)
     
-    // Use session context passed from forwarder
-    const sessionContext = request.sessionContext
-    const isMultiTurn = sessionContext && !sessionContext.isNew
-    
-    // Reuse existing chat or create new one
-    let chatId = sessionContext?.providerSessionId || ''
-    let parentMessageId = sessionContext?.parentMessageId || null
-    let messageId = ''
-    
-    if (isMultiTurn && chatId) {
-      console.log('[Z.ai] Reusing existing chat:', chatId, 'parentMessageId:', parentMessageId)
-      messageId = uuid()
-      // For multi-turn, only send the last user message
-      let lastUserIdx = -1
-      for (let i = processedMessages.length - 1; i >= 0; i--) {
-        if (processedMessages[i].role === 'user') {
-          lastUserIdx = i
-          break
-        }
-      }
-      if (lastUserIdx !== -1) {
-        processedMessages = [processedMessages[lastUserIdx]]
-      }
-    } else {
-      const chatResult = await this.createChat(mappedModel, signaturePrompt)
-      chatId = chatResult.chatId
-      messageId = chatResult.messageId
-      parentMessageId = null
-      console.log('[Z.ai] Created new chat:', chatId)
-    }
+    // Always create a new chat (single-turn mode only)
+    const chatResult = await this.createChat(mappedModel, signaturePrompt)
+    const chatId = chatResult.chatId
+    const messageId = chatResult.messageId
+    const parentMessageId = null
+    console.log('[Z.ai] Created new chat:', chatId)
     
     const requestId = uuid()
     const timestamp = Date.now()

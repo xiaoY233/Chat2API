@@ -96,15 +96,6 @@ export function Dashboard() {
     navigate('/logs?tab=request&highlight=' + item.id)
   }, [navigate])
 
-  const formatUptime = (uptime: number) => {
-    const hours = Math.floor(uptime / 3600)
-    const minutes = Math.floor((uptime % 3600) / 60)
-    if (hours > 0) {
-      return `${hours} ${t('dashboard.hours')} ${minutes} ${t('dashboard.minutes')}`
-    }
-    return `${minutes} ${t('dashboard.minutes')}`
-  }
-
   const isElectron = !!window.electronAPI
 
   return (

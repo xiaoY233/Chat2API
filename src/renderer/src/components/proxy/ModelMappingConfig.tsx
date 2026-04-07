@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -6,6 +6,7 @@ import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Combobox, type ComboboxOption } from '@/components/ui/combobox'
 import {
   Dialog,
   DialogContent,
@@ -264,6 +265,30 @@ export function ModelMappingConfig({ onConfigChange }: ModelMappingConfigProps) 
 
   const isWildcard = formData.requestModel.includes('*')
 
+  const modelOptions: ComboboxOption[] = useMemo(() => {
+    const options: ComboboxOption[] = []
+    const addedModels = new Set<string>()
+
+    providers.forEach(provider => {
+      provider.supportedModels?.forEach(model => {
+        if (!addedModels.has(model)) {
+          addedModels.add(model)
+          options.push({
+            value: model,
+            label: model,
+            group: provider.name,
+          })
+        }
+      })
+    })
+
+    return options.sort((a, b) => a.value.localeCompare(b.value))
+  }, [providers])
+
+  const handleModelChange = (value: string) => {
+    setFormData(prev => ({ ...prev, actualModel: value }))
+  }
+
   return (
     <Card className={hasChanges ? 'ring-2 ring-amber-500/50' : ''}>
       <CardHeader>
@@ -469,11 +494,12 @@ export function ModelMappingConfig({ onConfigChange }: ModelMappingConfigProps) 
             
             <div className="space-y-2">
               <Label htmlFor="actualModel">{t('proxy.actualModel')}</Label>
-              <Input
-                id="actualModel"
-                placeholder="deepseek-chat"
+              <Combobox
+                options={modelOptions}
                 value={formData.actualModel}
-                onChange={(e) => setFormData(prev => ({ ...prev, actualModel: e.target.value }))}
+                onChange={handleModelChange}
+                placeholder={t('proxy.selectModel')}
+                emptyText={t('proxy.noModelFound')}
               />
               <p className="text-xs text-muted-foreground">
                 {t('proxy.actualModelHelp')}

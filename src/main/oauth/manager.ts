@@ -141,12 +141,52 @@ export class OAuthManager extends EventEmitter {
     providerId: string,
     providerType: ProviderType,
     token: string,
-    realUserID?: string
+    realUserID?: string,
+    mimoUserId?: string,
+    mimoPhToken?: string
   ): Promise<OAuthResult> {
     const adapter = this.getAdapter(providerId, providerType)
     
     if ('loginWithToken' in adapter && typeof (adapter as any).loginWithToken === 'function') {
-      return await (adapter as any).loginWithToken(providerId, token, realUserID)
+      return await (adapter as any).loginWithToken(providerId, token, realUserID, mimoUserId, mimoPhToken)
+    }
+    
+    // For Mimo, validate with all three tokens
+    if (providerType === 'mimo') {
+      if (!mimoUserId || !mimoPhToken) {
+        return {
+          success: false,
+          providerId,
+          providerType,
+          error: 'Mimo requires userId and phToken in addition to serviceToken',
+        }
+      }
+      const validation = await adapter.validateToken({
+        service_token: token,
+        user_id: mimoUserId,
+        ph_token: mimoPhToken,
+      })
+      
+      if (!validation.valid) {
+        return {
+          success: false,
+          providerId,
+          providerType,
+          error: validation.error || 'Token validation failed',
+        }
+      }
+      
+      return {
+        success: true,
+        providerId,
+        providerType,
+        credentials: {
+          service_token: token,
+          user_id: mimoUserId,
+          ph_token: mimoPhToken,
+        },
+        accountInfo: validation.accountInfo,
+      }
     }
     
     const validation = await adapter.validateToken({ token })
@@ -336,8 +376,45 @@ export class OAuthManager extends EventEmitter {
           }
         }
 
-        // For non-MiniMax providers, validate immediately when we have a token
-        if (providerType !== 'minimax') {
+        // For Mimo, we need all three tokens before validating
+        if (providerType === 'mimo') {
+          const hasServiceToken = collectedTokens.serviceToken || collectedTokens.service_token
+          const hasUserId = collectedTokens.userId || collectedTokens.user_id
+          const hasPhToken = collectedTokens.xiaomichatbot_ph || collectedTokens.ph_token
+
+          if (!hasServiceToken || !hasUserId || !hasPhToken) {
+            console.log('[OAuthManager] Waiting for all Mimo tokens...', {
+              hasServiceToken: !!hasServiceToken,
+              hasUserId: !!hasUserId,
+              hasPhToken: !!hasPhToken,
+            })
+            
+            // Clear any existing timeout
+            if (validationTimeout) {
+              clearTimeout(validationTimeout)
+            }
+
+            // Wait 500ms for all tokens to be collected
+            validationTimeout = setTimeout(() => {
+              console.log('[OAuthManager] Proceeding with Mimo validation, collected tokens:', Object.keys(collectedTokens))
+              validateAndComplete()
+            }, 500)
+            return
+          }
+
+          // All tokens collected, trigger validation immediately
+          if (!isValidating) {
+            console.log('[OAuthManager] All Mimo tokens collected, validating...')
+            if (validationTimeout) {
+              clearTimeout(validationTimeout)
+            }
+            validateAndComplete()
+            return
+          }
+        }
+
+        // For non-MiniMax/Mimo providers, validate immediately when we have a token
+        if (providerType !== 'minimax' && providerType !== 'mimo') {
           if (isValidating) {
             console.log('[OAuthManager] Already validating, skipping')
             return
@@ -359,22 +436,16 @@ export class OAuthManager extends EventEmitter {
         })
 
         try {
-          // Build credentials for validation
           let validationCredentials: Record<string, string>
           let finalCredentials: Record<string, string>
 
           if (providerType === 'minimax') {
-            // For MiniMax, save token and realUserID separately
-            // Proxy adapter expects: token=JWT, realUserID=realUserID
-            // Validation uses combined format: realUserID+JWT
             const token = collectedTokens.token
             const realUserID = collectedTokens.realUserID
 
             if (realUserID) {
-              // Validation uses combined format
               const combinedToken = `${realUserID}+${token}`
               validationCredentials = { token: combinedToken }
-              // But save separately for proxy adapter
               finalCredentials = { token, realUserID }
               console.log('[OAuthManager] MiniMax: Using combined token for validation, saving separately')
             } else {
@@ -382,6 +453,35 @@ export class OAuthManager extends EventEmitter {
               finalCredentials = { token }
               console.log('[OAuthManager] MiniMax: Using token only (realUserID not found)')
             }
+          } else if (providerType === 'mimo') {
+            const serviceToken = collectedTokens.serviceToken || collectedTokens.service_token
+            const userId = collectedTokens.userId || collectedTokens.user_id
+            const phToken = collectedTokens.xiaomichatbot_ph || collectedTokens.ph_token
+
+            console.log('[OAuthManager] Mimo collectedTokens:', JSON.stringify(collectedTokens, null, 2))
+            console.log('[OAuthManager] Mimo extracted values:', { serviceToken: serviceToken?.substring(0, 20), userId, phToken: phToken?.substring(0, 20) })
+
+            if (!serviceToken || !userId || !phToken) {
+              console.log('[OAuthManager] Mimo: Missing required tokens, aborting validation')
+              this.sendProgressToRenderer({
+                status: 'pending',
+                message: 'Missing required tokens, waiting for valid login...',
+              })
+              isValidating = false
+              return
+            }
+
+            validationCredentials = {
+              service_token: serviceToken,
+              user_id: userId,
+              ph_token: phToken,
+            }
+            finalCredentials = {
+              service_token: serviceToken,
+              user_id: userId,
+              ph_token: phToken,
+            }
+            console.log('[OAuthManager] Mimo: Final credentials prepared:', Object.keys(finalCredentials))
           } else {
             validationCredentials = { ...collectedTokens }
             finalCredentials = { ...collectedTokens }
@@ -392,7 +492,7 @@ export class OAuthManager extends EventEmitter {
           console.log('[OAuthManager] Validation result:', validation)
 
           if (validation.valid) {
-            console.log('[OAuthManager] Token is valid, completing login')
+            console.log('[OAuthManager] Token is valid, completing login with credentials:', JSON.stringify(finalCredentials, null, 2))
             inAppLoginManager.completeWithSuccess(finalCredentials)
           } else {
             console.log('[OAuthManager] Token validation failed:', validation.error)

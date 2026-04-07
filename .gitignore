@@ -46,6 +46,9 @@ coverage/
 *.pem
 *.p12
 
+# Next.js experimental app (not part of Electron build)
+src/renderer/next-app/
+
 # Backup
 backup/
 

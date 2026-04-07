@@ -59,25 +59,14 @@ class SessionManagerClass {
 
   getOrCreateSession(options: CreateSessionOptions): SessionContext {
     const { providerId, accountId, model } = options
-    const sessionConfig = this.getSessionConfig()
-    
-    if (sessionConfig.mode === 'single') {
-      return {
-        sessionId: '',
-        providerSessionId: undefined,
-        parentMessageId: undefined,
-        messages: [],
-        isNew: true,
-      }
-    }
     
     const existingSession = this.getActiveSession(providerId, accountId)
     
     if (existingSession) {
       return {
         sessionId: existingSession.id,
-        providerSessionId: existingSession.providerSessionId,
-        parentMessageId: existingSession.parentMessageId,
+        providerSessionId: undefined,
+        parentMessageId: undefined,
         messages: existingSession.messages,
         isNew: false,
       }
@@ -91,11 +80,24 @@ class SessionManagerClass {
     
     return {
       sessionId: newSession.id,
-      providerSessionId: newSession.providerSessionId,
-      parentMessageId: newSession.parentMessageId,
+      providerSessionId: undefined,
+      parentMessageId: undefined,
       messages: newSession.messages,
       isNew: true,
     }
+  }
+
+  getActiveSession(providerId: string, accountId: string): SessionRecord | undefined {
+    const sessions = storeManager.getSessionsByProviderId(providerId)
+    const accountSessions = sessions.filter(s => s.accountId === accountId)
+    const config = this.getSessionConfig()
+    const timeoutMs = config.sessionTimeout * 60 * 1000
+    const now = Date.now()
+    
+    return accountSessions.find(s => 
+      s.status === 'active' && 
+      (now - s.lastActiveAt) < timeoutMs
+    )
   }
 
   createSession(options: CreateSessionOptions): SessionRecord {
@@ -106,7 +108,6 @@ class SessionManagerClass {
       id: this.generateSessionId(),
       providerId,
       accountId,
-      providerSessionId: '',
       sessionType,
       messages: [],
       createdAt: now,
@@ -123,10 +124,6 @@ class SessionManagerClass {
     return storeManager.getSessionById(sessionId)
   }
 
-  getActiveSession(providerId: string, accountId: string): SessionRecord | undefined {
-    return storeManager.getActiveSessionByProviderAccount(providerId, accountId)
-  }
-
   getAllActiveSessions(): SessionRecord[] {
     return storeManager.getActiveSessions()
   }
@@ -141,15 +138,6 @@ class SessionManagerClass {
       console.log('[SessionManager] Deleted session:', sessionId)
     }
     return result
-  }
-
-  deleteSessionByProviderSessionId(providerSessionId: string): boolean {
-    const sessions = storeManager.getSessions()
-    const session = sessions.find(s => s.providerSessionId === providerSessionId)
-    if (session) {
-      return this.deleteSession(session.id)
-    }
-    return false
   }
 
   cleanExpiredSessions(): number {
@@ -175,7 +163,7 @@ class SessionManagerClass {
 
   shouldDeleteAfterChat(): boolean {
     const config = this.getSessionConfig()
-    return config.mode === 'single' && config.deleteAfterTimeout
+    return config.deleteAfterTimeout
   }
 
   private generateSessionId(): string {

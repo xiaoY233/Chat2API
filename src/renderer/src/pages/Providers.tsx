@@ -16,6 +16,7 @@ import {
   AccountDetail,
   ProviderFilter,
 } from '@/components/providers'
+import { ModelEditor } from '@/components/models/ModelEditor'
 import type { 
   Provider, 
   ProviderStatus, 
@@ -47,6 +48,9 @@ export function Providers() {
   
   const [showAddAccountDialog, setShowAddAccountDialog] = useState(false)
   const [editingAccount, setEditingAccount] = useState<Account | null>(null)
+  
+  const [showModelEditor, setShowModelEditor] = useState(false)
+  const [modelEditorProvider, setModelEditorProvider] = useState<{ id: string; name: string } | null>(null)
   
   useEffect(() => {
     if (hasLoadedRef.current) return
@@ -235,6 +239,46 @@ export function Providers() {
       })
     } finally {
       setIsRefreshing(false)
+    }
+  }
+
+  const handleUpdateModels = async (providerId: string) => {
+    try {
+      toast({
+        title: t('providers.updatingModels'),
+        description: t('providers.updatingModels'),
+      })
+      
+      const result = await window.electronAPI.providers.updateModels?.(providerId)
+      
+      if (result?.success) {
+        const providers = await window.electronAPI.providers.getAll()
+        useProvidersStore.getState().setProviders(providers)
+        toast({
+          title: t('providers.modelsUpdated'),
+          description: t('providers.modelsUpdatedDesc'),
+        })
+      } else {
+        toast({
+          title: t('providers.updateModelsFailed'),
+          description: result?.error || t('common.error'),
+          variant: 'destructive',
+        })
+      }
+    } catch (error) {
+      toast({
+        title: t('providers.updateModelsFailed'),
+        description: t('common.error'),
+        variant: 'destructive',
+      })
+    }
+  }
+
+  const handleManageModels = (providerId: string) => {
+    const provider = store.providers.find(p => p.id === providerId)
+    if (provider) {
+      setModelEditorProvider({ id: provider.id, name: provider.name })
+      setShowModelEditor(true)
     }
   }
 
@@ -658,6 +702,8 @@ export function Providers() {
                 onDuplicate={handleDuplicateProvider}
                 onCheckStatus={handleCheckProviderStatus}
                 onManageAccounts={handleManageAccounts}
+                onUpdateModels={handleUpdateModels}
+                onManageModels={handleManageModels}
               />
             ))}
           </div>
@@ -689,6 +735,18 @@ export function Providers() {
           supportedModels: editingProvider.supportedModels || [],
         } : undefined}
       />
+
+      {modelEditorProvider && (
+        <ModelEditor
+          open={showModelEditor}
+          onOpenChange={(open) => {
+            setShowModelEditor(open)
+            if (!open) setModelEditorProvider(null)
+          }}
+          providerId={modelEditorProvider.id}
+          providerName={modelEditorProvider.name}
+        />
+      )}
     </div>
   )
 }

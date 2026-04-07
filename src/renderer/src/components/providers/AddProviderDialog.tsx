@@ -20,6 +20,7 @@ import { cn } from '@/lib/utils'
 import deepseekIcon from '@/assets/providers/deepseek.svg'
 import glmIcon from '@/assets/providers/glm.svg'
 import kimiIcon from '@/assets/providers/kimi.svg'
+import mimoIcon from '@/assets/providers/mimo.svg'
 import minimaxIcon from '@/assets/providers/minimax.svg'
 import perplexityIcon from '@/assets/providers/perplexity.svg'
 import qwenIcon from '@/assets/providers/qwen.svg'
@@ -47,6 +48,7 @@ const providerIcons: Record<string, string> = {
   deepseek: deepseekIcon,
   glm: glmIcon,
   kimi: kimiIcon,
+  mimo: mimoIcon,
   minimax: minimaxIcon,
   perplexity: perplexityIcon,
   qwen: qwenIcon,
@@ -55,7 +57,12 @@ const providerIcons: Record<string, string> = {
 }
 
 function mapOAuthCredentials(providerId: string | undefined, credentials: Record<string, string>): Record<string, string> {
-  if (!providerId) return credentials
+  console.log('[mapOAuthCredentials] Input providerId:', providerId, 'credentials:', JSON.stringify(credentials, null, 2))
+  
+  if (!providerId) {
+    console.log('[mapOAuthCredentials] No providerId, returning as-is')
+    return credentials
+  }
 
   const credentialKeyMap: Record<string, string> = {
     'glm': 'chatglm_refresh_token',
@@ -87,21 +94,56 @@ function mapOAuthCredentials(providerId: string | undefined, credentials: Record
             tokenValue = parsed.value
           }
         } catch (e) {
-          console.error('[AddProviderDialog] Error parsing JSON token:', e)
+          console.error('[mapOAuthCredentials] Error parsing JSON token:', e)
         }
       }
+      console.log('[mapOAuthCredentials] Mapped', oauthKey, 'to', fieldName)
       return { [fieldName]: tokenValue }
     }
   }
 
-  // For Perplexity, if we have the secure token, map it
   if (providerId === 'perplexity' && credentials['__Secure-next-auth.session-token']) {
+    console.log('[mapOAuthCredentials] Mapped Perplexity secure token')
     return { sessionToken: credentials['__Secure-next-auth.session-token'] }
   }
   if (providerId === 'perplexity' && credentials['next-auth.session-token']) {
+    console.log('[mapOAuthCredentials] Mapped Perplexity session token')
     return { sessionToken: credentials['next-auth.session-token'] }
   }
 
+  if (providerId === 'mimo') {
+    console.log('[mapOAuthCredentials] Processing Mimo credentials')
+    const result: Record<string, string> = {}
+    
+    if (credentials['serviceToken']) {
+      result['service_token'] = credentials['serviceToken']
+      console.log('[mapOAuthCredentials] Mapped serviceToken -> service_token')
+    } else if (credentials['service_token']) {
+      result['service_token'] = credentials['service_token']
+      console.log('[mapOAuthCredentials] Using existing service_token')
+    }
+    
+    if (credentials['userId']) {
+      result['user_id'] = credentials['userId']
+      console.log('[mapOAuthCredentials] Mapped userId -> user_id')
+    } else if (credentials['user_id']) {
+      result['user_id'] = credentials['user_id']
+      console.log('[mapOAuthCredentials] Using existing user_id')
+    }
+    
+    if (credentials['xiaomichatbot_ph']) {
+      result['ph_token'] = credentials['xiaomichatbot_ph']
+      console.log('[mapOAuthCredentials] Mapped xiaomichatbot_ph -> ph_token')
+    } else if (credentials['ph_token']) {
+      result['ph_token'] = credentials['ph_token']
+      console.log('[mapOAuthCredentials] Using existing ph_token')
+    }
+    
+    console.log('[mapOAuthCredentials] Mimo result:', JSON.stringify(result, null, 2))
+    return result
+  }
+
+  console.log('[mapOAuthCredentials] No special mapping needed, returning as-is')
   return credentials
 }
 
@@ -378,7 +420,7 @@ export function AddProviderDialog({
     ? providers.find((p) => p.id === selectedProvider) 
     : null
 
-  const supportsOAuth = selectedProviderData && ['deepseek', 'glm', 'kimi', 'minimax', 'qwen', 'qwen-ai', 'zai', 'perplexity'].includes(selectedProviderData.id)
+  const supportsOAuth = selectedProviderData && ['deepseek', 'glm', 'kimi', 'mimo', 'minimax', 'qwen', 'qwen-ai', 'zai', 'perplexity'].includes(selectedProviderData.id)
 
   const toggleModelExpansion = (providerId: string) => {
     setExpandedModels(prev => {
@@ -488,13 +530,37 @@ export function AddProviderDialog({
     setOAuthStatus(t('providers.openingLoginWindow'))
     
     try {
+      console.log('[AddProviderDialog] Starting OAuth login for:', selectedProviderData.id)
+      
       const result = await window.electronAPI?.oauth.startInAppLogin(
         selectedProviderData.id,
         selectedProviderData.id as ProviderVendor
       )
       
+      console.log('[AddProviderDialog] OAuth result:', JSON.stringify(result, null, 2))
+      
       if (result?.success && result.credentials) {
+        console.log('[AddProviderDialog] OAuth success, credentials:', JSON.stringify(result.credentials, null, 2))
+        
         const mappedCredentials = mapOAuthCredentials(selectedProviderData?.id, result.credentials)
+        console.log('[AddProviderDialog] Mapped credentials:', JSON.stringify(mappedCredentials, null, 2))
+        
+        const hasAllRequiredFields = selectedProviderData.credentialFields
+          .filter(f => f.required)
+          .every(f => mappedCredentials[f.name])
+        
+        console.log('[AddProviderDialog] Has all required fields:', hasAllRequiredFields)
+        console.log('[AddProviderDialog] Required fields:', selectedProviderData.credentialFields.filter(f => f.required).map(f => f.name))
+        console.log('[AddProviderDialog] Mapped credentials keys:', Object.keys(mappedCredentials))
+        
+        if (!hasAllRequiredFields) {
+          console.error('[AddProviderDialog] Missing required fields!')
+          const missing = selectedProviderData.credentialFields
+            .filter(f => f.required && !mappedCredentials[f.name])
+            .map(f => f.name)
+          console.error('[AddProviderDialog] Missing:', missing)
+        }
+        
         setCredentials(mappedCredentials)
         setOAuthStatus(t('providers.loginSuccess'))
         
@@ -504,6 +570,7 @@ export function AddProviderDialog({
         })
       } else {
         const errorMsg = result?.error || ''
+        console.error('[AddProviderDialog] OAuth failed:', errorMsg)
         const translatedError = errorMsg === 'Login window was closed' 
           ? t('providers.loginWindowClosed')
           : errorMsg === 'A login window is already open'
@@ -515,6 +582,7 @@ export function AddProviderDialog({
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : t('providers.loginFailed')
+      console.error('[AddProviderDialog] OAuth error:', errorMessage)
       setOAuthStatus(errorMessage)
     } finally {
       setIsOAuthLoading(false)
@@ -608,6 +676,23 @@ export function AddProviderDialog({
                   label: t('zai.token'),
                   placeholder: t('zai.tokenPlaceholder'),
                   helpText: t('zai.tokenHelp'),
+                },
+              },
+              mimo: {
+                service_token: {
+                  label: t('mimo.serviceToken'),
+                  placeholder: t('mimo.serviceTokenPlaceholder'),
+                  helpText: t('mimo.serviceTokenHelp'),
+                },
+                user_id: {
+                  label: t('mimo.userId'),
+                  placeholder: t('mimo.userIdPlaceholder'),
+                  helpText: t('mimo.userIdHelp'),
+                },
+                ph_token: {
+                  label: t('mimo.phToken'),
+                  placeholder: t('mimo.phTokenPlaceholder'),
+                  helpText: t('mimo.phTokenHelp'),
                 },
               },
               perplexity: {

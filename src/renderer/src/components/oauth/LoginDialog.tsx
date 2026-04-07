@@ -19,7 +19,7 @@ import { TokenInput } from './TokenInput'
 import { OAuthProgress, OAuthProgressStatus } from './OAuthProgress'
 import { ExternalLink, AlertCircle } from 'lucide-react'
 
-type ProviderType = 'deepseek' | 'glm' | 'kimi' | 'minimax' | 'qwen' | 'zai'
+type ProviderType = 'deepseek' | 'glm' | 'kimi' | 'mimo' | 'minimax' | 'qwen' | 'zai'
 
 interface OAuthLoginResult {
   success: boolean
@@ -143,6 +143,36 @@ const PROVIDER_CONFIGS: Record<ProviderType, ProviderConfig> = {
       },
     ],
   },
+  mimo: {
+    nameKey: 'mimo.name',
+    loginUrl: 'https://aistudio.xiaomimimo.com',
+    manualTokenConfigs: [
+      {
+        providerType: 'mimo',
+        tokenType: 'service_token',
+        labelKey: 'mimo.serviceToken',
+        placeholderKey: 'mimo.serviceTokenPlaceholder',
+        descriptionKey: 'mimo.serviceTokenHelp',
+        helpUrl: 'https://aistudio.xiaomimimo.com',
+      },
+      {
+        providerType: 'mimo',
+        tokenType: 'user_id',
+        labelKey: 'mimo.userId',
+        placeholderKey: 'mimo.userIdPlaceholder',
+        descriptionKey: 'mimo.userIdHelp',
+        helpUrl: 'https://aistudio.xiaomimimo.com',
+      },
+      {
+        providerType: 'mimo',
+        tokenType: 'ph_token',
+        labelKey: 'mimo.phToken',
+        placeholderKey: 'mimo.phTokenPlaceholder',
+        descriptionKey: 'mimo.phTokenHelp',
+        helpUrl: 'https://aistudio.xiaomimimo.com',
+      },
+    ],
+  },
 }
 
 export interface LoginDialogProps {
@@ -170,6 +200,8 @@ export function LoginDialog({
   const [activeTab, setActiveTab] = useState<string>(defaultTab)
   const [token, setToken] = useState('')
   const [realUserID, setRealUserID] = useState('') // For MiniMax
+  const [mimoUserId, setMimoUserId] = useState('') // For Mimo
+  const [mimoPhToken, setMimoPhToken] = useState('') // For Mimo
   const [tokenType, setTokenType] = useState<string>('')
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string>('')
@@ -185,6 +217,7 @@ export function LoginDialog({
   const config = PROVIDER_CONFIGS[providerType]
   const displayName = providerName || t(config?.nameKey || '') || providerType
   const isMiniMax = providerType === 'minimax'
+  const isMimo = providerType === 'mimo'
 
   useEffect(() => {
     if (config?.manualTokenConfigs.length) {
@@ -210,6 +243,8 @@ export function LoginDialog({
   const resetState = useCallback(() => {
     setToken('')
     setRealUserID('')
+    setMimoUserId('')
+    setMimoPhToken('')
     setError('')
     setIsLoading(false)
     setProgress({ status: 'idle', message: '' })
@@ -233,7 +268,12 @@ export function LoginDialog({
   }
 
   const handleManualSubmit = async () => {
-    if (!token.trim()) {
+    if (isMimo) {
+      if (!token.trim() || !mimoUserId.trim() || !mimoPhToken.trim()) {
+        setError(t('oauth.enterAllTokens'))
+        return
+      }
+    } else if (!token.trim()) {
       setError(t('oauth.enterToken'))
       return
     }
@@ -248,6 +288,8 @@ export function LoginDialog({
         providerType,
         token,
         realUserID: isMiniMax ? realUserID.trim() : undefined,
+        mimoUserId: isMimo ? mimoUserId.trim() : undefined,
+        mimoPhToken: isMimo ? mimoPhToken.trim() : undefined,
       }) as OAuthLoginResult | undefined
 
       if (result?.success) {
@@ -335,6 +377,31 @@ export function LoginDialog({
               />
             )}
 
+            {isMimo && (
+              <>
+                <TokenInput
+                  label={t('mimo.userId')}
+                  placeholder={t('mimo.userIdPlaceholder')}
+                  description={t('mimo.userIdHelp')}
+                  helpUrl="https://aistudio.xiaomimimo.com"
+                  value={mimoUserId}
+                  onChange={setMimoUserId}
+                  onSubmit={handleManualSubmit}
+                  disabled={isLoading}
+                />
+                <TokenInput
+                  label={t('mimo.phToken')}
+                  placeholder={t('mimo.phTokenPlaceholder')}
+                  description={t('mimo.phTokenHelp')}
+                  helpUrl="https://aistudio.xiaomimimo.com"
+                  value={mimoPhToken}
+                  onChange={setMimoPhToken}
+                  onSubmit={handleManualSubmit}
+                  disabled={isLoading}
+                />
+              </>
+            )}
+
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <AlertCircle className="h-4 w-4" />
               <span>{t('oauth.tokenStoredLocally')}</span>
@@ -386,7 +453,7 @@ export function LoginDialog({
           {activeTab === 'manual' && (
             <Button
               onClick={handleManualSubmit}
-              disabled={isLoading || !token.trim()}
+              disabled={isLoading || !token.trim() || (isMimo && (!mimoUserId.trim() || !mimoPhToken.trim()))}
             >
               {isLoading ? t('oauth.validating') : t('oauth.confirmLogin')}
             </Button>

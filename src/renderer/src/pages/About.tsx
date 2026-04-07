@@ -10,6 +10,7 @@ import {
   FileText,
   Bug,
   Zap,
+  RefreshCw,
 } from 'lucide-react'
 import logoIcon from '@/assets/icons/icons.png'
 
@@ -21,9 +22,16 @@ interface UpdateInfo {
   error?: string
 }
 
+interface DownloadProgress {
+  percent: number
+  bytesPerSecond: number
+  transferred: number
+  total: number
+}
+
 export function About() {
   const { t } = useTranslation()
-  const [appVersion, setAppVersion] = useState<string>('1.1.2')
+  const [appVersion, setAppVersion] = useState<string>('1.2.0')
 
   useEffect(() => {
     if (window.electronAPI?.app?.getVersion) {
@@ -38,10 +46,57 @@ export function About() {
     result?: UpdateInfo
   }>({ checking: false })
 
+  const [downloadProgress, setDownloadProgress] = useState<DownloadProgress | null>(null)
+  const [isDownloading, setIsDownloading] = useState(false)
+  const [isDownloaded, setIsDownloaded] = useState(false)
+  const [downloadError, setDownloadError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!window.electronAPI?.app) return
+
+    const unsubscribeProgress = window.electronAPI.app.onUpdateProgress((progress: DownloadProgress) => {
+      setDownloadProgress(progress)
+      setIsDownloading(true)
+      setDownloadError(null)
+    })
+
+    const unsubscribeDownloaded = window.electronAPI.app.onUpdateDownloaded(() => {
+      setIsDownloading(false)
+      setIsDownloaded(true)
+      setDownloadProgress(null)
+      setDownloadError(null)
+    })
+
+    const unsubscribeError = window.electronAPI.app.onUpdateError((error: any) => {
+      setIsDownloading(false)
+      setDownloadProgress(null)
+      setDownloadError(error?.message || 'Download failed')
+    })
+
+    return () => {
+      unsubscribeProgress()
+      unsubscribeDownloaded()
+      unsubscribeError()
+    }
+  }, [])
+
+  const formatBytes = (bytes: number): string => {
+    if (bytes === 0) return '0 B'
+    const k = 1024
+    const sizes = ['B', 'KB', 'MB', 'GB']
+    const i = Math.floor(Math.log(bytes) / Math.log(k))
+    return `${parseFloat((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`
+  }
+
+  const formatSpeed = (bytesPerSecond: number): string => {
+    return `${formatBytes(bytesPerSecond)}/s`
+  }
+
   const handleCheckAppUpdate = async () => {
     setAppUpdateStatus({ checking: true })
+    setDownloadError(null)
+    setIsDownloaded(false)
     try {
-      // Use main process to check update (avoids CORS issues)
       const result = await window.electronAPI.app.checkUpdate()
       setAppUpdateStatus({
         checking: false,
@@ -60,12 +115,22 @@ export function About() {
     }
   }
 
-  const handleDownloadAppUpdate = () => {
-    const url = appUpdateStatus.result?.releaseUrl || 'https://github.com/xiaoY233/Chat2API/releases'
-    if (window.electronAPI?.app?.openExternal) {
-      window.electronAPI.app.openExternal(url)
-    } else {
-      window.open(url, '_blank')
+  const handleDownloadUpdate = async () => {
+    try {
+      setIsDownloading(true)
+      setDownloadError(null)
+      await window.electronAPI.app.downloadUpdate()
+    } catch (error) {
+      setIsDownloading(false)
+      setDownloadError(error instanceof Error ? error.message : 'Download failed')
+    }
+  }
+
+  const handleInstallUpdate = async () => {
+    try {
+      await window.electronAPI.app.installUpdate()
+    } catch (error) {
+      setDownloadError(error instanceof Error ? error.message : 'Install failed')
     }
   }
 
@@ -183,6 +248,57 @@ export function About() {
                   <Loader2 className="w-4 h-4 animate-spin" />
                   <span className="text-sm font-medium">{t('settings.checking')}</span>
                 </div>
+              ) : isDownloading && downloadProgress ? (
+                <div className="flex flex-col gap-2 min-w-[200px]">
+                  <div className="flex items-center justify-between text-xs text-[var(--text-muted)]">
+                    <span>{t('settings.downloadingUpdate')}</span>
+                    <span className="font-mono">{downloadProgress.percent.toFixed(1)}%</span>
+                  </div>
+                  <div className="w-full h-2 bg-[var(--bg-tertiary)] rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-[var(--accent-primary)] transition-all duration-300"
+                      style={{ width: `${downloadProgress.percent}%` }}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between text-xs text-[var(--text-dim)]">
+                    <span>{formatSpeed(downloadProgress.bytesPerSecond)}</span>
+                    <span>
+                      {formatBytes(downloadProgress.transferred)} / {formatBytes(downloadProgress.total)}
+                    </span>
+                  </div>
+                </div>
+              ) : isDownloaded ? (
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-[var(--success)]/10 shadow-[0_0_8px_var(--success)]">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-[var(--success)]" />
+                    <span className="text-xs font-medium text-[var(--success)]">
+                      {t('settings.updateDownloaded')}
+                    </span>
+                  </div>
+                  <button
+                    onClick={handleInstallUpdate}
+                    className="px-4 py-2 bg-[var(--accent-primary)] hover:bg-[var(--accent-primary)]/90 text-white text-sm font-medium rounded-full transition-colors flex items-center gap-2 shadow-lg shadow-[var(--accent-primary)]/20"
+                  >
+                    <RefreshCw className="w-4 h-4" />
+                    {t('settings.restartAndInstall')}
+                  </button>
+                </div>
+              ) : downloadError ? (
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-[var(--accent-error)]/10">
+                    <AlertCircle className="w-3.5 h-3.5 text-[var(--accent-error)]" />
+                    <span className="text-xs font-medium text-[var(--accent-error)]">
+                      {t('settings.updateCheckFailed')}
+                    </span>
+                  </div>
+                  <button
+                    onClick={handleCheckAppUpdate}
+                    className="px-4 py-2 bg-[var(--glass-bg)] hover:bg-[var(--glass-bg-hover)] border border-[var(--glass-border)] hover:border-[var(--glass-border-hover)] rounded-full text-sm text-[var(--text-primary)] font-medium transition-all duration-200 flex items-center gap-2"
+                  >
+                    <RefreshCw className="h-4 w-4 text-[var(--text-muted)]" />
+                    {t('settings.retry')}
+                  </button>
+                </div>
               ) : appUpdateStatus.result && !appUpdateStatus.result.error && appUpdateStatus.result.hasUpdate ? (
                 <div className="flex items-center gap-3">
                   <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-[var(--success)]/10 shadow-[0_0_8px_var(--success)]">
@@ -191,11 +307,11 @@ export function About() {
                       <span className="relative inline-flex rounded-full h-2 w-2 bg-[var(--success)]"></span>
                     </span>
                     <span className="text-xs font-medium text-[var(--success)]">
-                      v{appUpdateStatus.result.latestVersion}
+                      {t('settings.updateAvailable')} v{appUpdateStatus.result.latestVersion}
                     </span>
                   </div>
                   <button
-                    onClick={handleDownloadAppUpdate}
+                    onClick={handleDownloadUpdate}
                     className="px-4 py-2 bg-[var(--accent-primary)] hover:bg-[var(--accent-primary)]/90 text-white text-sm font-medium rounded-full transition-colors flex items-center gap-2 shadow-lg shadow-[var(--accent-primary)]/20"
                   >
                     <Download className="w-4 h-4" />
@@ -214,7 +330,7 @@ export function About() {
             </div>
           </div>
 
-          {appUpdateStatus.result && !appUpdateStatus.checking && (
+          {appUpdateStatus.result && !appUpdateStatus.checking && !isDownloading && !isDownloaded && (
             <div className="mt-4 pt-4 border-t border-[var(--glass-border)]">
               {appUpdateStatus.result.error ? (
                 <div className="flex items-center gap-2 text-[var(--accent-error)]">

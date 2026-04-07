@@ -78,14 +78,6 @@ interface ChatCompletionRequest {
   tools?: any[]
   tool_choice?: any
   chatId?: string
-  isMultiTurn?: boolean
-  sessionContext?: {
-    sessionId: string
-    providerSessionId?: string
-    parentMessageId?: string
-    messages: any[]
-    isNew: boolean
-  }
 }
 
 interface DeviceInfo {
@@ -561,23 +553,7 @@ export class MiniMaxAdapter {
     
     const deviceInfo = await this.requestDeviceInfo()
     
-    // Use session context passed from forwarder
-    const sessionContext = request.sessionContext
-    const isMultiTurn = sessionContext && !sessionContext.isNew
-    
-    // Use providerSessionId (existing chat_id) if available
-    let chatId: string = sessionContext?.providerSessionId || ''
-    
-    console.log('[MiniMax] Session info:', {
-      isMultiTurn,
-      chatId: chatId || '(new)',
-    })
-    
-    // In multi-turn mode, only send the last user message
-    // MiniMax will use the chat_id to maintain conversation context
-    const messages = isMultiTurn && chatId 
-      ? [request.messages[request.messages.length - 1]] 
-      : [...request.messages]
+    const messages = [...request.messages]
     
     let toolsPrompt = ''
     // Only inject if tools are provided and not already injected by client
@@ -596,9 +572,10 @@ export class MiniMaxAdapter {
       }
     }
     
-    const requestBody = this.messagesPrepare(messages, toolsPrompt, isMultiTurn)
+    const requestBody = this.messagesPrepare(messages, toolsPrompt, false)
     
     let msgId: string = ''
+    let chatId: string = request.chatId || ''
     
     if (chatId) {
       console.log('[MiniMax] Using existing chat:', chatId)
@@ -740,11 +717,12 @@ export class MiniMaxAdapter {
     let lastContent = ''
     let lastThinkingContent = ''
     let pollCount = 0
-    const maxPolls = 60
+    const maxPolls = 120
     const pollInterval = 500
     const toolCallState = createToolCallState()
     let sentRole = false
     let sentThinkingRole = false
+    let lastMsgId = ''
     
     const poll = async () => {
       try {
@@ -759,31 +737,52 @@ export class MiniMaxAdapter {
             continue
           }
           
-          const { messages, base_resp } = detailResponse.data
+          const { messages, chat, base_resp } = detailResponse.data
           if (base_resp?.status_code !== 0) {
             console.log('[MiniMax] Poll base_resp:', base_resp)
             continue
           }
           
-          if (pollCount <= 3 || pollCount % 10 === 0) {
-            console.log('[MiniMax] Poll messages count:', messages?.length, 'first msg_type:', messages?.[0]?.msg_type)
-            if (messages && messages.length > 0) {
-              console.log('[MiniMax] All message types:', messages.map((m: any) => ({ msg_type: m.msg_type, has_content: !!m.msg_content, content_preview: m.msg_content?.substring?.(0, 50) })))
-            }
+          const chatStatus = chat?.chat_status || 0
+          
+          console.log('[MiniMax] Poll #' + pollCount + ' - chat_status:', chatStatus, 'messages count:', messages?.length)
+          
+          if (messages && messages.length > 0) {
+            console.log('[MiniMax] Message details:', messages.map((m: any) => ({ 
+              msg_id: m.msg_id, 
+              msg_type: m.msg_type, 
+              content_len: m.msg_content?.length || 0,
+              has_thinking: !!m.extra_info?.thinking_content,
+              thinking_len: m.extra_info?.thinking_content?.length || 0
+            })))
           }
           
-          const aiMessage = messages?.find((msg: any) => msg.msg_type === 2)
+          const aiMessages = messages?.filter((msg: any) => msg.msg_type === 2)
+          const aiMessage = aiMessages?.length > 0 ? aiMessages[aiMessages.length - 1] : null
+          
+          console.log('[MiniMax] AI messages count:', aiMessages?.length, 'using last message')
           
           if (aiMessage && aiMessage.msg_content) {
             const currentContent = aiMessage.msg_content
             const currentThinkingContent = aiMessage?.extra_info?.thinking_content || ''
+            const currentMsgId = aiMessage.msg_id || ''
             
-            // Handle thinking content
+            if (currentMsgId !== lastMsgId && lastMsgId !== '') {
+              console.log('[MiniMax] New AI message detected, msg_id changed from', lastMsgId, 'to', currentMsgId)
+              lastContent = ''
+              lastThinkingContent = ''
+            }
+            
+            console.log('[MiniMax] AI message found - msg_id:', currentMsgId, 
+              'content_len:', currentContent.length, 
+              'thinking_len:', currentThinkingContent.length,
+              'last_content_len:', lastContent.length,
+              'last_thinking_len:', lastThinkingContent.length)
+            
             if (currentThinkingContent && currentThinkingContent.length > lastThinkingContent.length) {
               const newThinkingChunk = currentThinkingContent.substring(lastThinkingContent.length)
               
               if (newThinkingChunk.trim()) {
-                // Send role for thinking content first
                 if (!sentThinkingRole) {
                   transStream.write(`data: ${JSON.stringify({
                     id: chatId.toString(),
@@ -795,7 +794,6 @@ export class MiniMaxAdapter {
                   sentThinkingRole = true
                 }
                 
-                // Send thinking content as reasoning_content
                 transStream.write(`data: ${JSON.stringify({
                   id: chatId.toString(),
                   model,
@@ -811,7 +809,6 @@ export class MiniMaxAdapter {
             if (currentContent.length > lastContent.length) {
               const newChunk = currentContent.substring(lastContent.length)
               
-              // Process tool call interception
               const baseChunk = createBaseChunk(chatId.toString(), model, created)
               const { chunks: outputChunks } = processStreamContent(
                 newChunk, 
@@ -830,10 +827,11 @@ export class MiniMaxAdapter {
               lastContent = currentContent
             }
             
-            if (pollCount > 5 && currentContent === lastContent && lastContent.length > 0) {
-              console.log('[MiniMax] Stream completed after', pollCount, 'polls, content length:', lastContent.length)
+            lastMsgId = currentMsgId
+            
+            if (chatStatus === 2 && aiMessage.msg_content) {
+              console.log('[MiniMax] Stream completed - chat_status: 2, polls:', pollCount, 'content length:', lastContent.length, 'thinking length:', lastThinkingContent.length)
               
-              // Flush any remaining tool calls
               const baseChunk = createBaseChunk(chatId.toString(), model, created)
               const flushChunks = flushToolCallBuffer(toolCallState, baseChunk, 'minimax')
               
@@ -858,6 +856,8 @@ export class MiniMaxAdapter {
               }
               return
             }
+            
+            lastMsgId = currentMsgId
           }
         }
         

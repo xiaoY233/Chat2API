@@ -206,12 +206,6 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
 
       const todaySuccess = useRequestLogTrends ? (todayTrend?.success ?? 0) : (todayTrend?.info ?? 0)
       const yesterdaySuccess = useRequestLogTrends ? (yesterdayTrend?.success ?? 0) : (yesterdayTrend?.info ?? 0)
-      const todayError = useRequestLogTrends 
-        ? (todayTrend?.error ?? 0) 
-        : ((todayTrend?.error ?? 0) + (todayTrend?.warn ?? 0))
-      const yesterdayError = useRequestLogTrends 
-        ? (yesterdayTrend?.error ?? 0) 
-        : ((yesterdayTrend?.error ?? 0) + (yesterdayTrend?.warn ?? 0))
       const todaySuccessRate = todayRequests > 0 ? Math.round((todaySuccess / todayRequests) * 100) : 0
       const yesterdaySuccessRate = yesterdayRequests > 0 ? Math.round((yesterdaySuccess / yesterdayRequests) * 100) : 0
       const successRateTrend = yesterdaySuccessRate > 0 ? todaySuccessRate - yesterdaySuccessRate : 0
@@ -222,9 +216,6 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
         ? Math.round(((todayAvgLatency - yesterdayAvgLatency) / yesterdayAvgLatency) * 100)
         : 0
 
-      const totalAccounts = accounts?.length ?? 0
-      const accountsTrend = 0
-
       setStats({
         totalRequests,
         successRate,
@@ -233,7 +224,6 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
         requestsTrend,
         successRateTrend,
         latencyTrend,
-        accountsTrend,
       })
 
       const providerUsage = persistentStats?.providerUsage ?? {}

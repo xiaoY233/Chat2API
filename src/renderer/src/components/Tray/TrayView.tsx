@@ -1,11 +1,9 @@
 import { useEffect, useState, useMemo } from 'react'
-import { useTranslation } from 'react-i18next'
 import { Power, Copy, Check, Play, Square, RotateCw, ExternalLink, Moon, Sun, Zap, Wifi, WifiOff } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useTheme } from '@/hooks/useTheme'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useProvidersStore } from '@/stores/providersStore'
-import type { AppConfig } from '@/types/electron'
 import iconsPng from '@/assets/icons/icons.png'
 
 interface ProviderInfo {
@@ -16,7 +14,6 @@ interface ProviderInfo {
 }
 
 export function TrayView() {
-  const { t } = useTranslation()
   const { toggleTheme, isDark } = useTheme()
   const { language } = useSettingsStore()
   const { providers, accounts, setProviders, setAccounts, setIsLoading, isLoading } = useProvidersStore()

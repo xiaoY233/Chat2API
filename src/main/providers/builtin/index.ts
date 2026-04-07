@@ -2,6 +2,7 @@ import deepseekConfig from './deepseek'
 import glmConfig from './glm'
 import kimiConfig from './kimi'
 import minimaxConfig from './minimax'
+import mimoConfig from './mimo'
 import perplexityConfig from './perplexity'
 import qwenConfig from './qwen'
 import qwenAiConfig from './qwen-ai'
@@ -13,6 +14,7 @@ export const builtinProviders: BuiltinProviderConfig[] = [
   glmConfig,
   kimiConfig,
   minimaxConfig,
+  mimoConfig,
   perplexityConfig,
   qwenConfig,
   qwenAiConfig,
@@ -24,6 +26,7 @@ export const builtinProviderMap: Record<string, BuiltinProviderConfig> = {
   glm: glmConfig,
   kimi: kimiConfig,
   minimax: minimaxConfig,
+  mimo: mimoConfig,
   perplexity: perplexityConfig,
   qwen: qwenConfig,
   'qwen-ai': qwenAiConfig,
@@ -43,6 +46,7 @@ export {
   glmConfig,
   kimiConfig,
   minimaxConfig,
+  mimoConfig,
   perplexityConfig,
   qwenConfig,
   qwenAiConfig,

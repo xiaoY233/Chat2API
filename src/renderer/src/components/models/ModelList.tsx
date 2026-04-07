@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, memo } from 'react'
+import { useState, useMemo, useCallback, memo, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -24,11 +24,12 @@ import { useProxyStore } from '@/stores/proxyStore'
 import { useToast } from '@/hooks/use-toast'
 import { Search, Copy, CheckCircle2, XCircle, Cpu, Check, Square, Database, ChevronLeft, ChevronRight } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import type { Account } from '@/types/electron'
+import type { Account, EffectiveModel } from '@/types/electron'
 import deepseekIcon from '@/assets/providers/deepseek.svg'
 import glmIcon from '@/assets/providers/glm.svg'
 import kimiIcon from '@/assets/providers/kimi.svg'
 import minimaxIcon from '@/assets/providers/minimax.svg'
+import mimoIcon from '@/assets/providers/mimo.svg'
 import perplexityIcon from '@/assets/providers/perplexity.svg'
 import qwenIcon from '@/assets/providers/qwen.svg'
 import zaiIcon from '@/assets/providers/zai.svg'
@@ -39,6 +40,7 @@ const providerIcons: Record<string, string> = {
   glm: glmIcon,
   kimi: kimiIcon,
   minimax: minimaxIcon,
+  mimo: mimoIcon,
   perplexity: perplexityIcon,
   qwen: qwenIcon,
   'qwen-ai': qwenIcon,
@@ -132,7 +134,7 @@ ModelRow.displayName = 'ModelRow'
 
 export function ModelList() {
   const { t } = useTranslation()
-  const { providers, accounts } = useProvidersStore()
+  const { providers, accounts, modelsLastUpdated } = useProvidersStore()
   const { modelMappings } = useProxyStore()
   const { toast } = useToast()
   
@@ -141,6 +143,32 @@ export function ModelList() {
   const [selectedModels, setSelectedModels] = useState<Set<string>>(new Set())
   const [selectAll, setSelectAll] = useState(false)
   const [currentPage, setCurrentPage] = useState(1)
+  const [effectiveModelsMap, setEffectiveModelsMap] = useState<Record<string, EffectiveModel[]>>({})
+  
+  const loadEffectiveModels = useCallback(async () => {
+    try {
+      const enabledProviders = providers.filter(p => p.enabled)
+      const newMap: Record<string, EffectiveModel[]> = {}
+      
+      for (const provider of enabledProviders) {
+        try {
+          const models = await window.electronAPI.providers.getEffectiveModels(provider.id)
+          newMap[provider.id] = models
+        } catch (error) {
+          console.error(`Failed to load models for provider ${provider.id}:`, error)
+          newMap[provider.id] = []
+        }
+      }
+      
+      setEffectiveModelsMap(newMap)
+    } catch (error) {
+      console.error('Failed to load effective models:', error)
+    }
+  }, [providers])
+  
+  useEffect(() => {
+    loadEffectiveModels()
+  }, [loadEffectiveModels, modelsLastUpdated])
   
   const modelList = useMemo(() => {
     const models: ModelInfo[] = []
@@ -162,23 +190,23 @@ export function ModelList() {
       activeProviderMap.set(provider.id, hasActiveAccounts)
     }
     
-    // Add models from providers
     for (const provider of enabledProviders) {
-      if (!provider.supportedModels || provider.supportedModels.length === 0) {
+      const effectiveModels = effectiveModelsMap[provider.id] || []
+      if (effectiveModels.length === 0) {
         continue
       }
       
       const providerAccounts = accountMap.get(provider.id) || []
       const hasActiveAccounts = activeProviderMap.get(provider.id) || false
       
-      for (const modelName of provider.supportedModels) {
-        const modelId = `${provider.id}-${modelName}`
+      for (const model of effectiveModels) {
+        const modelId = `${provider.id}-${model.displayName}`
         const status = hasActiveAccounts ? 'available' : 'unavailable'
-        addedModelNames.add(modelName)
+        addedModelNames.add(model.displayName)
         
         models.push({
           id: modelId,
-          name: modelName,
+          name: model.displayName,
           providerId: provider.id,
           providerName: provider.name,
           accountId: providerAccounts[0]?.id,
@@ -188,7 +216,6 @@ export function ModelList() {
       }
     }
     
-    // Add model mappings (only if not already added from providers)
     for (const mapping of modelMappings) {
       if (!addedModelNames.has(mapping.requestModel)) {
         models.push({
@@ -206,7 +233,7 @@ export function ModelList() {
     }
     
     return models
-  }, [providers, accounts, modelMappings])
+  }, [providers, accounts, modelMappings, effectiveModelsMap, t])
   
   const filteredModels = useMemo(() => {
     let filtered = modelList

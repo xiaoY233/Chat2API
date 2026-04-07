@@ -63,9 +63,6 @@ interface ChatCompletionRequest {
   reasoning_effort?: 'low' | 'medium' | 'high'
   tools?: any[]
   tool_choice?: any
-  sessionId?: string
-  parentMessageId?: string
-  isMultiTurn?: boolean
 }
 
 const tokenCache = new Map<string, TokenInfo>()
@@ -375,21 +372,8 @@ ${message.content || ''}
   async chatCompletion(request: ChatCompletionRequest): Promise<{ response: AxiosResponse; sessionId: string }> {
     const token = await this.acquireToken()
     
-    const isMultiTurn = !!(request.isMultiTurn && request.sessionId)
-    let sessionId = request.sessionId || ''
-    
-    if (isMultiTurn && sessionId) {
-      console.log('[DeepSeek] Reusing session:', sessionId)
-    } else {
-      // Clear session cache when starting a new session
-      // This ensures we don't reuse a cached session when SessionManager created a new session
-      const cacheKey = this.account.id
-      sessionCache.delete(cacheKey)
-      console.log('[DeepSeek] Cleared session cache for new session')
-      
-      sessionId = await this.createSession()
-      console.log('[DeepSeek] Created new session:', sessionId)
-    }
+    const sessionId = await this.createSession()
+    console.log('[DeepSeek] Created new session:', sessionId)
     
     const challenge = await this.getChallenge('/api/v0/chat/completion')
     const challengeAnswer = await this.calculateChallengeAnswer(challenge)
@@ -398,7 +382,7 @@ ${message.content || ''}
     // Note: Tool prompt injection is already handled by Forwarder.transformRequestForPromptToolUse()
     const messages = [...request.messages]
 
-    let prompt = this.messagesToPrompt(messages, isMultiTurn)
+    let prompt = this.messagesToPrompt(messages, false)
 
     // Use request parameters for mode control (OpenAI compatible)
     let searchEnabled = false
@@ -434,7 +418,6 @@ ${message.content || ''}
       `${DEEPSEEK_API_BASE}/v0/chat/completion`,
       {
         chat_session_id: sessionId,
-        parent_message_id: request.parentMessageId || null,
         prompt,
         ref_file_ids: [],
         search_enabled: searchEnabled,

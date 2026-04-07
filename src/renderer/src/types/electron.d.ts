@@ -20,6 +20,7 @@ import type {
   SystemPrompt,
   PromptType,
   ToolPromptConfig,
+  EffectiveModel,
 } from '../../../shared/types'
 
 export type { 
@@ -44,6 +45,7 @@ export type {
   SystemPrompt,
   PromptType,
   ToolPromptConfig,
+  EffectiveModel,
 }
 
 export interface CustomProviderFormData {
@@ -97,6 +99,27 @@ interface ProvidersAPI {
   duplicate: (id: string) => Promise<Provider>
   export: (id: string) => Promise<string>
   import: (jsonData: string) => Promise<Provider>
+  updateModels: (providerId: string) => Promise<{
+    success: boolean
+    modelsCount?: number
+    error?: string
+  }>
+  getEffectiveModels: (providerId: string) => Promise<EffectiveModel[]>
+  addCustomModel: (providerId: string, model: { displayName: string; actualModelId: string }) => Promise<{
+    success: boolean
+    models: EffectiveModel[]
+    error?: string
+  }>
+  removeModel: (providerId: string, modelName: string) => Promise<{
+    success: boolean
+    models: EffectiveModel[]
+    error?: string
+  }>
+  resetModels: (providerId: string) => Promise<{
+    success: boolean
+    models: EffectiveModel[]
+    error?: string
+  }>
 }
 
 interface AccountsAPI {
@@ -202,9 +225,43 @@ interface LogsAPI {
   onNewLog: (callback: (log: LogEntry) => void) => () => void
 }
 
+interface UpdateProgressInfo {
+  percent: number
+  bytesPerSecond: number
+  total: number
+  transferred: number
+}
+
+interface UpdateDownloadedInfo {
+  version: string
+  releaseDate: string
+  releaseNotes?: string
+}
+
+interface UpdateStatus {
+  checking: boolean
+  available: boolean
+  downloading: boolean
+  downloaded: boolean
+  error: string | null
+  progress: UpdateProgressInfo | null
+  version: string | null
+  releaseDate: string | null
+  releaseNotes: string | null
+}
+
 interface AppAPI {
   getVersion: () => Promise<string>
   checkUpdate: () => Promise<{ hasUpdate: boolean; currentVersion: string; latestVersion: string; releaseUrl?: string; error?: string }>
+  downloadUpdate: () => Promise<void>
+  installUpdate: () => Promise<void>
+  getUpdateStatus: () => Promise<UpdateStatus>
+  onUpdateChecking: (callback: () => void) => () => void
+  onUpdateAvailable: (callback: (info: UpdateDownloadedInfo) => void) => () => void
+  onUpdateNotAvailable: (callback: (info: UpdateDownloadedInfo) => void) => () => void
+  onUpdateProgress: (callback: (progress: UpdateProgressInfo) => void) => () => void
+  onUpdateDownloaded: (callback: (info: UpdateDownloadedInfo) => void) => () => void
+  onUpdateError: (callback: (error: string) => void) => () => void
   minimize: () => Promise<void>
   maximize: () => Promise<void>
   close: () => Promise<void>
@@ -371,6 +428,33 @@ interface ManagementApiAPI {
   generateSecret: () => Promise<string>
 }
 
+interface StrategyConfig {
+  slidingWindow: {
+    enabled: boolean
+    maxMessages: number
+  }
+  tokenLimit: {
+    enabled: boolean
+    maxTokens: number
+  }
+  summary: {
+    enabled: boolean
+    keepRecentMessages: number
+    summaryPrompt?: string
+  }
+}
+
+interface ContextManagementConfig {
+  enabled: boolean
+  strategies: StrategyConfig
+  executionOrder: ('slidingWindow' | 'tokenLimit' | 'summary')[]
+}
+
+interface ContextManagementAPI {
+  getConfig: () => Promise<ContextManagementConfig>
+  updateConfig: (updates: Partial<ContextManagementConfig>) => Promise<ContextManagementConfig>
+}
+
 interface ElectronAPI {
   proxy: ProxyAPI
   store: StoreAPI
@@ -385,6 +469,7 @@ interface ElectronAPI {
   prompts: PromptsAPI
   session: SessionAPI
   managementApi: ManagementApiAPI
+  contextManagement: ContextManagementAPI
   tray: TrayAPI
   on: (channel: string, callback: (...args: unknown[]) => void) => () => void
   send: (channel: string, ...args: unknown[]) => void

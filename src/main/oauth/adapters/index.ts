@@ -7,6 +7,7 @@ export { BaseOAuthAdapter } from './base'
 export { DeepSeekAdapter } from './deepseek'
 export { GLMAdapter } from './glm'
 export { KimiAdapter } from './kimi'
+export { MimoAdapter } from './mimo'
 export { MiniMaxAdapter } from './minimax'
 export { PerplexityAdapter } from './perplexity'
 export { QwenAdapter } from './qwen'
@@ -16,6 +17,7 @@ import { BaseOAuthAdapter } from './base'
 import { DeepSeekAdapter } from './deepseek'
 import { GLMAdapter } from './glm'
 import { KimiAdapter } from './kimi'
+import { MimoAdapter } from './mimo'
 import { MiniMaxAdapter } from './minimax'
 import { PerplexityAdapter } from './perplexity'
 import { QwenAdapter } from './qwen'
@@ -37,6 +39,8 @@ export function createAdapter(
       return new GLMAdapter(config)
     case 'kimi':
       return new KimiAdapter(config)
+    case 'mimo':
+      return new MimoAdapter(config)
     case 'minimax':
       return new MiniMaxAdapter(config)
     case 'perplexity':
@@ -63,6 +67,8 @@ export function getSupportedAuthMethods(providerType: ProviderType): string[] {
       return ['manual']
     case 'kimi':
       return ['manual']
+    case 'mimo':
+      return ['manual', 'cookie']
     case 'minimax':
       return ['manual']
     case 'perplexity':

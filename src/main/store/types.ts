@@ -66,6 +66,10 @@ export interface BuiltinProviderConfig extends Omit<Provider, 'createdAt' | 'upd
   tokenCheckEndpoint?: string
   /** Token check method */
   tokenCheckMethod?: 'GET' | 'POST'
+  /** Models list API endpoint for dynamic model fetching */
+  modelsApiEndpoint?: string
+  /** Additional headers for models API request */
+  modelsApiHeaders?: Record<string, string>
 }
 
 /**
@@ -220,12 +224,6 @@ export type LogLevel = 'debug' | 'info' | 'warn' | 'error'
 export type SessionStatus = 'active' | 'expired' | 'deleted'
 
 /**
- * Session Mode Enum
- * - single: Single-turn mode, session deleted after each chat
- */
-export type SessionMode = 'single'
-
-/**
  * Sliding Window Configuration Interface
  * Controls message count-based context trimming
  */
@@ -305,10 +303,6 @@ export interface SessionRecord {
   providerId: string
   /** Account ID */
   accountId: string
-  /** Provider-specific session ID (e.g., conversation_id, chat_id) */
-  providerSessionId: string
-  /** Parent message ID (for multi-turn conversations) */
-  parentMessageId?: string
   /** Session type */
   sessionType: 'chat' | 'agent'
   /** Message history */
@@ -333,8 +327,6 @@ export interface SessionRecord {
  * Global session management settings
  */
 export interface SessionConfig {
-  /** Session mode: 'single' for delete after chat, 'multi' for persistent sessions */
-  mode: SessionMode
   /** Session timeout (minutes), default 30 */
   sessionTimeout: number
   /** Max messages per session, default 50 */
@@ -584,6 +576,47 @@ export interface ValidationResult {
 }
 
 /**
+ * Custom Model Configuration
+ * User-defined model with display name and actual API model ID
+ */
+export interface CustomModel {
+  /** Model display name (used in AI client) */
+  displayName: string
+  /** Actual model ID (used in API call) */
+  actualModelId: string
+}
+
+/**
+ * User Model Overrides for a Provider
+ * Stores user customizations to built-in provider models
+ */
+export interface ProviderModelOverrides {
+  /** User added custom models */
+  addedModels: CustomModel[]
+  /** Excluded default model display names */
+  excludedModels: string[]
+}
+
+/**
+ * User Model Overrides
+ * Maps provider IDs to their model customizations
+ */
+export type UserModelOverrides = Record<string, ProviderModelOverrides>
+
+/**
+ * Effective Model Information
+ * Combined model info after merging defaults with user overrides
+ */
+export interface EffectiveModel {
+  /** Model display name (used in AI client) */
+  displayName: string
+  /** Actual model ID (used in API call) */
+  actualModelId: string
+  /** Whether this is a user-added custom model */
+  isCustom: boolean
+}
+
+/**
  * Storage Data Structure Interface
  */
 export interface StoreSchema {
@@ -603,13 +636,14 @@ export interface StoreSchema {
   sessions: SessionRecord[]
   /** Persistent statistics */
   statistics: PersistentStatistics
+  /** User model overrides for built-in providers */
+  userModelOverrides: UserModelOverrides
 }
 
 /**
  * Default Session Configuration
  */
 export const DEFAULT_SESSION_CONFIG: SessionConfig = {
-  mode: 'single',
   sessionTimeout: 30,
   maxMessagesPerSession: 50,
   deleteAfterTimeout: false,
@@ -630,6 +664,11 @@ export const DEFAULT_STATISTICS: PersistentStatistics = {
   accountUsage: {},
   dailyStats: {},
 }
+
+/**
+ * Default User Model Overrides
+ */
+export const DEFAULT_USER_MODEL_OVERRIDES: UserModelOverrides = {}
 
 /**
  * Default Tool Prompt Configuration
@@ -689,319 +728,6 @@ export const DEFAULT_CONFIG: AppConfig = {
 
 /**
  * Built-in Provider Configuration
+ * Re-exported from providers/builtin/index.ts to avoid duplication
  */
-export const BUILTIN_PROVIDERS: BuiltinProviderConfig[] = [
-  {
-    id: 'deepseek',
-    name: 'DeepSeek',
-    type: 'builtin',
-    authType: 'userToken',
-    apiEndpoint: 'https://chat.deepseek.com/api',
-    chatPath: '/v0/chat/completion',
-    headers: {
-      'Content-Type': 'application/json',
-      'Accept': '*/*',
-      'Origin': 'https://chat.deepseek.com',
-      'Referer': 'https://chat.deepseek.com/',
-    },
-    enabled: true,
-    description: 'DeepSeek intelligent dialogue assistant, supports deep thinking and web search',
-    supportedModels: [
-      'DeepSeek-V3.2',
-      'DeepSeek-Search',
-      'DeepSeek-R1',
-      'DeepSeek-R1-Search',
-    ],
-    modelMappings: {
-      'DeepSeek-V3.2': 'deepseek-chat',
-      'DeepSeek-Search': 'deepseek-chat',
-      'DeepSeek-R1': 'deepseek-chat',
-      'DeepSeek-R1-Search': 'deepseek-chat',
-    },
-    credentialFields: [
-      {
-        name: 'token',
-        label: 'User Token',
-        type: 'password',
-        required: true,
-        placeholder: 'Enter DeepSeek user token',
-        helpText: 'Authentication token obtained from DeepSeek web version',
-      },
-    ],
-  },
-  {
-    id: 'glm',
-    name: 'GLM (Zhipu Qingyan)',
-    type: 'builtin',
-    authType: 'refresh_token',
-    apiEndpoint: 'https://chatglm.cn/api',
-    chatPath: '/chatglm/backend-api/assistant/stream',
-    headers: {
-      'Content-Type': 'application/json',
-      'Accept': 'text/event-stream',
-      'Origin': 'https://chatglm.cn',
-      'Referer': 'https://chatglm.cn/',
-    },
-    enabled: true,
-    description: 'Zhipu Qingyan AI assistant, supports GLM-5 flagship model, deep thinking and web search',
-    supportedModels: ['GLM-5'],
-    modelMappings: {
-      'GLM-5': 'glm-5',
-    },
-    credentialFields: [
-      {
-        name: 'refresh_token',
-        label: 'Refresh Token',
-        type: 'password',
-        required: true,
-        placeholder: 'Enter chatglm_refresh_token',
-        helpText: 'Get chatglm_refresh_token from Zhipu Qingyan web version Cookie',
-      },
-    ],
-  },
-  {
-    id: 'kimi',
-    name: 'Kimi (Moonshot)',
-    type: 'builtin',
-    authType: 'jwt',
-    apiEndpoint: 'https://www.kimi.com',
-    chatPath: '/apiv2/kimi.gateway.chat.v1.ChatService/Chat',
-    headers: {
-      'Content-Type': 'application/connect+json',
-      'Accept': '*/*',
-      'Origin': 'https://www.kimi.com',
-      'Referer': 'https://www.kimi.com/',
-    },
-    enabled: true,
-    description: 'Kimi K2.5 AI assistant, supports thinking mode and web search',
-    supportedModels: ['Kimi-K2.5'],
-    credentialFields: [
-      {
-        name: 'token',
-        label: 'Access Token',
-        type: 'password',
-        required: true,
-        placeholder: 'Enter Kimi access token or refresh token',
-        helpText: 'Supports JWT Token or refresh_token',
-      },
-    ],
-  },
-  {
-    id: 'minimax',
-    name: 'MiniMax',
-    type: 'builtin',
-    authType: 'jwt',
-    apiEndpoint: 'https://agent.minimaxi.com',
-    chatPath: '/matrix/api/v1/chat/send_msg',
-    headers: {
-      'Content-Type': 'application/json',
-      'Accept': 'application/json',
-      'Origin': 'https://agent.minimaxi.com',
-      'Referer': 'https://agent.minimaxi.com/',
-    },
-    enabled: true,
-    description: 'MiniMax Agent - AI assistant with MCP multi-agent collaboration',
-    supportedModels: ['MiniMax-M2.5'],
-    credentialFields: [
-      {
-        name: 'token',
-        label: 'JWT Token',
-        type: 'password',
-        required: true,
-        placeholder: 'Enter MiniMax JWT Token or realUserID+JWTtoken',
-        helpText: 'Format: "realUserID+JWTtoken" or just JWT token',
-      },
-      {
-        name: 'realUserID',
-        label: 'Real User ID (Optional)',
-        type: 'text',
-        required: false,
-        placeholder: 'Enter Real User ID (optional)',
-        helpText: 'If provided, use this instead of JWT user ID',
-      },
-    ],
-  },
-  {
-    id: 'qwen',
-    name: 'Qwen',
-    type: 'builtin',
-    authType: 'tongyi_sso_ticket',
-    apiEndpoint: 'https://qianwen.biz.aliyun.com',
-    chatPath: '/dialog/conversation',
-    headers: {
-      'Content-Type': 'application/json',
-      'Accept': 'application/json, text/event-stream, text/plain, */*',
-      'Origin': 'https://tongyi.aliyun.com',
-      'Referer': 'https://tongyi.aliyun.com/',
-    },
-    enabled: true,
-    description: 'Qwen AI assistant by Alibaba Cloud',
-    supportedModels: [
-      'Qwen3.5-Plus',
-      'Qwen3-Max',
-      'Qwen3-Flash',
-      'Qwen3-Coder',
-      'Qwen3-Plus',
-      'qwen3-235b-a22b',
-      'qwen3-coder-plus',
-      'qwen3-30b-a3b',
-      'qwen-max-latest',
-    ],
-    modelMappings: {},
-    credentialFields: [
-      {
-        name: 'ticket',
-        label: 'SSO Ticket',
-        type: 'password',
-        required: true,
-        placeholder: 'Enter tongyi_sso_ticket',
-        helpText: 'SSO ticket obtained from www.qianwen.com, found in browser DevTools Application -> Cookies as tongyi_sso_ticket',
-      },
-    ],
-  },
-  {
-    id: 'qwen-ai',
-    name: 'Qwen AI (International)',
-    type: 'builtin',
-    authType: 'jwt',
-    apiEndpoint: 'https://chat.qwen.ai',
-    chatPath: '/api/v2/chat/completions',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-      source: 'web',
-    },
-    enabled: true,
-    description: 'Qwen AI international version (chat.qwen.ai)',
-    supportedModels: [
-      'Qwen3.5-Plus',
-      'Qwen3.5-397B',
-      'Qwen3-VL-Plus',
-      'Qwen3-Max',
-      'Qwen3-Coder-Plus',
-      'Qwen-Max-Latest',
-      'Qwen-Plus',
-      'Qwen-Turbo',
-    ],
-    modelMappings: {
-      'Qwen3.5-Plus': 'qwen3.5-plus',
-      'Qwen3.5-397B': 'qwen3.5-397b-a17b',
-      'Qwen3-VL-Plus': 'qwen3-vl-plus',
-      'Qwen3-Max': 'qwen3-max',
-      'Qwen3-Coder-Plus': 'qwen3-coder-plus',
-      'Qwen-Max-Latest': 'qwen-max-latest',
-      'Qwen-Plus': 'qwen-plus-2025-09-11',
-      'Qwen-Turbo': 'qwen-turbo-2025-02-11',
-    },
-    credentialFields: [
-      {
-        name: 'token',
-        label: 'Auth Token',
-        type: 'password',
-        required: true,
-        placeholder: 'Enter JWT token from chat.qwen.ai',
-        helpText: 'JWT token obtained from chat.qwen.ai Local Storage (key: "token")',
-      },
-      {
-        name: 'cookies',
-        label: 'Cookies (Optional)',
-        type: 'textarea',
-        required: false,
-        placeholder: 'Optional cookies for enhanced compatibility',
-        helpText: 'Full cookie string from browser DevTools (optional but recommended)',
-      },
-    ],
-  },
-  {
-    id: 'zai',
-    name: 'Z.ai',
-    type: 'builtin',
-    authType: 'token',
-    apiEndpoint: 'https://chat.z.ai/api',
-    chatPath: '/v2/chat/completions',
-    headers: {
-      'Content-Type': 'application/json',
-      'Accept': '*/*',
-      'Origin': 'https://chat.z.ai',
-      'Referer': 'https://chat.z.ai/',
-    },
-    enabled: true,
-    description: 'Z.ai - Free AI Chatbot powered by GLM-5 and GLM-4.7',
-    supportedModels: [
-      'GLM-5-Turbo',
-      'glm-5',
-      'glm-4.7',
-      'glm-4.6v',
-      'glm-4.6',
-      'glm-4.5v',
-      'glm-4.5-air',
-    ],
-    modelMappings: {
-      'GLM-5-Turbo': 'GLM-5-Turbo',
-      'glm-5': 'glm-5',
-      'glm-4.7': 'glm-4.7',
-      'glm-4.6v': 'glm-4.6v',
-      'glm-4.6': 'glm-4.6v',
-      'glm-4.5v': 'glm-4.5v',
-      'glm-4.5-air': 'glm-4.5-air',
-    },
-    credentialFields: [
-      {
-        name: 'token',
-        label: 'Access Token',
-        type: 'password',
-        required: true,
-        placeholder: 'Enter Z.ai JWT Token',
-        helpText: 'Get token from Z.ai web version, found in browser DevTools Application -> Cookie, starts with "eyJ..."',
-      },
-    ],
-    tokenCheckEndpoint: '/api/v1/users/user/settings',
-    tokenCheckMethod: 'GET',
-  },
-  {
-    id: 'perplexity',
-    name: 'Perplexity',
-    type: 'builtin',
-    authType: 'cookie',
-    apiEndpoint: 'https://www.perplexity.ai',
-    chatPath: '/rest/sse/perplexity_ask',
-    headers: {
-      'Content-Type': 'application/json',
-      'Accept': '*/*',
-      'Origin': 'https://www.perplexity.ai',
-      'Referer': 'https://www.perplexity.ai/',
-    },
-    enabled: true,
-    description: 'Perplexity AI search assistant with multi-model support and web search enhancement',
-    supportedModels: [
-      'Auto',
-      'Turbo',
-      'PPLX-Pro',
-      'GPT-5',
-      'Gemini-2.5-Pro',
-      'Claude-Sonnet-4',
-      'Claude-Opus-4',
-      'Nemotron',
-    ],
-    modelMappings: {
-      'Auto': 'auto',
-      'Turbo': 'turbo',
-      'PPLX-Pro': 'pplx_pro',
-      'GPT-5': 'gpt5',
-      'Gemini-2.5-Pro': 'gemini25pro',
-      'Claude-Sonnet-4': 'claude4sonnet',
-      'Claude-Opus-4': 'claude4opus',
-      'Nemotron': 'nemotron',
-    },
-    credentialFields: [
-      {
-        name: 'sessionToken',
-        label: 'Session Token',
-        type: 'password',
-        required: true,
-        placeholder: 'Enter Perplexity session token',
-        helpText: 'Automatically obtained from browser or manually enter __Secure-next-auth.session-token',
-      },
-    ],
-  },
-]
+export { builtinProviders as BUILTIN_PROVIDERS } from '../providers/builtin'

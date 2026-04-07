@@ -67,19 +67,10 @@ interface ChatCompletionRequest {
   tools?: any[]
   stream?: boolean
   temperature?: number
-  session_id?: string
-  isMultiTurn?: boolean
   web_search?: boolean
   reasoning_effort?: 'low' | 'medium' | 'high'
   enableThinking?: boolean
   enableWebSearch?: boolean
-  sessionContext?: {
-    sessionId: string
-    providerSessionId?: string
-    parentMessageId?: string
-    messages: any[]
-    isNew: boolean
-  }
 }
 
 function uuid(separator: boolean = true): string {
@@ -149,15 +140,8 @@ export class QwenAdapter {
       throw new Error('Qwen ticket not configured, please add ticket in account settings')
     }
 
-    // Use session context passed from forwarder
-    const sessionContext = request.sessionContext
-    const isMultiTurn = sessionContext && !sessionContext.isNew
-    
     const reqId = uuid(false)
-    // Use providerSessionId (existing session_id from Qwen) if available
-    const sessionId = sessionContext?.providerSessionId || uuid(false)
-    // Use parentMessageId (previous req_id) if available
-    const parentReqId = sessionContext?.parentMessageId || '0'
+    const sessionId = uuid(false)
     
     let actualModel = this.mapModel(request.model)
     
@@ -190,10 +174,8 @@ export class QwenAdapter {
     }
     
     console.log('[Qwen] Session info:', {
-      isMultiTurn,
       sessionId,
       reqId,
-      parentReqId,
     })
     console.log('[Qwen] Using model:', actualModel)
 
@@ -201,13 +183,7 @@ export class QwenAdapter {
     let systemPrompt = ''
     let userContent = ''
     
-    // In multi-turn mode, only process the last user message
-    // Qwen will use the session_id to maintain conversation context
-    const messagesToProcess = isMultiTurn && sessionId
-      ? [request.messages[request.messages.length - 1]]
-      : request.messages
-    
-    for (const msg of messagesToProcess) {
+    for (const msg of request.messages) {
       if (msg.role === 'system') {
         systemPrompt = extractTextContent(msg.content)
       } else if (msg.role === 'user') {
@@ -251,10 +227,10 @@ export class QwenAdapter {
         }
       ],
       from: 'default',
-      parent_req_id: parentReqId,
+      parent_req_id: '0',
       enable_search: enableWebSearch,
       biz_data: '{"entryPoint":"tongyigw"}',
-      scene_param: isMultiTurn ? 'continue_chat' : 'first_turn',
+      scene_param: 'first_turn',
       chat_client: 'h5',
       client_tm: timestamp.toString(),
       protocol_version: 'v2',

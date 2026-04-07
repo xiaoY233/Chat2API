@@ -1,16 +1,32 @@
+import { lazy, Suspense } from 'react'
 import { Routes, Route } from 'react-router-dom'
 import { MainLayout } from '@/components/layout/MainLayout'
-import { Dashboard } from '@/pages/Dashboard'
-import { Providers } from '@/pages/Providers'
-import { ProxySettings } from '@/pages/ProxySettings'
-import { Models } from '@/pages/Models'
-import ApiKeys from '@/pages/ApiKeys'
-import Logs from '@/pages/Logs'
-import { Settings } from '@/pages/Settings'
-import { About } from '@/pages/About'
-import { SessionManagement } from '@/pages/SessionManagement'
 import { TrayView } from '@/components/Tray/TrayView'
 import { Toaster } from '@/components/ui/toaster'
+import { Skeleton } from '@/components/ui/skeleton'
+
+const Dashboard = lazy(() => import('@/pages/Dashboard').then(m => ({ default: m.Dashboard })))
+const Providers = lazy(() => import('@/pages/Providers').then(m => ({ default: m.Providers })))
+const ProxySettings = lazy(() => import('@/pages/ProxySettings').then(m => ({ default: m.ProxySettings })))
+const Models = lazy(() => import('@/pages/Models').then(m => ({ default: m.Models })))
+const ApiKeys = lazy(() => import('@/pages/ApiKeys'))
+const Logs = lazy(() => import('@/pages/Logs'))
+const Settings = lazy(() => import('@/pages/Settings').then(m => ({ default: m.Settings })))
+const About = lazy(() => import('@/pages/About').then(m => ({ default: m.About })))
+const SessionManagement = lazy(() => import('@/pages/SessionManagement').then(m => ({ default: m.SessionManagement })))
+
+function PageLoader() {
+  return (
+    <div className="flex items-center justify-center min-h-[400px]">
+      <div className="space-y-4 w-full max-w-md">
+        <Skeleton className="h-8 w-3/4" />
+        <Skeleton className="h-4 w-full" />
+        <Skeleton className="h-4 w-5/6" />
+        <Skeleton className="h-32 w-full" />
+      </div>
+    </div>
+  )
+}
 
 function App() {
   return (
@@ -18,15 +34,15 @@ function App() {
       <Routes>
         <Route path="/tray" element={<TrayView />} />
         <Route element={<MainLayout />}>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/providers" element={<Providers />} />
-          <Route path="/proxy" element={<ProxySettings />} />
-          <Route path="/models" element={<Models />} />
-          <Route path="/api-keys" element={<ApiKeys />} />
-          <Route path="/logs" element={<Logs />} />
-          <Route path="/session" element={<SessionManagement />} />
-          <Route path="/settings" element={<Settings />} />
-          <Route path="/about" element={<About />} />
+          <Route path="/" element={<Suspense fallback={<PageLoader />}><Dashboard /></Suspense>} />
+          <Route path="/providers" element={<Suspense fallback={<PageLoader />}><Providers /></Suspense>} />
+          <Route path="/proxy" element={<Suspense fallback={<PageLoader />}><ProxySettings /></Suspense>} />
+          <Route path="/models" element={<Suspense fallback={<PageLoader />}><Models /></Suspense>} />
+          <Route path="/api-keys" element={<Suspense fallback={<PageLoader />}><ApiKeys /></Suspense>} />
+          <Route path="/logs" element={<Suspense fallback={<PageLoader />}><Logs /></Suspense>} />
+          <Route path="/session" element={<Suspense fallback={<PageLoader />}><SessionManagement /></Suspense>} />
+          <Route path="/settings" element={<Suspense fallback={<PageLoader />}><Settings /></Suspense>} />
+          <Route path="/about" element={<Suspense fallback={<PageLoader />}><About /></Suspense>} />
         </Route>
       </Routes>
       <Toaster />

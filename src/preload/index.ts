@@ -14,6 +14,7 @@ import type {
   AppConfig,
   SystemPrompt,
   PromptType,
+  EffectiveModel,
 } from '../shared/types'
 
 const proxyAPI = {
@@ -94,6 +95,37 @@ const providersAPI = {
   
   import: (jsonData: string): Promise<Provider> => 
     ipcRenderer.invoke(IpcChannels.PROVIDERS_IMPORT, jsonData),
+  
+  updateModels: (providerId: string): Promise<{
+    success: boolean
+    modelsCount?: number
+    error?: string
+  }> => 
+    ipcRenderer.invoke(IpcChannels.PROVIDERS_UPDATE_MODELS, providerId),
+  
+  getEffectiveModels: (providerId: string): Promise<EffectiveModel[]> => 
+    ipcRenderer.invoke(IpcChannels.PROVIDERS_GET_EFFECTIVE_MODELS, providerId),
+  
+  addCustomModel: (providerId: string, model: { displayName: string; actualModelId: string }): Promise<{
+    success: boolean
+    models: EffectiveModel[]
+    error?: string
+  }> => 
+    ipcRenderer.invoke(IpcChannels.PROVIDERS_ADD_CUSTOM_MODEL, providerId, model),
+  
+  removeModel: (providerId: string, modelName: string): Promise<{
+    success: boolean
+    models: EffectiveModel[]
+    error?: string
+  }> => 
+    ipcRenderer.invoke(IpcChannels.PROVIDERS_REMOVE_MODEL, providerId, modelName),
+  
+  resetModels: (providerId: string): Promise<{
+    success: boolean
+    models: EffectiveModel[]
+    error?: string
+  }> => 
+    ipcRenderer.invoke(IpcChannels.PROVIDERS_RESET_MODELS, providerId),
 }
 
 const accountsAPI = {
@@ -396,6 +428,51 @@ const appAPI = {
 
   checkUpdate: (): Promise<{ hasUpdate: boolean; currentVersion: string; latestVersion: string; releaseUrl?: string; error?: string }> =>
     ipcRenderer.invoke(IpcChannels.APP_CHECK_UPDATE),
+
+  downloadUpdate: (): Promise<void> =>
+    ipcRenderer.invoke(IpcChannels.APP_DOWNLOAD_UPDATE),
+
+  installUpdate: (): Promise<void> =>
+    ipcRenderer.invoke(IpcChannels.APP_INSTALL_UPDATE),
+
+  getUpdateStatus: (): Promise<any> =>
+    ipcRenderer.invoke(IpcChannels.APP_GET_UPDATE_STATUS),
+
+  onUpdateChecking: (callback: () => void) => {
+    const listener = (_event: Electron.IpcRendererEvent) => callback()
+    ipcRenderer.on(IpcChannels.APP_UPDATE_CHECKING, listener)
+    return () => ipcRenderer.removeListener(IpcChannels.APP_UPDATE_CHECKING, listener)
+  },
+
+  onUpdateAvailable: (callback: (info: any) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, info: any) => callback(info)
+    ipcRenderer.on(IpcChannels.APP_UPDATE_AVAILABLE, listener)
+    return () => ipcRenderer.removeListener(IpcChannels.APP_UPDATE_AVAILABLE, listener)
+  },
+
+  onUpdateNotAvailable: (callback: (info: any) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, info: any) => callback(info)
+    ipcRenderer.on(IpcChannels.APP_UPDATE_NOT_AVAILABLE, listener)
+    return () => ipcRenderer.removeListener(IpcChannels.APP_UPDATE_NOT_AVAILABLE, listener)
+  },
+
+  onUpdateProgress: (callback: (progress: any) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, progress: any) => callback(progress)
+    ipcRenderer.on(IpcChannels.APP_UPDATE_PROGRESS, listener)
+    return () => ipcRenderer.removeListener(IpcChannels.APP_UPDATE_PROGRESS, listener)
+  },
+
+  onUpdateDownloaded: (callback: (info: any) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, info: any) => callback(info)
+    ipcRenderer.on(IpcChannels.APP_UPDATE_DOWNLOADED, listener)
+    return () => ipcRenderer.removeListener(IpcChannels.APP_UPDATE_DOWNLOADED, listener)
+  },
+
+  onUpdateError: (callback: (error: any) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, error: any) => callback(error)
+    ipcRenderer.on(IpcChannels.APP_UPDATE_ERROR, listener)
+    return () => ipcRenderer.removeListener(IpcChannels.APP_UPDATE_ERROR, listener)
+  },
 }
 
 const configAPI = {

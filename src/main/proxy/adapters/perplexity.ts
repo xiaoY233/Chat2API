@@ -36,9 +36,6 @@ interface ChatCompletionRequest {
   reasoning_effort?: 'low' | 'medium' | 'high'
   tools?: any[]
   tool_choice?: any
-  sessionId?: string
-  parentMessageId?: string
-  isMultiTurn?: boolean
 }
 
 interface SessionData {
@@ -217,12 +214,10 @@ export class PerplexityAdapter {
 
   private buildRequestData(
     query: string,
-    model: string,
-    sessionData?: SessionData
+    model: string
   ): any {
-    const isFollowup = !!sessionData?.backend_uuid
     const frontendUuid = uuid()
-    const frontendContextUuid = sessionData?.frontend_context_uuid || uuid()
+    const frontendContextUuid = uuid()
 
     const baseParams: any = {
       attachments: [],
@@ -238,7 +233,7 @@ export class PerplexityAdapter {
       is_sponsored: false,
       frontend_context_uuid: frontendContextUuid,
       prompt_source: 'user',
-      query_source: isFollowup ? 'followup' : 'home',
+      query_source: 'home',
       is_incognito: false,
       time_from_first_type: 18361,
       local_search_enabled: false,
@@ -289,13 +284,6 @@ export class PerplexityAdapter {
       version: '2.18'
     }
 
-    if (isFollowup && sessionData) {
-      baseParams.last_backend_uuid = sessionData.backend_uuid
-      baseParams.read_write_token = sessionData.read_write_token
-      baseParams.followup_source = 'link'
-      baseParams.time_from_first_type = 8758
-    }
-
     return {
       params: baseParams,
       query_str: query
@@ -310,20 +298,8 @@ export class PerplexityAdapter {
 
     const model = mapModel(request.model)
     const requestId = uuid()
-    const cacheKey = this.account.id
 
-    let sessionData: SessionData | undefined
-    const isMultiTurn = !!(request.isMultiTurn && request.sessionId)
-
-    if (isMultiTurn) {
-      sessionData = sessionCache.get(cacheKey)
-    } else {
-      sessionCache.delete(cacheKey)
-    }
-
-    const referer = sessionData?.thread_url_slug
-      ? `${PERPLEXITY_URL}/search/${sessionData.thread_url_slug}`
-      : `${PERPLEXITY_URL}/`
+    const referer = `${PERPLEXITY_URL}/`
 
     const headers: Record<string, string> = {
       ...FAKE_HEADERS,
@@ -334,7 +310,7 @@ export class PerplexityAdapter {
       'Referer': referer,
     }
 
-    const data = this.buildRequestData(query, model, sessionData)
+    const data = this.buildRequestData(query, model)
 
     // Use Electron's net API which uses Chromium's network stack
     // This bypasses Cloudflare's TLS fingerprint detection
@@ -410,8 +386,7 @@ export class PerplexityAdapter {
           stream.emit('error', new Error(errorMessage))
         })
         
-        const sessionId = sessionData?.backend_uuid || requestId
-        resolve({ stream, sessionId })
+        resolve({ stream, sessionId: requestId })
       })
       
       request_.on('error', (error) => {

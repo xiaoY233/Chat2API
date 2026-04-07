@@ -110,6 +110,26 @@ export const TOKEN_EXTRACTION_CONFIGS: Record<ProviderType, TokenExtractionConfi
     successUrlPatterns: [/chat\.z\.ai/i, /z\.ai/i],
     windowTitle: 'Z.ai Login',
   },
+  mimo: {
+    loginUrl: 'https://aistudio.xiaomimimo.com',
+    tokenSources: [
+      {
+        type: 'cookie',
+        key: 'serviceToken',
+      },
+      {
+        type: 'cookie',
+        key: 'userId',
+      },
+      {
+        type: 'cookie',
+        key: 'xiaomichatbot_ph',
+      },
+    ],
+    targetDomains: ['.xiaomimimo.com', 'xiaomimimo.com'],
+    successUrlPatterns: [/aistudio\.xiaomimimo\.com/i],
+    windowTitle: 'Mimo AI Studio Login',
+  },
   'qwen-ai': {
     loginUrl: 'https://chat.qwen.ai',
     tokenSources: [

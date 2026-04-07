@@ -14,6 +14,7 @@ import { DeepSeekAdapter } from './adapters/deepseek'
 import { DeepSeekStreamHandler } from './adapters/deepseek-stream'
 import { GLMAdapter, GLMStreamHandler } from './adapters/glm'
 import { KimiAdapter, KimiStreamHandler } from './adapters/kimi'
+import { MimoAdapter, MimoStreamHandler } from './adapters/mimo'
 import { QwenAdapter, QwenStreamHandler } from './adapters/qwen'
 import { QwenAiAdapter, QwenAiStreamHandler } from './adapters/qwen-ai'
 import { ZaiAdapter, ZaiStreamHandler } from './adapters/zai'
@@ -89,10 +90,23 @@ export class RequestForwarder {
     return null
   }
 
-  /**
-   * Check if messages contain MCP-style tool definitions
-   * MCP tools are defined in system message using <tools><tool> XML format
-   */
+  private applyToolCallsToResponse(
+    result: any,
+    model: string,
+    tools: any[] | undefined
+  ): void {
+    if (tools && tools.length > 0 && !isNativeFunctionCallingModel(model)) {
+      const content = result?.choices?.[0]?.message?.content || ''
+      const toolCalls = this.parseToolCallsFromContent(content)
+      
+      if (toolCalls && toolCalls.length > 0) {
+        result.choices[0].message.tool_calls = toolCalls
+        result.choices[0].message.content = null
+        result.choices[0].finish_reason = 'tool_calls'
+      }
+    }
+  }
+
   private hasMCPToolDefinitions(messages: any[]): boolean {
     for (const msg of messages) {
       if (msg.role === 'system' && typeof msg.content === 'string') {
@@ -312,12 +326,7 @@ CRITICAL RULES:
           account,
           provider,
           actualModel,
-          context,
-          {
-            sessionId: '',
-            messages: [],
-            isNew: true,
-          }
+          context
         )
 
         if (result.success && result.body) {
@@ -348,12 +357,6 @@ CRITICAL RULES:
     const startTime = Date.now()
     const config = storeManager.getConfig()
     const maxRetries = config.retryCount
-
-    const sessionContext = sessionManager.getOrCreateSession({
-      providerId: provider.id,
-      accountId: account.id,
-      model: actualModel,
-    })
 
     let lastError: string | undefined
 
@@ -414,7 +417,7 @@ CRITICAL RULES:
       }
 
       try {
-        const result = await this.doForward(modifiedRequest, account, provider, actualModel, context, sessionContext)
+        const result = await this.doForward(modifiedRequest, account, provider, actualModel, context)
 
         if (result.success) {
           return result
@@ -445,49 +448,53 @@ CRITICAL RULES:
     account: Account,
     provider: Provider,
     actualModel: string,
-    context: ProxyContext,
-    sessionContext: { sessionId: string; providerSessionId?: string; parentMessageId?: string; messages: any[]; isNew: boolean }
+    context: ProxyContext
   ): Promise<ForwardResult> {
     const startTime = Date.now()
 
     // Check if it is a DeepSeek provider, use dedicated adapter
     if (DeepSeekAdapter.isDeepSeekProvider(provider)) {
-      return this.forwardDeepSeek(request, account, provider, actualModel, startTime, sessionContext)
+      return this.forwardDeepSeek(request, account, provider, actualModel, startTime)
     }
 
     // Check if it is a GLM provider, use dedicated adapter
     if (GLMAdapter.isGLMProvider(provider)) {
-      return this.forwardGLM(request, account, provider, actualModel, startTime, sessionContext)
+      return this.forwardGLM(request, account, provider, actualModel, startTime)
     }
 
     // Check if it is a Kimi provider, use dedicated adapter
     if (KimiAdapter.isKimiProvider(provider)) {
-      return this.forwardKimi(request, account, provider, actualModel, startTime, sessionContext)
+      return this.forwardKimi(request, account, provider, actualModel, startTime)
     }
 
     // Check if it is a Qwen provider, use dedicated adapter
     if (QwenAdapter.isQwenProvider(provider)) {
-      return this.forwardQwen(request, account, provider, actualModel, startTime, sessionContext)
+      return this.forwardQwen(request, account, provider, actualModel, startTime)
     }
 
     // Check if it is a Qwen AI (International) provider, use dedicated adapter
     if (QwenAiAdapter.isQwenAiProvider(provider)) {
-      return this.forwardQwenAi(request, account, provider, actualModel, startTime, sessionContext)
+      return this.forwardQwenAi(request, account, provider, actualModel, startTime)
     }
 
     // Check if it is a Z.ai provider, use dedicated adapter
     if (ZaiAdapter.isZaiProvider(provider)) {
-      return this.forwardZai(request, account, provider, actualModel, startTime, sessionContext)
+      return this.forwardZai(request, account, provider, actualModel, startTime)
     }
 
     // Check if it is a MiniMax provider, use dedicated adapter
     if (MiniMaxAdapter.isMiniMaxProvider(provider)) {
-      return this.forwardMiniMax(request, account, provider, actualModel, startTime, sessionContext)
+      return this.forwardMiniMax(request, account, provider, actualModel, startTime)
+    }
+
+    // Check if it is a Mimo provider, use dedicated adapter
+    if (MimoAdapter.isMimoProvider(provider)) {
+      return this.forwardMimo(request, account, provider, actualModel, startTime)
     }
 
     // Check if it is a Perplexity provider, use dedicated adapter
     if (PerplexityAdapter.isPerplexityProvider(provider)) {
-      return this.forwardPerplexity(request, account, provider, actualModel, startTime, sessionContext)
+      return this.forwardPerplexity(request, account, provider, actualModel, startTime)
     }
 
     try {
@@ -563,8 +570,7 @@ CRITICAL RULES:
     account: Account,
     provider: Provider,
     actualModel: string,
-    startTime: number,
-    sessionContext: { sessionId: string; providerSessionId?: string; parentMessageId?: string; messages: any[]; isNew: boolean }
+    startTime: number
   ): Promise<ForwardResult> {
     try {
       const transformed = this.transformRequestForPromptToolUse(request, provider)
@@ -583,9 +589,6 @@ CRITICAL RULES:
         temperature: transformedRequest.temperature,
         web_search: transformedRequest.web_search,
         reasoning_effort: transformedRequest.reasoning_effort,
-        isMultiTurn: false,
-        sessionId: '',
-        parentMessageId: '',
       })
 
       const latency = Date.now() - startTime
@@ -632,14 +635,6 @@ CRITICAL RULES:
       if (request.stream) {
         const transformedStream = await handler.handleStream(response.data)
         
-        // Listen for stream end to update parent message ID
-        transformedStream.on('end', () => {
-          const lastMessageId = handler.getLastMessageId()
-          if (lastMessageId && sessionContext.sessionId) {
-            sessionManager.updateParentMessageId(sessionContext.sessionId, lastMessageId)
-          }
-        })
-        
         return {
           success: true,
           status: response.status,
@@ -654,26 +649,8 @@ CRITICAL RULES:
       // Non-streaming requests need to collect stream data and convert
       const result = await handler.handleNonStream(response.data)
       
-      // Update parent message ID for non-stream response
-      const lastMessageId = handler.getLastMessageId()
-      if (lastMessageId && sessionContext.sessionId) {
-        sessionManager.updateParentMessageId(sessionContext.sessionId, lastMessageId)
-      }
+      this.applyToolCallsToResponse(result, request.model, request.tools)
       
-      // Parse tool calls from response content if using prompt-based tool calling
-      if (request.tools && request.tools.length > 0 && !isNativeFunctionCallingModel(request.model)) {
-        const content = result?.choices?.[0]?.message?.content || ''
-        const toolCalls = this.parseToolCallsFromContent(content)
-        
-        if (toolCalls && toolCalls.length > 0) {
-          // Found tool calls in response, add them to the response
-          result.choices[0].message.tool_calls = toolCalls
-          result.choices[0].message.content = null
-          result.choices[0].finish_reason = 'tool_calls'
-        }
-      }
-      
-      // Delete session after non-streaming request ends
       if (deleteSessionCallback) {
         await deleteSessionCallback()
       }
@@ -685,7 +662,6 @@ CRITICAL RULES:
         body: result,
         latency,
         providerSessionId: sessionId,
-        parentMessageId: lastMessageId,
       }
     } catch (error) {
       const latency = Date.now() - startTime
@@ -705,8 +681,7 @@ CRITICAL RULES:
     account: Account,
     provider: Provider,
     actualModel: string,
-    startTime: number,
-    sessionContext: { sessionId: string; providerSessionId?: string; parentMessageId?: string; messages: any[]; isNew: boolean }
+    startTime: number
   ): Promise<ForwardResult> {
     try {
       const transformed = this.transformRequestForPromptToolUse(request, provider)
@@ -726,13 +701,6 @@ CRITICAL RULES:
         web_search: transformedRequest.web_search,
         reasoning_effort: transformedRequest.reasoning_effort,
         deep_research: transformedRequest.deep_research,
-        sessionContext: {
-          sessionId: sessionContext.sessionId,
-          providerSessionId: sessionContext.providerSessionId,
-          parentMessageId: sessionContext.parentMessageId,
-          messages: sessionContext.messages,
-          isNew: sessionContext.isNew,
-        },
       })
 
       const latency = Date.now() - startTime
@@ -763,14 +731,6 @@ CRITICAL RULES:
       if (request.stream) {
         const transformedStream = await handler.handleStream(response.data)
         
-        // Listen for stream end to update provider session ID
-        transformedStream.on('end', () => {
-          const convId = handler.getConversationId()
-          if (convId && sessionContext.sessionId) {
-            sessionManager.updateProviderSessionId(sessionContext.sessionId, convId)
-          }
-        })
-        
         // If delete session after chat is enabled, we need to handle it after stream ends
         if (shouldDeleteSession()) {
           const originalEnd = transformedStream.end.bind(transformedStream)
@@ -792,31 +752,14 @@ CRITICAL RULES:
           stream: transformedStream,
           skipTransform: true,
           latency,
-          providerSessionId: sessionContext.providerSessionId || handler.getConversationId(),
+          providerSessionId: handler.getConversationId(),
         }
       }
 
       const result = await handler.handleNonStream(response.data)
       
-      // Update provider session ID for non-stream response
-      const convId = handler.getConversationId()
-      if (convId && sessionContext.sessionId) {
-        sessionManager.updateProviderSessionId(sessionContext.sessionId, convId)
-      }
+      this.applyToolCallsToResponse(result, request.model, request.tools)
       
-      // Parse tool calls from response content if using prompt-based tool calling
-      if (request.tools && request.tools.length > 0 && !isNativeFunctionCallingModel(request.model)) {
-        const content = result?.choices?.[0]?.message?.content || ''
-        const toolCalls = this.parseToolCallsFromContent(content)
-        
-        if (toolCalls && toolCalls.length > 0) {
-          result.choices[0].message.tool_calls = toolCalls
-          result.choices[0].message.content = null
-          result.choices[0].finish_reason = 'tool_calls'
-        }
-      }
-      
-      // Delete session after non-stream response
       if (shouldDeleteSession()) {
         const convId = handler.getConversationId()
         if (convId) {
@@ -847,8 +790,7 @@ CRITICAL RULES:
     account: Account,
     provider: Provider,
     actualModel: string,
-    startTime: number,
-    sessionContext: { sessionId: string; providerSessionId?: string; parentMessageId?: string; messages: any[]; isNew: boolean }
+    startTime: number
   ): Promise<ForwardResult> {
     try {
       const transformed = this.transformRequestForPromptToolUse(request, provider)
@@ -862,13 +804,6 @@ CRITICAL RULES:
         temperature: request.temperature,
         enableThinking: !!request.reasoning_effort,
         enableWebSearch: !!request.web_search,
-        sessionContext: {
-          sessionId: sessionContext.sessionId,
-          providerSessionId: sessionContext.providerSessionId,
-          parentMessageId: sessionContext.parentMessageId,
-          messages: sessionContext.messages,
-          isNew: sessionContext.isNew,
-        },
       })
 
       const latency = Date.now() - startTime
@@ -887,21 +822,6 @@ CRITICAL RULES:
       
       if (request.stream) {
         const transformedStream = await handler.handleStream(response.data)
-        
-        // Listen for stream end to update parent message ID and provider session ID
-        transformedStream.on('end', () => {
-          const lastMessageId = handler.getLastMessageId()
-          const realChatId = handler.getConversationId()
-          console.log('[Kimi] Stream end event, realChatId:', realChatId, 'lastMessageId:', lastMessageId, 'sessionId:', sessionContext.sessionId)
-          if (lastMessageId && sessionContext.sessionId) {
-            sessionManager.updateParentMessageId(sessionContext.sessionId, lastMessageId)
-          }
-          // Update provider session ID with real chat_id from response
-          // Only update if realChatId is valid (not null, not empty, and not a temporary ID)
-          if (realChatId && sessionContext.sessionId) {
-            sessionManager.updateProviderSessionId(sessionContext.sessionId, realChatId)
-          }
-        })
         
         // Add delete conversation callback if needed
         if (shouldDeleteSession()) {
@@ -924,37 +844,14 @@ CRITICAL RULES:
           stream: transformedStream,
           skipTransform: true,
           latency,
-          // Use existing providerSessionId if available, otherwise wait for stream to extract real chat_id
-          providerSessionId: sessionContext.providerSessionId || undefined,
+          providerSessionId: undefined,
         }
       }
 
       const result = await handler.handleNonStream(response.data)
-      
-      // Update parent message ID and provider session ID for non-stream response
-      const lastMessageId = handler.getLastMessageId()
-      const realChatId = handler.getConversationId()
-      if (lastMessageId && sessionContext.sessionId) {
-        sessionManager.updateParentMessageId(sessionContext.sessionId, lastMessageId)
-      }
-      // Update provider session ID with real chat_id from response
-      if (realChatId && sessionContext.sessionId && !realChatId.startsWith('kimi-')) {
-        sessionManager.updateProviderSessionId(sessionContext.sessionId, realChatId)
-      }
 
-      // Parse tool calls from response content if using prompt-based tool calling
-      if (request.tools && request.tools.length > 0 && !isNativeFunctionCallingModel(request.model)) {
-        const content = result?.choices?.[0]?.message?.content || ''
-        const toolCalls = this.parseToolCallsFromContent(content)
-        
-        if (toolCalls && toolCalls.length > 0) {
-          result.choices[0].message.tool_calls = toolCalls
-          result.choices[0].message.content = null
-          result.choices[0].finish_reason = 'tool_calls'
-        }
-      }
+      this.applyToolCallsToResponse(result, request.model, request.tools)
 
-      // Delete conversation if needed
       if (shouldDeleteSession()) {
         const realChatId = handler.getConversationId()
         if (realChatId && realChatId.startsWith('kimi-') === false) {
@@ -988,8 +885,7 @@ CRITICAL RULES:
     account: Account,
     provider: Provider,
     actualModel: string,
-    startTime: number,
-    sessionContext: { sessionId: string; providerSessionId?: string; parentMessageId?: string; messages: any[]; isNew: boolean }
+    startTime: number
   ): Promise<ForwardResult> {
     try {
       const transformed = this.transformRequestForPromptToolUse(request, provider)
@@ -1008,13 +904,6 @@ CRITICAL RULES:
         temperature: request.temperature,
         enableThinking: !!request.reasoning_effort,
         enableWebSearch: !!request.web_search,
-        sessionContext: {
-          sessionId: sessionContext.sessionId,
-          providerSessionId: sessionContext.providerSessionId,
-          parentMessageId: sessionContext.parentMessageId,
-          messages: sessionContext.messages,
-          isNew: sessionContext.isNew,
-        },
       })
 
       const latency = Date.now() - startTime
@@ -1043,15 +932,6 @@ CRITICAL RULES:
 
       if (request.stream) {
         const transformedStream = await handler.handleStream(response.data, response)
-        
-        // Listen for stream end to update parent message ID using the reqId
-        // IMPORTANT: parentMessageId should be the reqId of the previous request
-        transformedStream.on('end', () => {
-          if (reqId && sessionContext.sessionId) {
-            // Update parent message ID using the reqId for the next request
-            sessionManager.updateParentMessageId(sessionContext.sessionId, reqId)
-          }
-        })
 
         return {
           success: true,
@@ -1066,22 +946,7 @@ CRITICAL RULES:
 
       const result = await handler.handleNonStream(response.data, response)
 
-      // Parse tool calls from response content if using prompt-based tool calling
-      if (request.tools && request.tools.length > 0 && !isNativeFunctionCallingModel(request.model)) {
-        const content = result?.choices?.[0]?.message?.content || ''
-        const toolCalls = this.parseToolCallsFromContent(content)
-        
-        if (toolCalls && toolCalls.length > 0) {
-          result.choices[0].message.tool_calls = toolCalls
-          result.choices[0].message.content = null
-          result.choices[0].finish_reason = 'tool_calls'
-        }
-      }
-
-      // Update parent message ID for non-stream response using the reqId
-      if (reqId && sessionContext.sessionId) {
-        sessionManager.updateParentMessageId(sessionContext.sessionId, reqId)
-      }
+      this.applyToolCallsToResponse(result, request.model, request.tools)
 
       const sid = handler.getSessionId()
       if (deleteSessionCallback && sid) {
@@ -1114,8 +979,7 @@ CRITICAL RULES:
     account: Account,
     provider: Provider,
     actualModel: string,
-    startTime: number,
-    sessionContext: { sessionId: string; providerSessionId?: string; parentMessageId?: string; messages: any[]; isNew: boolean }
+    startTime: number
   ): Promise<ForwardResult> {
     try {
       const transformed = this.transformRequestForPromptToolUse(request, provider)
@@ -1128,13 +992,6 @@ CRITICAL RULES:
         stream: request.stream,
         temperature: request.temperature,
         enable_thinking: !!request.reasoning_effort,
-        sessionContext: {
-          sessionId: sessionContext.sessionId,
-          providerSessionId: sessionContext.providerSessionId,
-          parentMessageId: sessionContext.parentMessageId,
-          messages: sessionContext.messages,
-          isNew: sessionContext.isNew,
-        },
       })
 
       const latency = Date.now() - startTime
@@ -1165,15 +1022,6 @@ CRITICAL RULES:
       if (request.stream) {
         const transformedStream = await handler.handleStream(response.data)
 
-        // Listen for stream end to get the response ID and update parent message ID
-        transformedStream.on('end', () => {
-          const responseId = handler.getResponseId()
-          if (responseId && sessionContext.sessionId) {
-            // Update parent message ID using the existing session context
-            sessionManager.updateParentMessageId(sessionContext.sessionId, responseId)
-          }
-        })
-
         return {
           success: true,
           status: response.status,
@@ -1187,23 +1035,7 @@ CRITICAL RULES:
 
       const result = await handler.handleNonStream(response.data)
 
-      // Update parent message ID for non-stream response
-      const responseId = handler.getResponseId()
-      if (responseId && sessionContext.sessionId) {
-        sessionManager.updateParentMessageId(sessionContext.sessionId, responseId)
-      }
-
-      // Parse tool calls from response content if using prompt-based tool calling
-      if (request.tools && request.tools.length > 0 && !isNativeFunctionCallingModel(request.model)) {
-        const content = result?.choices?.[0]?.message?.content || ''
-        const toolCalls = this.parseToolCallsFromContent(content)
-        
-        if (toolCalls && toolCalls.length > 0) {
-          result.choices[0].message.tool_calls = toolCalls
-          result.choices[0].message.content = null
-          result.choices[0].finish_reason = 'tool_calls'
-        }
-      }
+      this.applyToolCallsToResponse(result, request.model, request.tools)
 
       if (deleteChatCallback) {
         await deleteChatCallback(chatId)
@@ -1235,8 +1067,7 @@ CRITICAL RULES:
     account: Account,
     provider: Provider,
     actualModel: string,
-    startTime: number,
-    sessionContext: { sessionId: string; providerSessionId?: string; parentMessageId?: string; messages: any[]; isNew: boolean }
+    startTime: number
   ): Promise<ForwardResult> {
     console.log('[forwardZai] actualModel:', actualModel)
     console.log('[forwardZai] provider.modelMappings:', provider.modelMappings)
@@ -1252,13 +1083,6 @@ CRITICAL RULES:
         temperature: request.temperature,
         web_search: request.web_search,
         reasoning_effort: request.reasoning_effort,
-        sessionContext: {
-          sessionId: sessionContext.sessionId,
-          providerSessionId: sessionContext.providerSessionId,
-          parentMessageId: sessionContext.parentMessageId,
-          messages: sessionContext.messages,
-          isNew: sessionContext.isNew,
-        },
       })
 
       const latency = Date.now() - startTime
@@ -1289,15 +1113,6 @@ CRITICAL RULES:
       if (request.stream === true) {
         const transformedStream = await handler.handleStream(response.data)
         
-        // Listen for stream end to update parent message ID using the requestId
-        // IMPORTANT: parentMessageId should be the requestId of the previous request, not the assistant message ID
-        transformedStream.on('end', () => {
-          if (requestId && sessionContext.sessionId) {
-            // Update parent message ID using the requestId for the next request
-            sessionManager.updateParentMessageId(sessionContext.sessionId, requestId)
-          }
-        })
-        
         return {
           success: true,
           status: response.status,
@@ -1311,23 +1126,7 @@ CRITICAL RULES:
 
       const result = await handler.handleNonStream(response.data)
 
-      // Parse tool calls from response content if using prompt-based tool calling
-      if (request.tools && request.tools.length > 0 && !isNativeFunctionCallingModel(request.model)) {
-        const content = result?.choices?.[0]?.message?.content || ''
-        const toolCalls = this.parseToolCallsFromContent(content)
-        
-        if (toolCalls && toolCalls.length > 0) {
-          result.choices[0].message.tool_calls = toolCalls
-          result.choices[0].message.content = null
-          result.choices[0].finish_reason = 'tool_calls'
-        }
-      }
-      
-      // Update parent message ID for non-stream response using the requestId
-      // IMPORTANT: parentMessageId should be the requestId of the previous request, not the assistant message ID
-      if (requestId && sessionContext.sessionId) {
-        sessionManager.updateParentMessageId(sessionContext.sessionId, requestId)
-      }
+      this.applyToolCallsToResponse(result, request.model, request.tools)
       
       if (deleteChatCallback) {
         await deleteChatCallback(chatId)
@@ -1359,8 +1158,7 @@ CRITICAL RULES:
     account: Account,
     provider: Provider,
     actualModel: string,
-    startTime: number,
-    sessionContext: { sessionId: string; providerSessionId?: string; parentMessageId?: string; messages: any[]; isNew: boolean }
+    startTime: number
   ): Promise<ForwardResult> {
     console.log('[forwardMiniMax] actualModel:', actualModel)
     console.log('[forwardMiniMax] provider.modelMappings:', provider.modelMappings)
@@ -1374,13 +1172,6 @@ CRITICAL RULES:
         messages: transformed.messages as any,
         stream: request.stream,
         temperature: request.temperature,
-        sessionContext: {
-          sessionId: sessionContext.sessionId,
-          providerSessionId: sessionContext.providerSessionId,
-          parentMessageId: sessionContext.parentMessageId,
-          messages: sessionContext.messages,
-          isNew: sessionContext.isNew,
-        },
       })
 
       const latency = Date.now() - startTime
@@ -1431,19 +1222,8 @@ CRITICAL RULES:
       }
 
       if (response) {
-        // Parse tool calls from response content if using prompt-based tool calling
-        if (request.tools && request.tools.length > 0 && !isNativeFunctionCallingModel(request.model)) {
-          const content = response.data?.choices?.[0]?.message?.content || ''
-          const toolCalls = this.parseToolCallsFromContent(content)
-          
-          if (toolCalls && toolCalls.length > 0) {
-            response.data.choices[0].message.tool_calls = toolCalls
-            response.data.choices[0].message.content = null
-            response.data.choices[0].finish_reason = 'tool_calls'
-          }
-        }
+        this.applyToolCallsToResponse(response.data, request.model, request.tools)
         
-        // Response is already formatted as OpenAI-compatible format
         if (deleteChatCallback) {
           await deleteChatCallback(chatId)
         }
@@ -1474,6 +1254,91 @@ CRITICAL RULES:
   }
 
   /**
+   * Mimo Dedicated Forward
+   * Uses Mimo adapter for Xiaomi AI Studio
+   */
+  private async forwardMimo(
+    request: ChatCompletionRequest,
+    account: Account,
+    provider: Provider,
+    actualModel: string,
+    startTime: number
+  ): Promise<ForwardResult> {
+    try {
+      const adapter = new MimoAdapter(provider, account)
+
+      const { response, conversationId } = await adapter.chatCompletion({
+        model: request.model,
+        originalModel: request.originalModel,
+        messages: request.messages as any,
+        stream: request.stream,
+        temperature: request.temperature,
+      })
+
+      const latency = Date.now() - startTime
+
+      if (response.status >= 400) {
+        let errorMessage = `HTTP ${response.status}`
+        return {
+          success: false,
+          status: response.status,
+          error: errorMessage,
+          latency,
+        }
+      }
+
+      const handler = new MimoStreamHandler(actualModel, conversationId, 'separate')
+
+      if (request.stream) {
+        const transformedStream = new PassThrough()
+        const openAIStream = handler.handleStream(response.data)
+
+        ;(async () => {
+          try {
+            for await (const chunk of openAIStream) {
+              transformedStream.write(chunk)
+            }
+            transformedStream.end()
+          } catch (error) {
+            console.error('[Mimo] Stream error:', error)
+            transformedStream.end()
+          }
+        })()
+
+        return {
+          success: true,
+          status: response.status,
+          headers: this.extractHeaders(response.headers),
+          stream: transformedStream,
+          skipTransform: true,
+          latency,
+          providerSessionId: conversationId,
+        }
+      }
+
+      const result = await handler.handleNonStream(response.data)
+
+      return {
+        success: true,
+        status: response.status,
+        headers: this.extractHeaders(response.headers),
+        body: JSON.parse(result),
+        skipTransform: true,
+        latency,
+        providerSessionId: conversationId,
+      }
+    } catch (error) {
+      const latency = Date.now() - startTime
+      console.error('[Mimo] Forward error:', error)
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+        latency,
+      }
+    }
+  }
+
+  /**
    * Perplexity Dedicated Forward
    * Uses Electron's net API to bypass Cloudflare protection
    */
@@ -1482,8 +1347,7 @@ CRITICAL RULES:
     account: Account,
     provider: Provider,
     actualModel: string,
-    startTime: number,
-    sessionContext: { sessionId: string; providerSessionId?: string; parentMessageId?: string; messages: any[]; isNew: boolean }
+    startTime: number
   ): Promise<ForwardResult> {
     console.log('[forwardPerplexity] actualModel:', actualModel)
     try {
@@ -1496,8 +1360,6 @@ CRITICAL RULES:
         messages: transformed.messages as any,
         stream: request.stream,
         temperature: request.temperature,
-        isMultiTurn: false,
-        sessionId: undefined,
       })
 
       const latency = Date.now() - startTime
@@ -1530,19 +1392,8 @@ CRITICAL RULES:
       const handler = new PerplexityStreamHandler(actualModel, sessionId, undefined, adapter)
       const result = await handler.handleNonStream(stream)
       
-      // Parse tool calls from response content if tools were provided
-      if (request.tools && request.tools.length > 0 && !isNativeFunctionCallingModel(request.model)) {
-        const content = result?.choices?.[0]?.message?.content || ''
-        const toolCalls = this.parseToolCallsFromContent(content)
-        
-        if (toolCalls && toolCalls.length > 0) {
-          result.choices[0].message.tool_calls = toolCalls
-          result.choices[0].message.content = null
-          result.choices[0].finish_reason = 'tool_calls'
-        }
-      }
+      this.applyToolCallsToResponse(result, request.model, request.tools)
       
-      // Delete session after non-stream response
       if (shouldDeleteSession()) {
         await adapter.deleteSession(sessionId)
       }

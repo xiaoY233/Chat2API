@@ -60,14 +60,6 @@ interface ChatCompletionRequest {
   tool_choice?: any
   conversationId?: string
   parentId?: string
-  isMultiTurn?: boolean
-  sessionContext?: {
-    sessionId: string
-    providerSessionId?: string
-    parentMessageId?: string
-    messages: any[]
-    isNew: boolean
-  }
 }
 
 const accessTokenMap = new Map<string, TokenInfo>()
@@ -305,18 +297,7 @@ export class KimiAdapter {
       }
     }
 
-    // Use session context passed from forwarder - MUST be defined before messagesPrepare
-    const sessionContext = request.sessionContext
-    const isMultiTurn = sessionContext && !sessionContext.isNew
-    
-    // Use providerSessionId (existing chat_id) if available
-    const chatId = sessionContext?.providerSessionId || ''
-    // Use parentMessageId (previous message id) if available
-    const parentId = sessionContext?.parentMessageId || ''
-
-    console.log(`[Kimi] Model: ${request.model}, chatId: ${chatId || '(new)'}, parentId: ${parentId || '(none)'}, isMultiTurn: ${isMultiTurn}`)
-
-    const content = this.messagesPrepare(messages, toolsPrompt, isMultiTurn)
+    const content = this.messagesPrepare(messages, toolsPrompt, false)
 
     // Determine if thinking and web search should be enabled
     // Priority: explicit parameters > model name detection
@@ -339,10 +320,10 @@ export class KimiAdapter {
 
     const jsonBody = JSON.stringify({
       scenario: 'SCENARIO_K2D5',
-      chat_id: chatId,
+      chat_id: '',
       tools: enableWebSearch ? [{ type: 'TOOL_TYPE_SEARCH', search: {} }] : [],
       message: {
-        parent_id: parentId,
+        parent_id: '',
         role: 'user',
         blocks: [{
           message_id: '',
@@ -390,8 +371,7 @@ export class KimiAdapter {
       throw new Error(`Completion request failed: HTTP ${response.status}`)
     }
 
-    // Return empty string for new conversations, real chat_id will be extracted from response
-    return { response, conversationId: chatId }
+    return { response, conversationId: '' }
   }
 
   async deleteConversation(conversationId: string): Promise<boolean> {

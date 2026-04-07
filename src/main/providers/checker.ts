@@ -147,8 +147,34 @@ export class ProviderChecker {
         return this.checkQwenAiToken(account.credentials.token)
       case 'perplexity':
         return this.checkPerplexityToken(account.credentials.sessionToken || account.credentials.token)
+      case 'mimo':
+        return this.checkMimoToken(
+          account.credentials.service_token,
+          account.credentials.user_id,
+          account.credentials.ph_token
+        )
       default:
+        if (!builtinConfig.tokenCheckEndpoint) {
+          return { valid: true }
+        }
         return this.checkGenericToken(builtinConfig, account)
+    }
+  }
+
+  private static checkMimoToken(
+    serviceToken: string,
+    userId: string,
+    phToken: string
+  ): TokenCheckResult {
+    if (!serviceToken || !userId || !phToken) {
+      return { valid: false, error: 'Missing required credentials: service_token, user_id, ph_token' }
+    }
+
+    return {
+      valid: true,
+      userInfo: {
+        name: 'Mimo User',
+      },
     }
   }
 
@@ -667,6 +693,55 @@ export class ProviderChecker {
     const crypto = await import('crypto')
     const secret = '8a1317a7468aa3ad86e997d08f3f31cb'
     return crypto.createHash('md5').update(`${timestamp}-${nonce}-${secret}`).digest('hex')
+  }
+
+  static async fetchProviderModels(
+    providerId: string
+  ): Promise<{
+    supportedModels: string[]
+    modelMappings: Record<string, string>
+  }> {
+    const builtinConfig = getBuiltinProvider(providerId)
+    
+    if (!builtinConfig) {
+      throw new Error(`Provider ${providerId} not found`)
+    }
+
+    if (!builtinConfig.modelsApiEndpoint) {
+      throw new Error(`Provider ${providerId} does not support dynamic model fetching`)
+    }
+
+    try {
+      const headers: Record<string, string> = {
+        ...(builtinConfig.modelsApiHeaders || builtinConfig.headers),
+      }
+
+      const response = await axios.get(builtinConfig.modelsApiEndpoint, {
+        headers,
+        timeout: CHECK_TIMEOUT,
+        validateStatus: () => true,
+      })
+
+      if (response.status !== 200) {
+        throw new Error(`Failed to fetch models: HTTP ${response.status}`)
+      }
+
+      const models = response.data.data || []
+      const supportedModels: string[] = []
+      const modelMappings: Record<string, string> = {}
+
+      for (const model of models) {
+        if (model.name && model.id) {
+          supportedModels.push(model.name)
+          modelMappings[model.name] = model.id
+        }
+      }
+
+      return { supportedModels, modelMappings }
+    } catch (error) {
+      console.error(`[ProviderChecker] Failed to fetch models for ${providerId}:`, error)
+      throw error
+    }
   }
 }
 
