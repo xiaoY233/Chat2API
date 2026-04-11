@@ -1,14 +1,9 @@
 {
-  "name": "chat2api",
-  "version": "1.2.0",
-  "description": "Chat2API 管理器 - 统一管理多个 AI 服务提供商，提供 OpenAI 兼容 API 接口",
+  "name": "openclaw-mcp-integration",
+  "version": "1.0.0",
+  "description": "OpenClaw MCP 工具集成 - 内置 MCP 工具调用功能",
   "main": "./out/main/index.js",
-  "author": {
-    "name": "Chat2API Team",
-    "email": "support@chat2api.com"
-  },
-  "homepage": "https://github.com/chat2api/Chat2API-Manager",
-  "license": "GPL-3.0",
+  "license": "MIT",
   "scripts": {
     "dev": "bash scripts/dev.sh",
     "dev:win": "electron-vite dev",

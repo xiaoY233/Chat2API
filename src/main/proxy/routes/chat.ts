@@ -18,6 +18,7 @@ import {
   transformResponseToAnthropic,
   transformChunkToAnthropic
 } from '../utils/toolFormatConverter'
+import mcpAdapter from '../../mcp/adapter'
 
 const router = new Router({ prefix: '/v1/chat' })
 
@@ -179,6 +180,54 @@ router.post('/completions', async (ctx: Context) => {
   proxyStatusManager.recordRequestStart(request.model, provider.id, account.id)
 
   try {
+    // Check if this is an MCP tool call
+    if (request.tool_calls && request.tool_calls.length > 0) {
+      const toolCall = request.tool_calls[0];
+      if (toolCall.function.name.startsWith('mcp_')) {
+        // Handle MCP tool call
+        try {
+          const toolResult = await mcpAdapter.callTool(toolCall.function.name, JSON.parse(toolCall.function.arguments));
+          
+          const response: ChatCompletionResponse = {
+            id: requestId,
+            object: 'chat.completion',
+            created: Math.floor(Date.now() / 1000),
+            model: actualModel,
+            choices: [{
+              index: 0,
+              message: {
+                role: 'tool',
+                tool_call_id: toolCall.id,
+                name: toolCall.function.name,
+                content: typeof toolResult === 'string' ? toolResult : JSON.stringify(toolResult),
+              },
+              finish_reason: 'tool_calls',
+            }],
+            usage: {
+              prompt_tokens: 0,
+              completion_tokens: 0,
+              total_tokens: 0,
+            },
+          };
+          
+          ctx.status = 200;
+          ctx.body = response;
+          return;
+        } catch (error) {
+          ctx.status = 500;
+          ctx.body = {
+            error: {
+              message: error instanceof Error ? error.message : 'Failed to call MCP tool',
+              type: 'internal_error',
+              param: null,
+              code: null,
+            },
+          };
+          return;
+        }
+      }
+    }
+
     const result = await requestForwarder.forwardChatCompletion(
       request,
       account,

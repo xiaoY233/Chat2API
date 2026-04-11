@@ -4,6 +4,7 @@ import { createWindow, getMainWindow, loadUrl, loadFile, openDevTools } from './
 import { createTrayManager, TrayManager } from './tray/TrayManager'
 import { registerIpcHandlers } from './ipc/handlers'
 import { UpdaterManager } from './updater'
+import mcpAdapter from './mcp/adapter'
 
 // Prevent uncaught exceptions from crashing the app
 process.on('uncaughtException', (error) => {
@@ -96,6 +97,14 @@ async function setupApp(): Promise<void> {
 
   await registerIpcHandlers(mainWindow)
 
+  // Initialize MCP adapter
+  try {
+    await mcpAdapter.initialize()
+    console.log('MCP adapter initialized successfully')
+  } catch (error) {
+    console.error('Failed to initialize MCP adapter:', error)
+  }
+
   trayManager = createTrayManager(mainWindow)
 
   await loadAppContent(mainWindow)
@@ -127,6 +136,10 @@ function cleanup(): void {
   console.log('Application is exiting, performing cleanup...')
   const updaterManager = UpdaterManager.getInstance()
   updaterManager.destroy()
+  
+  // Shutdown MCP adapter
+  mcpAdapter.shutdown()
+  console.log('MCP adapter shutdown')
 }
 
 export function restartApp(): void {
