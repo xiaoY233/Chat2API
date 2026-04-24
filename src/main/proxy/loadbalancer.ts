@@ -11,7 +11,8 @@ import { storeManager } from '../store/store'
  * Load Balancer
  */
 export class LoadBalancer {
-  private roundRobinIndex: Map<string, number> = new Map()
+  private providerIndex: Map<string, number> = new Map()
+  private accountIndex: Map<string, number> = new Map()
   private failedAccounts: Map<string, { count: number; lastFailTime: number }> = new Map()
   private static readonly FAIL_THRESHOLD = 3
   private static readonly RECOVERY_TIME = 60000 // 1 minute
@@ -233,15 +234,33 @@ export class LoadBalancer {
 
   /**
    * Round Robin strategy
+   * Uses two-level round-robin: provider level + account level.
+   * This isolates each provider's account index so that adding/removing
+   * accounts (e.g., due to temporary unavailability) in one provider
+   * never drifts the round-robin pointer of another provider.
    */
   private selectRoundRobin(candidates: AccountSelection[]): AccountSelection {
-    const providerIds = [...new Set(candidates.map(c => c.provider.id))]
-    const key = providerIds.join(',')
+    // Group candidates by provider (preserve insertion order)
+    const byProvider = new Map<string, AccountSelection[]>()
+    for (const c of candidates) {
+      if (!byProvider.has(c.provider.id)) {
+        byProvider.set(c.provider.id, [])
+      }
+      byProvider.get(c.provider.id)!.push(c)
+    }
+    const providerIds = [...byProvider.keys()]
 
-    const currentIndex = this.roundRobinIndex.get(key) || 0
-    const selected = candidates[currentIndex % candidates.length]
+    // Provider-level round-robin
+    const providerKey = providerIds.join(',')
+    const providerIdx = this.providerIndex.get(providerKey) || 0
+    const chosenProviderId = providerIds[providerIdx % providerIds.length]
+    this.providerIndex.set(providerKey, providerIdx + 1)
 
-    this.roundRobinIndex.set(key, (currentIndex + 1) % candidates.length)
+    // Account-level round-robin (isolated per provider)
+    const providerAccounts = byProvider.get(chosenProviderId)!
+    const accountIdx = this.accountIndex.get(chosenProviderId) || 0
+    const selected = providerAccounts[accountIdx % providerAccounts.length]
+    this.accountIndex.set(chosenProviderId, accountIdx + 1)
 
     return selected
   }
@@ -307,7 +326,8 @@ export class LoadBalancer {
    * Reset Round Robin index
    */
   resetRoundRobinIndex(): void {
-    this.roundRobinIndex.clear()
+    this.providerIndex.clear()
+    this.accountIndex.clear()
   }
 
   /**
