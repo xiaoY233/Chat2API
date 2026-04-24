@@ -27,7 +27,7 @@ i18n
     detection: {
       order: ['localStorage', 'navigator'],
       caches: ['localStorage'],
-      lookupLocalStorage: 'chat2api-settings',
+      lookupLocalStorage: 'chat2api-language',
       convertDetectedLanguage: (lng: string) => {
         if (lng.includes('zh')) return 'zh-CN'
         if (lng.includes('en')) return 'en-US'

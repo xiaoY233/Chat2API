@@ -203,6 +203,8 @@ export interface AppConfig {
   enableApiKey: boolean
   /** OAuth proxy mode: 'system' uses system proxy, 'none' disables proxy */
   oauthProxyMode: 'system' | 'none'
+  /** UI language */
+  language: 'zh-CN' | 'en-US'
   /** Session management configuration */
   sessionConfig: SessionConfig
   /** Tool prompt injection configuration */
@@ -720,6 +722,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   apiKeys: [],
   enableApiKey: false,
   oauthProxyMode: 'system',
+  language: 'en-US',
   sessionConfig: DEFAULT_SESSION_CONFIG,
   toolPromptConfig: DEFAULT_TOOL_PROMPT_CONFIG,
   managementApi: DEFAULT_MANAGEMENT_API_CONFIG,

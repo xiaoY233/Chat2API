@@ -51,7 +51,14 @@ export const useSettingsStore = create<SettingsState>()(
   persist(
     (set, get) => ({
       theme: 'system',
-      setTheme: (theme) => set({ theme }),
+      setTheme: async (theme) => {
+        set({ theme })
+        try {
+          await window.electronAPI.config.update({ theme })
+        } catch (error) {
+          console.error('Failed to update theme:', error)
+        }
+      },
       sidebarCollapsed: false,
       toggleSidebar: () => set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
       setSidebarCollapsed: (collapsed) => set({ sidebarCollapsed: collapsed }),
@@ -67,9 +74,14 @@ export const useSettingsStore = create<SettingsState>()(
         }
       },
       language: 'en-US',
-      setLanguage: (language) => {
+      setLanguage: async (language) => {
         set({ language })
         i18n.changeLanguage(language)
+        try {
+          await window.electronAPI.config.update({ language })
+        } catch (error) {
+          console.error('Failed to update language:', error)
+        }
       },
       autoStart: false,
       setAutoStart: async (enabled) => {
@@ -90,15 +102,36 @@ export const useSettingsStore = create<SettingsState>()(
         }
       },
       minimizeToTray: true,
-      setMinimizeToTray: (enabled) => set({ minimizeToTray: enabled }),
+      setMinimizeToTray: async (enabled) => {
+        set({ minimizeToTray: enabled })
+        try {
+          await window.electronAPI.config.update({ minimizeToTray: enabled })
+        } catch (error) {
+          console.error('Failed to update minimizeToTray:', error)
+        }
+      },
       closeBehavior: 'minimize',
       setCloseBehavior: (behavior) => set({ closeBehavior: behavior }),
       enableNotifications: true,
       setEnableNotifications: (enabled) => set({ enableNotifications: enabled }),
       logLevel: 'info',
-      setLogLevel: (level) => set({ logLevel: level }),
+      setLogLevel: async (level) => {
+        set({ logLevel: level })
+        try {
+          await window.electronAPI.config.update({ logLevel: level })
+        } catch (error) {
+          console.error('Failed to update logLevel:', error)
+        }
+      },
       logRetentionDays: 30,
-      setLogRetentionDays: (days) => set({ logRetentionDays: days }),
+      setLogRetentionDays: async (days) => {
+        set({ logRetentionDays: days })
+        try {
+          await window.electronAPI.config.update({ logRetentionDays: days })
+        } catch (error) {
+          console.error('Failed to update logRetentionDays:', error)
+        }
+      },
       maxLogs: 10000,
       setMaxLogs: (count) => set({ maxLogs: count }),
       credentialEncryption: true,
@@ -110,10 +143,10 @@ export const useSettingsStore = create<SettingsState>()(
       updateConfig: async (updates) => {
         const currentConfig = get().config
         if (!currentConfig) return
-        
+
         const newConfig = { ...currentConfig, ...updates }
         set({ config: newConfig })
-        
+
         try {
           await window.electronAPI.config.update(updates)
         } catch (error) {
@@ -124,11 +157,15 @@ export const useSettingsStore = create<SettingsState>()(
       fetchConfig: async () => {
         try {
           const config = await window.electronAPI.config.get()
-          set({ 
+          set({
             config,
+            theme: config.theme || 'system',
             autoStart: config.autoStart,
             autoStartProxy: config.autoStartProxy,
+            minimizeToTray: config.minimizeToTray ?? true,
             oauthProxyMode: config.oauthProxyMode || 'system',
+            logLevel: config.logLevel || 'info',
+            logRetentionDays: config.logRetentionDays || 30,
           })
         } catch (error) {
           console.error('Failed to fetch config:', error)
@@ -136,11 +173,32 @@ export const useSettingsStore = create<SettingsState>()(
       },
     }),
     {
-      name: 'chat2api-settings',
+      name: 'chat2api-ui-settings',
+      partialize: (state) => ({
+        theme: state.theme,
+        language: state.language,
+        sidebarCollapsed: state.sidebarCollapsed,
+        proxyEnabled: state.proxyEnabled,
+        oauthProxyMode: state.oauthProxyMode,
+        autoStart: state.autoStart,
+        autoStartProxy: state.autoStartProxy,
+        minimizeToTray: state.minimizeToTray,
+        closeBehavior: state.closeBehavior,
+        enableNotifications: state.enableNotifications,
+        logLevel: state.logLevel,
+        logRetentionDays: state.logRetentionDays,
+        maxLogs: state.maxLogs,
+        credentialEncryption: state.credentialEncryption,
+        logDesensitization: state.logDesensitization,
+      }),
       onRehydrateStorage: () => (state) => {
         if (state?.language) {
           i18n.changeLanguage(state.language)
         }
+        // 从后端同步配置（theme、autoStart 等）
+        useSettingsStore.getState().fetchConfig().catch((err) => {
+          console.error('Failed to fetch config on rehydrate:', err)
+        })
       },
     }
   )
