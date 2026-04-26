@@ -4,6 +4,7 @@ import { createWindow, getMainWindow, loadUrl, loadFile, openDevTools } from './
 import { createTrayManager, TrayManager } from './tray/TrayManager'
 import { registerIpcHandlers } from './ipc/handlers'
 import { UpdaterManager } from './updater'
+import { logManager } from './logger/manager'
 
 // Prevent uncaught exceptions from crashing the app
 process.on('uncaughtException', (error) => {
@@ -123,8 +124,9 @@ async function loadAppContent(mainWindow: BrowserWindow): Promise<void> {
   }
 }
 
-function cleanup(): void {
+async function cleanup(): Promise<void> {
   console.log('Application is exiting, performing cleanup...')
+  await logManager.flush().catch(console.error)
   const updaterManager = UpdaterManager.getInstance()
   updaterManager.destroy()
 }

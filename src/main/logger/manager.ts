@@ -37,14 +37,17 @@ class LogManager {
   private initialized: boolean = false
   private mainWindow: BrowserWindow | null = null
 
+  private saveTimer: NodeJS.Timeout | null = null
+  private readonly SAVE_DELAY_MS = 2000
+
   constructor() {
     const userDataPath = app.getPath('userData')
     const logDir = path.join(userDataPath, 'logs')
-    
+
     if (!fs.existsSync(logDir)) {
       fs.mkdirSync(logDir, { recursive: true })
     }
-    
+
     this.logFile = path.join(logDir, 'app.log')
   }
 
@@ -54,7 +57,7 @@ class LogManager {
 
   async initialize(): Promise<void> {
     if (this.initialized) return
-    
+
     try {
       await this.loadLogs()
       this.initialized = true
@@ -70,7 +73,7 @@ class LogManager {
       if (fs.existsSync(this.logFile)) {
         const content = await fs.promises.readFile(this.logFile, 'utf-8')
         const lines = content.trim().split('\n').filter(Boolean)
-        
+
         this.logs = lines
           .map(line => {
             try {
@@ -97,6 +100,28 @@ class LogManager {
     }
   }
 
+  private scheduleSave(): void {
+    if (this.saveTimer) {
+      clearTimeout(this.saveTimer)
+    }
+    this.saveTimer = setTimeout(() => {
+      this.saveLogs().catch(console.error)
+      this.saveTimer = null
+    }, this.SAVE_DELAY_MS)
+  }
+
+  /**
+   * Force flush logs to disk immediately.
+   * Call this before app exit.
+   */
+  async flush(): Promise<void> {
+    if (this.saveTimer) {
+      clearTimeout(this.saveTimer)
+      this.saveTimer = null
+    }
+    await this.saveLogs()
+  }
+
   log(
     level: LogLevel,
     message: string,
@@ -121,7 +146,7 @@ class LogManager {
       this.logs = this.logs.slice(-this.maxLogs)
     }
 
-    this.saveLogs().catch(console.error)
+    this.scheduleSave()
 
     this.mainWindow?.webContents.send(IpcChannels.LOGS_NEW_LOG, entry)
 
@@ -153,7 +178,7 @@ class LogManager {
 
     if (filter?.keyword) {
       const keyword = filter.keyword.toLowerCase()
-      filtered = filtered.filter(log => 
+      filtered = filtered.filter(log =>
         log.message.toLowerCase().includes(keyword)
       )
     }
@@ -229,7 +254,7 @@ class LogManager {
   async cleanOldLogs(): Promise<void> {
     const now = Date.now()
     const retentionMs = this.retentionDays * 24 * 60 * 60 * 1000
-    
+
     this.logs = this.logs.filter(log => now - log.timestamp < retentionMs)
     await this.saveLogs()
   }
@@ -256,7 +281,7 @@ class LogManager {
         const time = new Date(log.timestamp).toISOString()
         const level = log.level.toUpperCase().padEnd(5)
         let line = `[${time}] [${level}] ${log.message}`
-        
+
         if (log.providerId) {
           line += ` | Provider: ${log.providerId}`
         }
@@ -269,7 +294,7 @@ class LogManager {
         if (log.data) {
           line += ` | Data: ${JSON.stringify(log.data)}`
         }
-        
+
         return line
       })
       .join('\n')
