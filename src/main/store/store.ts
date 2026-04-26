@@ -87,6 +87,9 @@ class StoreManager {
 
     const storagePath = this.getStoragePath()
 
+    // 迁移：如果存在旧的加密数据文件，先解密并迁移到明文存储
+    const migratedData = await this.migrateEncryptedStorage(storagePath)
+
     try {
       this.store = new Store({
         name: 'data',
@@ -95,13 +98,19 @@ class StoreManager {
         encryptionKey: this.getEncryptionKey(),
       })
 
+      // 写入迁移数据（如果有）
+      if (migratedData) {
+        this.store.set(migratedData)
+        console.log('[Store] Successfully migrated encrypted data to unencrypted storage')
+      }
+
       await this.initializeDefaultProviders()
       this.isInitialized = true
       this.initializationError = null
     } catch (error) {
       console.error('[Store] Failed to initialize storage:', error)
       this.initializationError = error instanceof Error ? error : new Error(String(error))
-      
+
       // Try to recover by backing up corrupted data and reinitializing
       try {
         await this.recoverFromCorruptedData(storagePath)
@@ -118,6 +127,49 @@ class StoreManager {
         console.error('[Store] Failed to recover from corrupted data:', recoveryError)
         throw this.initializationError
       }
+    }
+  }
+
+  /**
+   * Migrate encrypted storage to unencrypted storage
+   * If an old encrypted data.json exists, decrypt it and remove the file
+   * so the new unencrypted store can be created cleanly.
+   */
+  private async migrateEncryptedStorage(storagePath: string): Promise<Record<string, unknown> | null> {
+    try {
+      const { existsSync, unlinkSync } = await import('fs')
+      const { join } = await import('path')
+      const dataFile = join(storagePath, 'data.json')
+
+      if (!existsSync(dataFile)) {
+        return null
+      }
+
+      // Try to read with the old fixed encryption key
+      const encryptedStore = new Store({
+        name: 'data',
+        cwd: storagePath,
+        encryptionKey: 'chat2api-fixed-encryption-key-v1',
+      })
+
+      const data = encryptedStore.store as Record<string, unknown>
+      const hasData =
+        (Array.isArray(data.providers) && data.providers.length > 0) ||
+        (Array.isArray(data.accounts) && data.accounts.length > 0) ||
+        (data.config && Object.keys(data.config).length > 0)
+
+      if (!hasData) {
+        // File exists but only contains defaults; safe to remove
+        unlinkSync(dataFile)
+        return null
+      }
+
+      // Remove the encrypted file so the new unencrypted store can take over
+      unlinkSync(dataFile)
+      return data
+    } catch (error) {
+      console.log('[Store] No encrypted data to migrate or migration skipped:', error)
+      return null
     }
   }
 
@@ -159,15 +211,7 @@ class StoreManager {
    * so it must be stable across app restarts
    */
   private getEncryptionKey(): string | undefined {
-    try {
-      if (safeStorage.isEncryptionAvailable()) {
-        // Use a fixed key - electron-store will use this to encrypt/decrypt data
-        // The key itself is not stored in the data file, only used for encryption
-        return 'chat2api-fixed-encryption-key-v1'
-      }
-    } catch (error) {
-      console.warn('Encryption unavailable, using unencrypted storage:', error)
-    }
+    // electron-store 文件级加密已关闭，数据以明文 JSON 存储
     return undefined
   }
 
