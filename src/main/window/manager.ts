@@ -43,6 +43,13 @@ export function createWindow(options: WindowOptions = {}): BrowserWindow {
     icon: join(__dirname, '../../resources/icon.png'),
   })
 
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    if (input.alt && input.key === 'F12') {
+      event.preventDefault()
+      mainWindow?.webContents.toggleDevTools()
+    }
+  })
+
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url)
     return { action: 'deny' }
