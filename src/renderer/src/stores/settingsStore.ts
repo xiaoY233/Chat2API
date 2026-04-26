@@ -81,7 +81,7 @@ export const useSettingsStore = create<SettingsState>()(
       setLogRetentionDays: (days) => set({ logRetentionDays: days }),
       maxLogs: 10000,
       setMaxLogs: (count) => set({ maxLogs: count }),
-      credentialEncryption: true,
+      credentialEncryption: false,
       setCredentialEncryption: (enabled) => set({ credentialEncryption: enabled }),
       logDesensitization: true,
       setLogDesensitization: (enabled) => set({ logDesensitization: enabled }),

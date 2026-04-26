@@ -282,23 +282,7 @@ class StoreManager {
    * @returns Encrypted string
    */
   encryptData(data: string): string {
-    try {
-      console.log('[Store] encryptData input length:', data.length, 'content:', data.substring(0, 20) + '...')
-      if (safeStorage.isEncryptionAvailable()) {
-        // Create new Buffer to store encryption result
-        const encrypted = Buffer.from(safeStorage.encryptString(data))
-        const result = encrypted.toString('base64')
-        console.log('[Store] encryptData output length:', result.length, 'content:', result.substring(0, 20) + '...')
-        // Verify encryption is correct
-        const decrypted = safeStorage.decryptString(encrypted)
-        console.log('[Store] encryptData verify decryption:', decrypted.substring(0, 20) + '...', 'match:', decrypted === data)
-        return result
-      } else {
-        console.log('[Store] Encryption unavailable, returning original data')
-      }
-    } catch (error) {
-      console.error('Failed to encrypt data:', error)
-    }
+    // 默认关闭 safeStorage 凭证加密，直接明文存储
     return data
   }
 
@@ -308,13 +292,18 @@ class StoreManager {
    * @returns Decrypted string
    */
   decryptData(encryptedData: string): string {
+    // 兼容旧数据：若数据仍为 safeStorage 密文则尝试解密，否则直接返回
     try {
       if (safeStorage.isEncryptionAvailable()) {
         const buffer = Buffer.from(encryptedData, 'base64')
-        return safeStorage.decryptString(buffer)
+        const decrypted = safeStorage.decryptString(buffer)
+        // 若解密结果与原数据不同，说明是旧加密数据，返回解密结果
+        if (decrypted !== encryptedData) {
+          return decrypted
+        }
       }
-    } catch (error) {
-      console.error('Failed to decrypt data:', error)
+    } catch {
+      // 解密失败说明不是 safeStorage 密文，直接返回原数据
     }
     return encryptedData
   }
