@@ -876,6 +876,8 @@
     "resetDefault": "恢复默认",
     "cancel": "取消",
     "save": "保存",
+    "saveSuccess": "保存成功",
+    "saveFailed": "保存失败",
     "noModels": "暂无模型",
     "warningTitle": "重要提示",
     "warningMessage": "实际调用模型ID需自行在供应商官方页面获取，填写错误将导致对话失败。建议先在官方页面确认模型ID后再添加。",

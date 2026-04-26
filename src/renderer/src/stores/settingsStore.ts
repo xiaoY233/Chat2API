@@ -45,93 +45,40 @@ interface SettingsState {
   setConfig: (config: AppConfig) => void
   updateConfig: (updates: Partial<AppConfig>) => Promise<void>
   fetchConfig: () => Promise<void>
+  saveSettings: () => Promise<void>
 }
 
 export const useSettingsStore = create<SettingsState>()(
   persist(
     (set, get) => ({
       theme: 'system',
-      setTheme: async (theme) => {
-        set({ theme })
-        try {
-          await window.electronAPI.config.update({ theme })
-        } catch (error) {
-          console.error('Failed to update theme:', error)
-        }
-      },
+      setTheme: (theme) => set({ theme }),
       sidebarCollapsed: false,
       toggleSidebar: () => set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
       setSidebarCollapsed: (collapsed) => set({ sidebarCollapsed: collapsed }),
       proxyEnabled: false,
       setProxyEnabled: (enabled) => set({ proxyEnabled: enabled }),
       oauthProxyMode: 'system',
-      setOauthProxyMode: async (mode) => {
-        set({ oauthProxyMode: mode })
-        try {
-          await window.electronAPI.config.update({ oauthProxyMode: mode })
-        } catch (error) {
-          console.error('Failed to update oauthProxyMode:', error)
-        }
-      },
+      setOauthProxyMode: (mode) => set({ oauthProxyMode: mode }),
       language: 'en-US',
-      setLanguage: async (language) => {
+      setLanguage: (language) => {
         set({ language })
         i18n.changeLanguage(language)
-        try {
-          await window.electronAPI.config.update({ language })
-        } catch (error) {
-          console.error('Failed to update language:', error)
-        }
       },
       autoStart: false,
-      setAutoStart: async (enabled) => {
-        set({ autoStart: enabled })
-        try {
-          await window.electronAPI.config.update({ autoStart: enabled })
-        } catch (error) {
-          console.error('Failed to update autoStart:', error)
-        }
-      },
+      setAutoStart: (enabled) => set({ autoStart: enabled }),
       autoStartProxy: false,
-      setAutoStartProxy: async (enabled) => {
-        set({ autoStartProxy: enabled })
-        try {
-          await window.electronAPI.config.update({ autoStartProxy: enabled })
-        } catch (error) {
-          console.error('Failed to update autoStartProxy:', error)
-        }
-      },
+      setAutoStartProxy: (enabled) => set({ autoStartProxy: enabled }),
       minimizeToTray: true,
-      setMinimizeToTray: async (enabled) => {
-        set({ minimizeToTray: enabled })
-        try {
-          await window.electronAPI.config.update({ minimizeToTray: enabled })
-        } catch (error) {
-          console.error('Failed to update minimizeToTray:', error)
-        }
-      },
+      setMinimizeToTray: (enabled) => set({ minimizeToTray: enabled }),
       closeBehavior: 'minimize',
       setCloseBehavior: (behavior) => set({ closeBehavior: behavior }),
       enableNotifications: true,
       setEnableNotifications: (enabled) => set({ enableNotifications: enabled }),
       logLevel: 'info',
-      setLogLevel: async (level) => {
-        set({ logLevel: level })
-        try {
-          await window.electronAPI.config.update({ logLevel: level })
-        } catch (error) {
-          console.error('Failed to update logLevel:', error)
-        }
-      },
+      setLogLevel: (level) => set({ logLevel: level }),
       logRetentionDays: 30,
-      setLogRetentionDays: async (days) => {
-        set({ logRetentionDays: days })
-        try {
-          await window.electronAPI.config.update({ logRetentionDays: days })
-        } catch (error) {
-          console.error('Failed to update logRetentionDays:', error)
-        }
-      },
+      setLogRetentionDays: (days) => set({ logRetentionDays: days }),
       maxLogs: 10000,
       setMaxLogs: (count) => set({ maxLogs: count }),
       credentialEncryption: true,
@@ -169,6 +116,24 @@ export const useSettingsStore = create<SettingsState>()(
           })
         } catch (error) {
           console.error('Failed to fetch config:', error)
+        }
+      },
+      saveSettings: async () => {
+        const state = get()
+        try {
+          await window.electronAPI.config.update({
+            theme: state.theme,
+            language: state.language,
+            autoStart: state.autoStart,
+            autoStartProxy: state.autoStartProxy,
+            minimizeToTray: state.minimizeToTray,
+            oauthProxyMode: state.oauthProxyMode,
+            logLevel: state.logLevel,
+            logRetentionDays: state.logRetentionDays,
+          })
+        } catch (error) {
+          console.error('Failed to save settings:', error)
+          throw error
         }
       },
     }),

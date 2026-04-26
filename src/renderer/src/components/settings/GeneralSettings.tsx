@@ -5,7 +5,10 @@ import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
 import { useSettingsStore, CloseBehavior, OAuthProxyMode } from '@/stores/settingsStore'
-import { Bell, Minimize2, Power, Globe } from 'lucide-react'
+import { Bell, Minimize2, Power, Globe, Save } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { useState } from 'react'
+import { useToast } from '@/hooks/use-toast'
 
 export function GeneralSettings() {
   const { t } = useTranslation()
@@ -22,7 +25,22 @@ export function GeneralSettings() {
     setEnableNotifications,
     oauthProxyMode,
     setOauthProxyMode,
+    saveSettings,
   } = useSettingsStore()
+  const { toast } = useToast()
+  const [isSaving, setIsSaving] = useState(false)
+
+  const handleSave = async () => {
+    setIsSaving(true)
+    try {
+      await saveSettings()
+      toast({ title: t('common.success'), description: t('settings.saveSuccess') })
+    } catch {
+      toast({ title: t('common.error'), description: t('settings.saveFailed'), variant: 'destructive' })
+    } finally {
+      setIsSaving(false)
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -152,6 +170,13 @@ export function GeneralSettings() {
           </div>
         </CardContent>
       </Card>
+
+      <div className="flex justify-end">
+        <Button onClick={handleSave} disabled={isSaving} className="flex items-center gap-2">
+          <Save className="h-4 w-4" />
+          {isSaving ? t('settings.saving') : t('settings.save')}
+        </Button>
+      </div>
     </div>
   )
 }

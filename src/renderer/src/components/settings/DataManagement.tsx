@@ -108,6 +108,18 @@ export function DataManagement() {
     }
   }
 
+  const handleSave = async () => {
+    setIsSaving(true)
+    try {
+      await saveSettings()
+      toast({ title: t('common.success'), description: t('settings.saveSuccess') })
+    } catch {
+      toast({ title: t('common.error'), description: t('settings.saveFailed'), variant: 'destructive' })
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
   const handleResetApp = async () => {
     setIsResetting(true)
     try {
@@ -285,6 +297,13 @@ export function DataManagement() {
           </div>
         </CardContent>
       </Card>
+
+      <div className="flex justify-end">
+        <Button onClick={handleSave} disabled={isSaving} className="flex items-center gap-2">
+          <Save className="h-4 w-4" />
+          {isSaving ? t('settings.saving') : t('settings.save')}
+        </Button>
+      </div>
     </div>
   )
 }

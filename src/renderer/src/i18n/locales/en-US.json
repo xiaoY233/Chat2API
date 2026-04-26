@@ -876,6 +876,8 @@
     "resetDefault": "Reset to Default",
     "cancel": "Cancel",
     "save": "Save",
+    "saveSuccess": "Saved successfully",
+    "saveFailed": "Save failed",
     "noModels": "No models",
     "warningTitle": "Important Notice",
     "warningMessage": "The actual model ID must be obtained from the provider's official page. Incorrect ID will cause chat failures. Please confirm the model ID on the official page before adding.",
