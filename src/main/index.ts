@@ -5,6 +5,7 @@ import { createTrayManager, TrayManager } from './tray/TrayManager'
 import { registerIpcHandlers } from './ipc/handlers'
 import { UpdaterManager } from './updater'
 import { logManager } from './logger/manager'
+import { storeManager } from './store/store'
 
 // Prevent uncaught exceptions from crashing the app
 process.on('uncaughtException', (error) => {
@@ -127,6 +128,7 @@ async function loadAppContent(mainWindow: BrowserWindow): Promise<void> {
 async function cleanup(): Promise<void> {
   console.log('Application is exiting, performing cleanup...')
   await logManager.flush().catch(console.error)
+  await storeManager.flushLogs().catch(console.error)
   const updaterManager = UpdaterManager.getInstance()
   updaterManager.destroy()
 }

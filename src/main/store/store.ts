@@ -52,6 +52,11 @@ class StoreManager {
   private mainWindow: BrowserWindow | null = null
   private initializationError: Error | null = null
 
+  private pendingLogs: LogEntry[] = []
+  private pendingRequestLogs: RequestLogEntry[] = []
+  private logSaveTimer: NodeJS.Timeout | null = null
+  private readonly LOG_SAVE_DELAY_MS = 3000
+
   setMainWindow(window: BrowserWindow | null): void {
     this.mainWindow = window
   }
@@ -317,6 +322,52 @@ class StoreManager {
         ? `Storage initialization failed: ${this.initializationError.message}`
         : 'Storage not initialized, please call initialize() first'
       throw new Error(errorMsg)
+    }
+  }
+
+  private scheduleLogSave(): void {
+    if (this.logSaveTimer) {
+      clearTimeout(this.logSaveTimer)
+    }
+    this.logSaveTimer = setTimeout(() => {
+      this.flushLogs().catch(console.error)
+      this.logSaveTimer = null
+    }, this.LOG_SAVE_DELAY_MS)
+  }
+
+  /**
+   * Force flush pending logs to disk immediately.
+   * Call this before app exit.
+   */
+  async flushLogs(): Promise<void> {
+    if (this.logSaveTimer) {
+      clearTimeout(this.logSaveTimer)
+      this.logSaveTimer = null
+    }
+    if (!this.isInitialized || !this.store) return
+
+    if (this.pendingLogs.length > 0) {
+      const logs = this.store.get('logs') as LogEntry[] || []
+      logs.push(...this.pendingLogs)
+      const config = this.getConfig()
+      const maxLogs = config.logRetentionDays * 1000
+      if (logs.length > maxLogs) {
+        logs.splice(0, logs.length - maxLogs)
+      }
+      this.store.set('logs', logs)
+      this.pendingLogs = []
+    }
+
+    if (this.pendingRequestLogs.length > 0) {
+      const requestLogs = this.store.get('requestLogs') as RequestLogEntry[] || []
+      requestLogs.push(...this.pendingRequestLogs)
+      const config = this.getConfig()
+      const maxLogs = config.logRetentionDays * 500
+      if (requestLogs.length > maxLogs) {
+        requestLogs.splice(0, requestLogs.length - maxLogs)
+      }
+      this.store.set('requestLogs', requestLogs)
+      this.pendingRequestLogs = []
     }
   }
 
@@ -717,8 +768,7 @@ class StoreManager {
     }
   ): LogEntry {
     this.ensureInitialized()
-    const logs = this.store!.get('logs') || []
-    
+
     const entry: LogEntry = {
       id: this.generateId(),
       timestamp: Date.now(),
@@ -726,16 +776,16 @@ class StoreManager {
       message,
       ...data,
     }
-    
-    logs.push(entry)
-    
+
+    this.pendingLogs.push(entry)
+
     const config = this.getConfig()
     const maxLogs = config.logRetentionDays * 1000
-    if (logs.length > maxLogs) {
-      logs.splice(0, logs.length - maxLogs)
+    if (this.pendingLogs.length > maxLogs) {
+      this.pendingLogs.splice(0, this.pendingLogs.length - maxLogs)
     }
-    
-    this.store!.set('logs', logs)
+
+    this.scheduleLogSave()
 
     this.mainWindow?.webContents.send(IpcChannels.LOGS_NEW_LOG, entry)
 
@@ -749,16 +799,16 @@ class StoreManager {
    */
   getLogs(limit?: number, level?: LogLevel): LogEntry[] {
     this.ensureInitialized()
-    let logs = this.store!.get('logs') as LogEntry[] || []
-    
+    let logs = (this.store!.get('logs') as LogEntry[] || []).concat(this.pendingLogs)
+
     if (level) {
       logs = logs.filter((l: LogEntry) => l.level === level)
     }
-    
+
     if (limit && logs.length > limit) {
       logs = logs.slice(-limit)
     }
-    
+
     return logs
   }
 
@@ -767,6 +817,7 @@ class StoreManager {
    */
   clearLogs(): void {
     this.ensureInitialized()
+    this.pendingLogs = []
     this.store!.set('logs', [])
   }
 
@@ -918,22 +969,21 @@ class StoreManager {
    */
   addRequestLog(entry: Omit<RequestLogEntry, 'id'>): RequestLogEntry {
     this.ensureInitialized()
-    const requestLogs = this.store!.get('requestLogs') || []
-    
+
     const newEntry: RequestLogEntry = {
       ...entry,
       id: this.generateId(),
     }
-    
-    requestLogs.push(newEntry)
-    
+
+    this.pendingRequestLogs.push(newEntry)
+
     const config = this.getConfig()
     const maxLogs = config.logRetentionDays * 500
-    if (requestLogs.length > maxLogs) {
-      requestLogs.splice(0, requestLogs.length - maxLogs)
+    if (this.pendingRequestLogs.length > maxLogs) {
+      this.pendingRequestLogs.splice(0, this.pendingRequestLogs.length - maxLogs)
     }
-    
-    this.store!.set('requestLogs', requestLogs)
+
+    this.scheduleLogSave()
 
     this.mainWindow?.webContents.send(IpcChannels.REQUEST_LOGS_NEW, newEntry)
 
@@ -945,8 +995,15 @@ class StoreManager {
    */
   updateRequestLog(id: string, updates: Partial<RequestLogEntry>): boolean {
     this.ensureInitialized()
-    const requestLogs = this.store!.get('requestLogs') || []
 
+    // 先在 pending 中查找
+    const pendingIndex = this.pendingRequestLogs.findIndex((l) => l.id === id)
+    if (pendingIndex !== -1) {
+      this.pendingRequestLogs[pendingIndex] = { ...this.pendingRequestLogs[pendingIndex], ...updates }
+      return true
+    }
+
+    const requestLogs = this.store!.get('requestLogs') || []
     const index = requestLogs.findIndex((l: RequestLogEntry) => l.id === id)
     if (index === -1) return false
 
@@ -961,22 +1018,22 @@ class StoreManager {
    */
   getRequestLogs(limit?: number, filter?: { status?: 'success' | 'error'; providerId?: string }): RequestLogEntry[] {
     this.ensureInitialized()
-    let requestLogs = this.store!.get('requestLogs') || []
-    
+    let requestLogs = (this.store!.get('requestLogs') as RequestLogEntry[] || []).concat(this.pendingRequestLogs)
+
     if (filter?.status) {
       requestLogs = requestLogs.filter((l: RequestLogEntry) => l.status === filter.status)
     }
-    
+
     if (filter?.providerId) {
       requestLogs = requestLogs.filter((l: RequestLogEntry) => l.providerId === filter.providerId)
     }
-    
+
     requestLogs.sort((a: RequestLogEntry, b: RequestLogEntry) => b.timestamp - a.timestamp)
-    
+
     if (limit && requestLogs.length > limit) {
       requestLogs = requestLogs.slice(0, limit)
     }
-    
+
     return requestLogs
   }
 
@@ -985,6 +1042,8 @@ class StoreManager {
    */
   getRequestLogById(id: string): RequestLogEntry | undefined {
     this.ensureInitialized()
+    const pending = this.pendingRequestLogs.find((l) => l.id === id)
+    if (pending) return pending
     const requestLogs = this.store!.get('requestLogs') || []
     return requestLogs.find((l: RequestLogEntry) => l.id === id)
   }
@@ -994,6 +1053,7 @@ class StoreManager {
    */
   clearRequestLogs(): void {
     this.ensureInitialized()
+    this.pendingRequestLogs = []
     this.store!.set('requestLogs', [])
     this.store!.set('statistics', DEFAULT_STATISTICS)
   }
