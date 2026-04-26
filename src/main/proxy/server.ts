@@ -129,18 +129,26 @@ export class ProxyServer {
       await next()
 
       const latency = Date.now() - startTime
-      const logLevel = ctx.status >= 400 ? 'warn' : 'info'
 
-      if (!ctx.path.startsWith('/v1/models')) {
-        storeManager.addLog(logLevel, `${ctx.method} ${ctx.path} ${ctx.status} ${latency}ms`, {
-          data: {
-            method: ctx.method,
-            path: ctx.path,
-            status: ctx.status,
-            latency,
-            clientIP: ctx.ip,
-          },
-        })
+      // 只记录异常请求或慢请求，避免正常请求产生大量日志
+      const isError = ctx.status >= 400
+      const isSlow = latency > 1000
+      const isModelsEndpoint = ctx.path.startsWith('/v1/models')
+
+      if (!isModelsEndpoint && (isError || isSlow)) {
+        storeManager.addLog(
+          isError ? 'warn' : 'info',
+          `${ctx.method} ${ctx.path} ${ctx.status} ${latency}ms`,
+          {
+            data: {
+              method: ctx.method,
+              path: ctx.path,
+              status: ctx.status,
+              latency,
+              clientIP: ctx.ip,
+            },
+          }
+        )
       }
     })
   }
