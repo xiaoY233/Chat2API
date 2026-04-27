@@ -6,6 +6,7 @@ import { registerIpcHandlers } from './ipc/handlers'
 import { UpdaterManager } from './updater'
 import { logManager } from './logger/manager'
 import { storeManager } from './store/store'
+import { diskMonitor } from './utils/diskMonitor'
 
 // Prevent uncaught exceptions from crashing the app
 process.on('uncaughtException', (error) => {
@@ -101,6 +102,13 @@ async function setupApp(): Promise<void> {
   trayManager = createTrayManager(mainWindow)
 
   await loadAppContent(mainWindow)
+
+  // Enable debug mode via --debug flag or config.debugMode
+  const config = storeManager.getConfig()
+  const isDebugMode = process.argv.includes('--debug') || config.debugMode
+  if (isDebugMode) {
+    diskMonitor.enable()
+  }
 
   if (process.env.NODE_ENV === 'development') {
     openDevTools()

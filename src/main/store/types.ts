@@ -213,6 +213,8 @@ export interface AppConfig {
   managementApi: ManagementApiConfig
   /** Context management configuration */
   contextManagement: ContextManagementConfig
+  /** Debug mode: enables disk I/O profiling and dev tools */
+  debugMode: boolean
 }
 
 /**
@@ -727,6 +729,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   toolPromptConfig: DEFAULT_TOOL_PROMPT_CONFIG,
   managementApi: DEFAULT_MANAGEMENT_API_CONFIG,
   contextManagement: DEFAULT_CONTEXT_MANAGEMENT_CONFIG,
+  debugMode: false,
 }
 
 /**

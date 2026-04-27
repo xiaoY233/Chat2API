@@ -1,6 +1,7 @@
 import { BrowserWindow, app, shell } from 'electron'
 import { join } from 'path'
 import { storeManager } from '../store/store'
+import { diskMonitor } from '../utils/diskMonitor'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -44,7 +45,8 @@ export function createWindow(options: WindowOptions = {}): BrowserWindow {
   })
 
   mainWindow.webContents.on('before-input-event', (event, input) => {
-    if (input.alt && input.key === 'F12') {
+    // Alt+F12 仅在 DEBUG 模式下可用（--debug 或 config.debugMode）
+    if (input.alt && input.key === 'F12' && diskMonitor.isEnabled()) {
       event.preventDefault()
       mainWindow?.webContents.toggleDevTools()
     }
