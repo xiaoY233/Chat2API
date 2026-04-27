@@ -124,19 +124,8 @@ export function RequestLogList() {
     return () => clearInterval(interval)
   }, [fetchLogs])
 
-  useEffect(() => {
-    if (!window.electronAPI?.requestLogs?.onNewLog) return
-
-    const unsubscribe = window.electronAPI.requestLogs.onNewLog((newLog: RequestLogEntry) => {
-      if (statusFilter === 'all' || newLog.status === statusFilter) {
-        logsRef.current = [newLog, ...logsRef.current.slice(0, 199)]
-        setLogs([...logsRef.current])
-      }
-      fetchStats()
-    })
-
-    return unsubscribe
-  }, [statusFilter, fetchStats])
+  // 移除 onNewLog 实时推送，避免 IPC 洪水导致前端卡死。
+  // 仅依靠 3 秒轮询 fetchLogs 获取最新数据。
 
   useEffect(() => {
     const updateSize = () => {

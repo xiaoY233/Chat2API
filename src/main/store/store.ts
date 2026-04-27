@@ -57,6 +57,11 @@ class StoreManager {
   private logSaveTimer: NodeJS.Timeout | null = null
   private readonly LOG_SAVE_DELAY_MS = 3000
 
+  private pendingIpcLogs: LogEntry[] = []
+  private pendingIpcRequestLogs: RequestLogEntry[] = []
+  private ipcFlushTimer: NodeJS.Timeout | null = null
+  private readonly IPC_FLUSH_DELAY_MS = 500
+
   setMainWindow(window: BrowserWindow | null): void {
     this.mainWindow = window
   }
@@ -368,6 +373,38 @@ class StoreManager {
       }
       this.store.set('requestLogs', requestLogs)
       this.pendingRequestLogs = []
+    }
+  }
+
+  private scheduleIpcFlush(): void {
+    if (this.ipcFlushTimer) {
+      clearTimeout(this.ipcFlushTimer)
+    }
+    this.ipcFlushTimer = setTimeout(() => {
+      this.flushIpc()
+      this.ipcFlushTimer = null
+    }, this.IPC_FLUSH_DELAY_MS)
+  }
+
+  /**
+   * Batch flush pending IPC messages to renderer.
+   * Groups rapid-fire logs into a single burst to reduce IPC pressure.
+   */
+  private flushIpc(): void {
+    if (!this.mainWindow) return
+
+    if (this.pendingIpcLogs.length > 0) {
+      for (const log of this.pendingIpcLogs) {
+        this.mainWindow.webContents.send(IpcChannels.LOGS_NEW_LOG, log)
+      }
+      this.pendingIpcLogs = []
+    }
+
+    if (this.pendingIpcRequestLogs.length > 0) {
+      for (const log of this.pendingIpcRequestLogs) {
+        this.mainWindow.webContents.send(IpcChannels.REQUEST_LOGS_NEW, log)
+      }
+      this.pendingIpcRequestLogs = []
     }
   }
 
@@ -787,7 +824,8 @@ class StoreManager {
 
     this.scheduleLogSave()
 
-    this.mainWindow?.webContents.send(IpcChannels.LOGS_NEW_LOG, entry)
+    this.pendingIpcLogs.push(entry)
+    this.scheduleIpcFlush()
 
     return entry
   }
@@ -985,7 +1023,8 @@ class StoreManager {
 
     this.scheduleLogSave()
 
-    this.mainWindow?.webContents.send(IpcChannels.REQUEST_LOGS_NEW, newEntry)
+    this.pendingIpcRequestLogs.push(newEntry)
+    this.scheduleIpcFlush()
 
     return newEntry
   }

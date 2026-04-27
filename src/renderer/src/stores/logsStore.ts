@@ -78,10 +78,10 @@ export const useLogsStore = create<LogsState>((set, get) => ({
   },
 
   addLog: (log) => {
-    const { logs, autoScroll, filter } = get()
+    const { logs, autoScroll, filter, filteredLogs, stats } = get()
     const newLogs = [log, ...logs].slice(0, 10000)
-    set({ logs: newLogs })
-    
+
+    let newFilteredLogs = filteredLogs
     if (autoScroll) {
       let shouldAdd = true
       if (filter.level !== 'all' && log.level !== filter.level) {
@@ -96,19 +96,21 @@ export const useLogsStore = create<LogsState>((set, get) => ({
       if (filter.endTime && log.timestamp > filter.endTime) {
         shouldAdd = false
       }
-      
+
       if (shouldAdd) {
-        set({ filteredLogs: [log, ...get().filteredLogs].slice(0, 10000) })
+        newFilteredLogs = [log, ...filteredLogs].slice(0, 10000)
       }
     }
 
-    set((state) => ({
+    set({
+      logs: newLogs,
+      filteredLogs: newFilteredLogs,
       stats: {
-        ...state.stats,
-        total: state.stats.total + 1,
-        [log.level]: state.stats[log.level] + 1,
+        ...stats,
+        total: stats.total + 1,
+        [log.level]: stats[log.level] + 1,
       },
-    }))
+    })
   },
 
   setSelectedLog: (log) => set({ selectedLog: log }),
