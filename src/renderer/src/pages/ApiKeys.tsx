@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -22,16 +22,18 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 
-import { 
-  Key, 
-  Plus, 
-  Copy, 
-  Trash2, 
-  Eye, 
+import {
+  Key,
+  Plus,
+  Copy,
+  Trash2,
+  Eye,
   EyeOff,
   Shield,
   Clock,
   BarChart3,
+  Save,
+  RotateCcw,
 } from 'lucide-react'
 import { toast } from '@/hooks/use-toast'
 import { useSettingsStore } from '@/stores/settingsStore'
@@ -57,25 +59,33 @@ export default function ApiKeysPage() {
   const [newKeyName, setNewKeyName] = useState('')
   const [visibleKeys, setVisibleKeys] = useState<Set<string>>(new Set())
   const [deleteKeyId, setDeleteKeyId] = useState<string | null>(null)
+  const [hasChanges, setHasChanges] = useState(false)
+  const [saving, setSaving] = useState(false)
+
+  // Local state initialized from config
+  const [localEnableApiKey, setLocalEnableApiKey] = useState(false)
+  const [localApiKeys, setLocalApiKeys] = useState<ApiKey[]>([])
 
   useEffect(() => {
     fetchConfig()
   }, [fetchConfig])
 
-  const apiKeys = config?.apiKeys || []
+  // Sync local state from config on first load
+  useEffect(() => {
+    if (config) {
+      setLocalEnableApiKey(config.enableApiKey || false)
+      setLocalApiKeys(config.apiKeys || [])
+    }
+  }, [config])
 
-  const handleToggleEnabled = async (keyId: string, enabled: boolean) => {
-    const updatedKeys = apiKeys.map(k => 
+  const handleToggleEnabled = useCallback((keyId: string, enabled: boolean) => {
+    setLocalApiKeys(prev => prev.map(k =>
       k.id === keyId ? { ...k, enabled } : k
-    )
-    await updateConfig({ apiKeys: updatedKeys })
-    toast({
-      title: enabled ? t('apiKeys.keyEnabled') : t('apiKeys.keyDisabled'),
-      description: enabled ? t('apiKeys.keyEnabled') : t('apiKeys.keyDisabled'),
-    })
-  }
+    ))
+    setHasChanges(true)
+  }, [])
 
-  const handleAddKey = async () => {
+  const handleAddKey = useCallback(() => {
     if (!newKeyName.trim()) {
       toast({
         title: t('apiKeys.pleaseEnterName'),
@@ -94,21 +104,54 @@ export default function ApiKeysPage() {
       usageCount: 0,
     }
 
-    await updateConfig({ apiKeys: [...apiKeys, newKey] })
+    setLocalApiKeys(prev => [...prev, newKey])
     setShowAddDialog(false)
     setNewKeyName('')
+    setHasChanges(true)
+  }, [newKeyName, t])
+
+  const handleDeleteKey = useCallback(() => {
+    if (!deleteKeyId) return
+
+    setLocalApiKeys(prev => prev.filter(k => k.id !== deleteKeyId))
+    setDeleteKeyId(null)
+    setHasChanges(true)
+  }, [deleteKeyId])
+
+  const handleToggleGlobalEnabled = useCallback((enabled: boolean) => {
+    setLocalEnableApiKey(enabled)
+    setHasChanges(true)
+  }, [])
+
+  const handleSave = async () => {
+    setSaving(true)
+    try {
+      await updateConfig({
+        enableApiKey: localEnableApiKey,
+        apiKeys: localApiKeys,
+      })
+      setHasChanges(false)
+      toast({
+        title: t('common.success'),
+        description: t('apiKeys.saved'),
+      })
+    } catch (error) {
+      toast({
+        title: t('common.error'),
+        description: t('apiKeys.saveFailed'),
+        variant: 'destructive',
+      })
+    } finally {
+      setSaving(false)
+    }
   }
 
-  const handleDeleteKey = async () => {
-    if (!deleteKeyId) return
-    
-    const updatedKeys = apiKeys.filter(k => k.id !== deleteKeyId)
-    await updateConfig({ apiKeys: updatedKeys })
-    setDeleteKeyId(null)
-    toast({
-      title: t('apiKeys.deleted'),
-      description: t('apiKeys.keyDeleted'),
-    })
+  const handleReset = () => {
+    if (config) {
+      setLocalEnableApiKey(config.enableApiKey || false)
+      setLocalApiKeys(config.apiKeys || [])
+    }
+    setHasChanges(false)
   }
 
   const handleCopyKey = (key: string) => {
@@ -127,14 +170,6 @@ export default function ApiKeysPage() {
       newVisible.add(keyId)
     }
     setVisibleKeys(newVisible)
-  }
-
-  const handleToggleGlobalEnabled = async (enabled: boolean) => {
-    await updateConfig({ enableApiKey: enabled })
-    toast({
-      title: enabled ? t('apiKeys.authEnabled') : t('apiKeys.authDisabled'),
-      description: enabled ? t('apiKeys.authEnabled') : t('apiKeys.authDisabled'),
-    })
   }
 
   const formatDate = (timestamp: number) => {
@@ -159,6 +194,20 @@ export default function ApiKeysPage() {
           <h1 className="text-2xl font-bold">{t('apiKeys.title')}</h1>
           <p className="text-muted-foreground">{t('apiKeys.description')}</p>
         </div>
+        <div className="flex items-center gap-2">
+          {hasChanges && (
+            <>
+              <Button variant="outline" onClick={handleReset}>
+                <RotateCcw className="h-4 w-4 mr-2" />
+                {t('common.reset')}
+              </Button>
+              <Button onClick={handleSave} disabled={saving}>
+                <Save className="h-4 w-4 mr-2" />
+                {saving ? t('common.saving') : t('common.save')}
+              </Button>
+            </>
+          )}
+        </div>
       </div>
 
       <Card>
@@ -176,12 +225,12 @@ export default function ApiKeysPage() {
             <div className="space-y-0.5">
               <Label htmlFor="global-enable">{t('apiKeys.enableApiKeyAuth')}</Label>
               <p className="text-sm text-muted-foreground">
-                {t('apiKeys.currentStatus')}: {config?.enableApiKey ? t('common.enabled') : t('common.disabled')}
+                {t('apiKeys.currentStatus')}: {localEnableApiKey ? t('common.enabled') : t('common.disabled')}
               </p>
             </div>
             <Switch
               id="global-enable"
-              checked={config?.enableApiKey || false}
+              checked={localEnableApiKey}
               onCheckedChange={handleToggleGlobalEnabled}
             />
           </div>
@@ -196,7 +245,7 @@ export default function ApiKeysPage() {
               {t('apiKeys.apiKeyList')}
             </CardTitle>
             <CardDescription>
-              {t('apiKeys.totalKeys', { count: apiKeys.length })}, {t('apiKeys.enabledKeys', { count: apiKeys.filter(k => k.enabled).length })}
+              {t('apiKeys.totalKeys', { count: localApiKeys.length })}, {t('apiKeys.enabledKeys', { count: localApiKeys.filter(k => k.enabled).length })}
             </CardDescription>
           </div>
           <Button onClick={() => setShowAddDialog(true)}>
@@ -205,7 +254,7 @@ export default function ApiKeysPage() {
           </Button>
         </CardHeader>
         <CardContent>
-          {apiKeys.length === 0 ? (
+          {localApiKeys.length === 0 ? (
             <div className="text-center py-12">
               <Key className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
               <p className="text-muted-foreground">{t('apiKeys.noApiKeys')}</p>
@@ -226,7 +275,7 @@ export default function ApiKeysPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {apiKeys.map((apiKey) => (
+                {localApiKeys.map((apiKey) => (
                   <TableRow key={apiKey.id}>
                     <TableCell>
                       <div className="font-medium">{apiKey.name}</div>
@@ -234,8 +283,8 @@ export default function ApiKeysPage() {
                     <TableCell>
                       <div className="flex items-center gap-2">
                         <code className="text-sm bg-muted px-2 py-1 rounded">
-                          {visibleKeys.has(apiKey.id) 
-                            ? apiKey.key 
+                          {visibleKeys.has(apiKey.id)
+                            ? apiKey.key
                             : maskKey(apiKey.key)}
                         </code>
                         <Button
@@ -263,7 +312,7 @@ export default function ApiKeysPage() {
                     <TableCell>
                       <Switch
                         checked={apiKey.enabled}
-                        onCheckedChange={(checked) => 
+                        onCheckedChange={(checked) =>
                           handleToggleEnabled(apiKey.id, checked)
                         }
                       />
