@@ -87,6 +87,7 @@ export interface AppConfig {
   proxyPort: number
   proxyHost: string
   loadBalanceStrategy: LoadBalanceStrategy
+  accountWeights: Record<string, number>
   modelMappings: Record<string, ModelMapping>
   theme: Theme
   autoStart: boolean

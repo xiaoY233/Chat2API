@@ -14,7 +14,6 @@ export class LoadBalancer {
   private providerIndex: Map<string, number> = new Map()
   private accountIndex: Map<string, number> = new Map()
   private failedAccounts: Map<string, { count: number; lastFailTime: number }> = new Map()
-  private smoothWeights: Map<string, number> = new Map()
   private static readonly FAIL_THRESHOLD = 3
   private static readonly RECOVERY_TIME = 60000 // 1 minute
 
@@ -268,55 +267,35 @@ export class LoadBalancer {
   }
 
   /**
-   * Smooth weighted round-robin for account selection.
-   * Accounts with higher weight are selected proportionally more often.
-   * Default weight is 100 for all accounts.
+   * Weighted random account selection.
+   * Each account is selected with probability proportional to its configured weight.
+   * Stateless — immune to dynamic pool changes (accounts entering/leaving).
    */
   private selectWeightedAccount(
     accounts: AccountSelection[],
     providerId: string
   ): AccountSelection {
-    const config = storeManager.getConfig()
-    const weights = config.accountWeights || {}
-
     if (accounts.length === 1) {
       return accounts[0]
     }
 
-    // Prune stale smoothWeight entries for accounts no longer in the pool
-    const activeIds = new Set(accounts.map(a => a.account.id))
-    for (const key of this.smoothWeights.keys()) {
-      if (!activeIds.has(key)) {
-        this.smoothWeights.delete(key)
-      }
-    }
+    const config = storeManager.getConfig()
+    const weights = config.accountWeights || {}
 
-    // Calculate total weight
     let totalWeight = 0
     for (const a of accounts) {
-      const w = weights[a.account.id] ?? 100
-      totalWeight += Math.max(w, 5) // floor at 5 to avoid zero-weight starvation
+      totalWeight += Math.max(weights[a.account.id] ?? 100, 5)
     }
 
-    // Smooth weighted round-robin pass
-    let best: AccountSelection | null = null
-    let bestVal = -Infinity
-
+    let random = Math.random() * totalWeight
     for (const a of accounts) {
-      const w = weights[a.account.id] ?? 100
-      const effectiveW = Math.max(w, 5)
-      const current = (this.smoothWeights.get(a.account.id) || 0) + effectiveW
-      this.smoothWeights.set(a.account.id, current)
-      if (current > bestVal) {
-        bestVal = current
-        best = a
+      random -= Math.max(weights[a.account.id] ?? 100, 5)
+      if (random <= 0) {
+        return a
       }
     }
 
-    // Reduce the selected account's weight by total
-    this.smoothWeights.set(best!.account.id, bestVal - totalWeight)
-
-    return best!
+    return accounts[accounts.length - 1]
   }
 
   /**
