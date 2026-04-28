@@ -348,7 +348,6 @@ export function Models() {
       // Also load providers/accounts if not already loaded
       // (ModelList needs them, but user may navigate directly to /models)
       const currentProviders = useProvidersStore.getState().providers
-      const currentAccounts = useProvidersStore.getState().accounts
       if (currentProviders.length === 0 && window.electronAPI?.providers?.getAll) {
         try {
           const [providersData, accountsData] = await Promise.all([

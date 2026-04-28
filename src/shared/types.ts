@@ -100,6 +100,7 @@ export interface AppConfig {
   apiKeys: ApiKey[]
   enableApiKey: boolean
   oauthProxyMode: 'system' | 'none'
+  language: 'zh-CN' | 'en-US'
   sessionConfig: SessionConfig
   toolPromptConfig: ToolPromptConfig
 }

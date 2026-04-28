@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { ProxyStatus, ProxyStatistics, Provider, Account, ProviderCheckResult, LogEntry } from '@/types/electron'
+import type { ProxyStatus, ProxyStatistics, Provider, Account, LogEntry } from '@/types/electron'
 import type { ProviderStats, ActivityItem, ChartDataPoint } from '@/components/dashboard'
 
 interface DashboardStats {
