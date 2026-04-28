@@ -828,7 +828,7 @@ CRITICAL RULES:
           const originalEnd = transformedStream.end.bind(transformedStream)
           transformedStream.end = function(chunk?: any, encoding?: any, callback?: any) {
             const realChatId = handler.getConversationId()
-            if (realChatId && realChatId.startsWith('kimi-') === false) {
+            if (realChatId) {
               adapter.deleteConversation(realChatId).catch(err => {
                 console.error('[Kimi] Failed to delete conversation:', err)
               })
@@ -854,7 +854,7 @@ CRITICAL RULES:
 
       if (shouldDeleteSession()) {
         const realChatId = handler.getConversationId()
-        if (realChatId && realChatId.startsWith('kimi-') === false) {
+        if (realChatId) {
           await adapter.deleteConversation(realChatId)
         }
       }
@@ -1006,21 +1006,21 @@ CRITICAL RULES:
         }
       }
 
-      const deleteChatCallback = shouldDeleteSession()
-        ? async (cid: string) => {
-            try {
-              await adapter.deleteChat(cid)
-            } catch (err) {
-              console.error('[QwenAI] Failed to delete chat:', err)
-            }
-          }
-        : undefined
-
-      const handler = new QwenAiStreamHandler(actualModel, deleteChatCallback)
+      const handler = new QwenAiStreamHandler(actualModel)
       handler.setChatId(chatId)
 
       if (request.stream) {
         const transformedStream = await handler.handleStream(response.data)
+
+        if (shouldDeleteSession()) {
+          const originalEnd = transformedStream.end.bind(transformedStream)
+          transformedStream.end = function(chunk?: any, encoding?: any, callback?: any) {
+            adapter.deleteChat(chatId).catch(err => {
+              console.error('[QwenAI] Failed to delete chat:', err)
+            })
+            return originalEnd(chunk, encoding, callback)
+          }
+        }
 
         return {
           success: true,
@@ -1037,8 +1037,8 @@ CRITICAL RULES:
 
       this.applyToolCallsToResponse(result, request.model, request.tools)
 
-      if (deleteChatCallback) {
-        await deleteChatCallback(chatId)
+      if (shouldDeleteSession()) {
+        await adapter.deleteChat(chatId)
       }
 
       return {

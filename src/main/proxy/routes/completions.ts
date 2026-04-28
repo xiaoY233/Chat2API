@@ -170,7 +170,7 @@ router.post('/completions', async (ctx: Context) => {
       todayUsed: (account.todayUsed || 0) + 1,
     })
 
-    storeManager.addLog('info', `Request succeeded`, {
+    storeManager.addLog('debug', `Request succeeded`, {
       requestId,
       providerId: provider.id,
       accountId: account.id,

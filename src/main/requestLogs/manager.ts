@@ -26,6 +26,9 @@ export class RequestLogManager {
   private requestLogs: RequestLogEntry[] = []
   private config: RequestLogConfig
   private initialized = false
+  private persistTimer: NodeJS.Timeout | null = null
+  private dirty = false
+  private readonly persistDelayMs = 2000
 
   constructor(options: RequestLogManagerOptions) {
     this.storageDir = options.storageDir
@@ -44,7 +47,7 @@ export class RequestLogManager {
   setConfig(config: Partial<RequestLogConfig>): void {
     this.config = normalizeRequestLogConfig(config)
     this.requestLogs = trimRequestLogsToMaxEntries(this.requestLogs, this.config)
-    this.persist()
+    this.schedulePersist()
   }
 
   async migrateLegacyLogs(legacyLogs: RequestLogEntry[]): Promise<boolean> {
@@ -63,7 +66,7 @@ export class RequestLogManager {
         })),
       this.config,
     )
-    this.persist()
+    this.schedulePersist()
 
     return true
   }
@@ -82,7 +85,7 @@ export class RequestLogManager {
 
     this.requestLogs.push(logEntry)
     this.requestLogs = trimRequestLogsToMaxEntries(this.requestLogs, this.config)
-    this.persist()
+    this.schedulePersist()
 
     return logEntry
   }
@@ -102,7 +105,7 @@ export class RequestLogManager {
       ...this.requestLogs[index],
       ...sanitizeRequestLogUpdates(updates, this.config),
     }
-    this.persist()
+    this.schedulePersist()
     return true
   }
 
@@ -135,7 +138,7 @@ export class RequestLogManager {
   clearRequestLogs(): void {
     this.ensureInitialized()
     this.requestLogs = []
-    this.persist()
+    this.schedulePersist()
   }
 
   getRequestLogStats(): RequestLogStats {
@@ -188,6 +191,19 @@ export class RequestLogManager {
     return [...this.requestLogs]
   }
 
+  flushSync(): void {
+    if (!this.initialized) {
+      return
+    }
+
+    if (this.persistTimer) {
+      clearTimeout(this.persistTimer)
+      this.persistTimer = null
+    }
+
+    this.persistNow()
+  }
+
   private ensureInitialized(): void {
     if (!this.initialized) {
       throw new Error('RequestLogManager is not initialized')
@@ -217,9 +233,27 @@ export class RequestLogManager {
       .filter((entry): entry is RequestLogEntry => entry !== null)
   }
 
-  private persist(): void {
+  private schedulePersist(): void {
+    this.dirty = true
+
+    if (this.persistTimer) {
+      clearTimeout(this.persistTimer)
+    }
+
+    this.persistTimer = setTimeout(() => {
+      this.persistTimer = null
+      this.persistNow()
+    }, this.persistDelayMs)
+  }
+
+  private persistNow(): void {
+    if (!this.dirty) {
+      return
+    }
+
     const content = this.requestLogs.map((entry) => JSON.stringify(entry)).join('\n')
     writeFileSync(this.logFile, content, 'utf-8')
+    this.dirty = false
   }
 }
 

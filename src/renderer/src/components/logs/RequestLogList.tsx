@@ -114,29 +114,23 @@ export function RequestLogList() {
     }
   }, [])
 
-  useEffect(() => {
-    setIsLoading(true)
-    Promise.all([fetchLogs(), fetchStats()]).finally(() => setIsLoading(false))
+  const refreshLogs = useCallback(async () => {
+    await Promise.all([fetchLogs(), fetchStats()])
   }, [fetchLogs, fetchStats])
 
   useEffect(() => {
-    const interval = setInterval(fetchLogs, 3000)
-    return () => clearInterval(interval)
-  }, [fetchLogs])
+    setIsLoading(true)
+    refreshLogs().finally(() => setIsLoading(false))
+  }, [refreshLogs])
 
   useEffect(() => {
-    if (!window.electronAPI?.requestLogs?.onNewLog) return
-
-    const unsubscribe = window.electronAPI.requestLogs.onNewLog((newLog: RequestLogEntry) => {
-      if (statusFilter === 'all' || newLog.status === statusFilter) {
-        logsRef.current = [newLog, ...logsRef.current.slice(0, 199)]
-        setLogs([...logsRef.current])
-      }
-      fetchStats()
-    })
-
-    return unsubscribe
-  }, [statusFilter, fetchStats])
+    const interval = setInterval(() => {
+      refreshLogs().catch((error) => {
+        console.error('Failed to refresh request logs:', error)
+      })
+    }, 3000)
+    return () => clearInterval(interval)
+  }, [refreshLogs])
 
   useEffect(() => {
     const updateSize = () => {
@@ -231,7 +225,7 @@ export function RequestLogList() {
           </Select>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={fetchLogs}>
+          <Button variant="outline" size="sm" onClick={refreshLogs}>
             {t('dashboard.refresh')}
           </Button>
           <Button variant="destructive" size="sm" onClick={() => setShowClearDialog(true)}>

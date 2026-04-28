@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -57,6 +57,7 @@ test('RequestLogManager migrates legacy request logs into standalone storage and
     createEntry('2', 2),
     createEntry('3', 3),
   ])
+  manager.flushSync()
 
   assert.equal(migrated, true)
   assert.deepEqual(
@@ -81,7 +82,30 @@ test('RequestLogManager respects disabled persistence and keeps the file empty',
 
   await manager.initialize()
   const entry = manager.addRequestLog(createEntryInput(1))
+  manager.flushSync()
 
   assert.ok(entry.id)
   assert.equal(manager.getRequestLogs().length, 0)
+})
+
+test('RequestLogManager buffers writes until flush', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'request-log-manager-buffered-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+
+  const manager = new RequestLogManager({
+    storageDir: root,
+    config: createConfig({ maxEntries: 5 }),
+  })
+
+  await manager.initialize()
+  manager.addRequestLog(createEntryInput(1))
+  manager.addRequestLog(createEntryInput(2))
+
+  assert.equal(existsSync(join(root, 'request-logs.ndjson')), false)
+
+  manager.flushSync()
+
+  const persisted = readFileSync(join(root, 'request-logs.ndjson'), 'utf-8')
+  assert.match(persisted, /"timestamp":1/)
+  assert.match(persisted, /"timestamp":2/)
 })

@@ -34,7 +34,6 @@ import {
   DEFAULT_REQUEST_LOG_CONFIG,
 } from './types'
 import { BUILTIN_PROMPTS } from '../data/builtin-prompts'
-import { IpcChannels } from '../ipc/channels'
 import { RequestLogManager } from '../requestLogs/manager'
 import { normalizeRequestLogConfig } from '../requestLogs/types'
 
@@ -56,6 +55,9 @@ class StoreManager {
   private mainWindow: BrowserWindow | null = null
   private initializationError: Error | null = null
   private requestLogManager: RequestLogManager | null = null
+  private pendingLogs: LogEntry[] = []
+  private logFlushTimer: NodeJS.Timeout | null = null
+  private readonly logFlushDelayMs = 2000
 
   setMainWindow(window: BrowserWindow | null): void {
     this.mainWindow = window
@@ -306,6 +308,62 @@ class StoreManager {
         : 'Storage not initialized, please call initialize() first'
       throw new Error(errorMsg)
     }
+  }
+
+  private getLogPriority(level: LogLevel): number {
+    switch (level) {
+      case 'debug':
+        return 10
+      case 'info':
+        return 20
+      case 'warn':
+        return 30
+      case 'error':
+        return 40
+      default:
+        return 20
+    }
+  }
+
+  private shouldRecordLog(level: LogLevel): boolean {
+    const config = this.normalizeConfig(this.store!.get('config') || DEFAULT_CONFIG)
+    return this.getLogPriority(level) >= this.getLogPriority(config.logLevel)
+  }
+
+  private scheduleLogFlush(): void {
+    if (this.logFlushTimer) {
+      clearTimeout(this.logFlushTimer)
+    }
+
+    this.logFlushTimer = setTimeout(() => {
+      this.logFlushTimer = null
+      this.flushLogsSync()
+    }, this.logFlushDelayMs)
+  }
+
+  private getCombinedLogs(): LogEntry[] {
+    const persistedLogs = (this.store!.get('logs') as LogEntry[]) || []
+    return persistedLogs.concat(this.pendingLogs)
+  }
+
+  flushPendingWrites(): void {
+    this.flushLogsSync()
+    this.requestLogManager?.flushSync()
+  }
+
+  private flushLogsSync(): void {
+    if (!this.isInitialized || !this.store || this.pendingLogs.length === 0) {
+      return
+    }
+
+    const logs = ((this.store.get('logs') as LogEntry[]) || []).concat(this.pendingLogs)
+    const config = this.getConfig()
+    const maxLogs = config.logRetentionDays * 1000
+
+    const trimmedLogs = logs.length > maxLogs ? logs.slice(-maxLogs) : logs
+
+    this.store.set('logs', trimmedLogs)
+    this.pendingLogs = []
   }
 
   /**
@@ -728,8 +786,6 @@ class StoreManager {
     }
   ): LogEntry {
     this.ensureInitialized()
-    const logs = this.store!.get('logs') || []
-    
     const entry: LogEntry = {
       id: this.generateId(),
       timestamp: Date.now(),
@@ -737,18 +793,20 @@ class StoreManager {
       message,
       ...data,
     }
-    
-    logs.push(entry)
-    
+
+    if (!this.shouldRecordLog(level)) {
+      return entry
+    }
+
+    this.pendingLogs.push(entry)
+
     const config = this.getConfig()
     const maxLogs = config.logRetentionDays * 1000
-    if (logs.length > maxLogs) {
-      logs.splice(0, logs.length - maxLogs)
+    if (this.pendingLogs.length > maxLogs) {
+      this.pendingLogs = this.pendingLogs.slice(-maxLogs)
     }
-    
-    this.store!.set('logs', logs)
 
-    this.mainWindow?.webContents.send(IpcChannels.LOGS_NEW_LOG, entry)
+    this.scheduleLogFlush()
 
     return entry
   }
@@ -760,7 +818,7 @@ class StoreManager {
    */
   getLogs(limit?: number, level?: LogLevel): LogEntry[] {
     this.ensureInitialized()
-    let logs = this.store!.get('logs') as LogEntry[] || []
+    let logs = this.getCombinedLogs()
     
     if (level) {
       logs = logs.filter((l: LogEntry) => l.level === level)
@@ -778,6 +836,11 @@ class StoreManager {
    */
   clearLogs(): void {
     this.ensureInitialized()
+    if (this.logFlushTimer) {
+      clearTimeout(this.logFlushTimer)
+      this.logFlushTimer = null
+    }
+    this.pendingLogs = []
     this.store!.set('logs', [])
   }
 
@@ -786,7 +849,7 @@ class StoreManager {
    */
   getLogStats(): { total: number; info: number; warn: number; error: number; debug: number } {
     this.ensureInitialized()
-    const logs = this.store!.get('logs') || []
+    const logs = this.getCombinedLogs()
     
     return {
       total: logs.length,
@@ -802,7 +865,7 @@ class StoreManager {
    */
   getLogTrend(days: number = 7): { date: string; total: number; info: number; warn: number; error: number }[] {
     this.ensureInitialized()
-    const logs = this.store!.get('logs') || []
+    const logs = this.getCombinedLogs()
     const now = Date.now()
     const dayMs = 24 * 60 * 60 * 1000
     const trends: { date: string; total: number; info: number; warn: number; error: number }[] = []
@@ -834,7 +897,7 @@ class StoreManager {
    */
   getAccountLogTrend(accountId: string, days: number = 7): { date: string; total: number; info: number; warn: number; error: number }[] {
     this.ensureInitialized()
-    const logs = this.store!.get('logs') || []
+    const logs = this.getCombinedLogs()
     const accountLogs = logs.filter((l: LogEntry) => l.accountId === accountId && l.requestId)
     const now = Date.now()
     const dayMs = 24 * 60 * 60 * 1000
@@ -870,7 +933,7 @@ class StoreManager {
    */
   exportLogs(format: 'json' | 'txt' = 'json'): string {
     this.ensureInitialized()
-    const logs = this.store!.get('logs') || []
+    const logs = this.getCombinedLogs()
 
     if (format === 'json') {
       return JSON.stringify(logs, null, 2)
@@ -905,7 +968,7 @@ class StoreManager {
    */
   getLogById(id: string): LogEntry | undefined {
     this.ensureInitialized()
-    const logs = this.store!.get('logs') || []
+    const logs = this.getCombinedLogs()
     return logs.find((l: LogEntry) => l.id === id)
   }
 
@@ -915,10 +978,11 @@ class StoreManager {
   cleanExpiredLogs(): void {
     this.ensureInitialized()
     const config = this.getConfig()
-    const logs = this.store!.get('logs') || []
+    const logs = this.getCombinedLogs()
     const cutoff = Date.now() - config.logRetentionDays * 24 * 60 * 60 * 1000
     
     const filtered = logs.filter((l: LogEntry) => l.timestamp >= cutoff)
+    this.pendingLogs = []
     this.store!.set('logs', filtered)
   }
 
@@ -930,9 +994,6 @@ class StoreManager {
   addRequestLog(entry: Omit<RequestLogEntry, 'id'>): RequestLogEntry {
     this.ensureInitialized()
     const newEntry = this.getRequestLogManager().addRequestLog(entry)
-
-    this.mainWindow?.webContents.send(IpcChannels.REQUEST_LOGS_NEW, newEntry)
-
     return newEntry
   }
 
@@ -1636,8 +1697,14 @@ class StoreManager {
    */
   clearAll(): void {
     this.ensureInitialized()
+    if (this.logFlushTimer) {
+      clearTimeout(this.logFlushTimer)
+      this.logFlushTimer = null
+    }
+    this.pendingLogs = []
     this.store!.clear()
     this.requestLogManager?.clearRequestLogs()
+    this.requestLogManager?.flushSync()
   }
 
   /**
