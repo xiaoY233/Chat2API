@@ -370,15 +370,13 @@ export class QwenAiStreamHandler {
   private chatId: string = ''
   private model: string
   private created: number
-  private onEnd?: (chatId: string) => void
   private responseId: string = ''
   private content: string = ''
   private toolCallsSent: boolean = false
 
-  constructor(model: string, onEnd?: (chatId: string) => void) {
+  constructor(model: string) {
     this.model = model
     this.created = Math.floor(Date.now() / 1000)
-    this.onEnd = onEnd
   }
 
   setChatId(chatId: string) {
@@ -432,9 +430,6 @@ export class QwenAiStreamHandler {
         })}\n\n`
       )
       transStream.end('data: [DONE]\n\n')
-      if (this.onEnd && this.chatId) {
-        this.onEnd(this.chatId)
-      }
     }
   }
 
@@ -611,10 +606,6 @@ export class QwenAiStreamHandler {
               }
               transStream.write(`data: ${JSON.stringify(finalChunk)}\n\n`)
               transStream.end('data: [DONE]\n\n')
-
-              if (this.onEnd && this.chatId) {
-                this.onEnd(this.chatId)
-              }
             }
           }
         } catch (err) {
@@ -713,10 +704,6 @@ export class QwenAiStreamHandler {
                   const finalReasoning = reasoningText || summaryText
                   if (finalReasoning) {
                     data.choices[0].message.reasoning_content = finalReasoning
-                  }
-
-                  if (this.onEnd && this.chatId) {
-                    this.onEnd(this.chatId)
                   }
 
                   resolveOnce(data)
