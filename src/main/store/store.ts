@@ -107,6 +107,7 @@ class StoreManager {
         cwd: storagePath,
         defaults: this.getDefaultData(),
         encryptionKey: this.getEncryptionKey(),
+        serialize: (value: any) => JSON.stringify(value, null, 2),
       })
 
       // 写入迁移数据（如果有）
@@ -117,6 +118,10 @@ class StoreManager {
 
       // Initialize separate logs store and migrate legacy logs from data.json
       await this.initializeLogsStore(storagePath)
+
+      // Reformat existing data.json with proper indentation
+      const currentData = this.store.store
+      this.store.set(currentData)
 
       await this.initializeDefaultProviders()
       this.isInitialized = true
@@ -133,6 +138,7 @@ class StoreManager {
           cwd: storagePath,
           defaults: this.getDefaultData(),
           encryptionKey: this.getEncryptionKey(),
+          serialize: (value: any) => JSON.stringify(value, null, 2),
         })
         this.isInitialized = true
         this.initializationError = null
@@ -255,6 +261,7 @@ class StoreManager {
       cwd: storagePath,
       defaults: { logs: [], requestLogs: [] },
       encryptionKey: this.getEncryptionKey(),
+      serialize: (value: any) => JSON.stringify(value, null, 2),
     })
 
     // One-time migration: if old data.json still contains logs/requestLogs, move them to logs-data.json
