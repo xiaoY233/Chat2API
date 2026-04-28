@@ -828,7 +828,7 @@ CRITICAL RULES:
           const originalEnd = transformedStream.end.bind(transformedStream)
           transformedStream.end = function(chunk?: any, encoding?: any, callback?: any) {
             const realChatId = handler.getConversationId()
-            if (realChatId && realChatId.startsWith('kimi-') === false) {
+            if (realChatId) {
               adapter.deleteConversation(realChatId).catch(err => {
                 console.error('[Kimi] Failed to delete conversation:', err)
               })
@@ -854,7 +854,7 @@ CRITICAL RULES:
 
       if (shouldDeleteSession()) {
         const realChatId = handler.getConversationId()
-        if (realChatId && realChatId.startsWith('kimi-') === false) {
+        if (realChatId) {
           await adapter.deleteConversation(realChatId)
         }
       }

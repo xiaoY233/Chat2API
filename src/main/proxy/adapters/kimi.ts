@@ -426,14 +426,8 @@ export class KimiStreamHandler {
   }
 
   getConversationId(): string | null {
-    // Return realChatId if available, otherwise return null (not empty string)
-    // to prevent saving invalid session IDs
     if (this.realChatId) {
       return this.realChatId
-    }
-    // Only return conversationId if it's a valid ID (not empty and not a temporary ID)
-    if (this.conversationId && this.conversationId.length > 0 && !this.conversationId.startsWith('kimi-')) {
-      return this.conversationId
     }
     return null
   }
