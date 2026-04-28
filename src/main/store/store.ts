@@ -48,6 +48,7 @@ type StoreType = any
  */
 class StoreManager {
   private store: StoreType | null = null
+  private logsStore: StoreType | null = null
   private isInitialized: boolean = false
   private mainWindow: BrowserWindow | null = null
   private initializationError: Error | null = null
@@ -113,6 +114,9 @@ class StoreManager {
         this.store.set(migratedData)
         console.log('[Store] Successfully migrated encrypted data to unencrypted storage')
       }
+
+      // Initialize separate logs store and migrate legacy logs from data.json
+      await this.initializeLogsStore(storagePath)
 
       await this.initializeDefaultProviders()
       this.isInitialized = true
@@ -243,6 +247,44 @@ class StoreManager {
   }
 
   /**
+   * Initialize separate logs store and migrate legacy logs from data.json
+   */
+  private async initializeLogsStore(storagePath: string): Promise<void> {
+    this.logsStore = new Store({
+      name: 'logs-data',
+      cwd: storagePath,
+      defaults: { logs: [], requestLogs: [] },
+      encryptionKey: this.getEncryptionKey(),
+    })
+
+    // One-time migration: if old data.json still contains logs/requestLogs, move them to logs-data.json
+    const oldLogs = this.logsStore!.get('logs') as LogEntry[] | undefined
+    const oldRequestLogs = this.logsStore!.get('requestLogs') as RequestLogEntry[] | undefined
+
+    const hasOldLogs = Array.isArray(oldLogs) && oldLogs.length > 0
+    const hasOldRequestLogs = Array.isArray(oldRequestLogs) && oldRequestLogs.length > 0
+
+    if (hasOldLogs || hasOldRequestLogs) {
+      const existingLogs = this.logsStore.get('logs') as LogEntry[] || []
+      const existingRequestLogs = this.logsStore.get('requestLogs') as RequestLogEntry[] || []
+
+      if (hasOldLogs) {
+        this.logsStore.set('logs', existingLogs.concat(oldLogs))
+        console.log(`[Store] Migrated ${oldLogs.length} log entries from data.json to logs-data.json`)
+      }
+      if (hasOldRequestLogs) {
+        this.logsStore.set('requestLogs', existingRequestLogs.concat(oldRequestLogs))
+        console.log(`[Store] Migrated ${oldRequestLogs.length} request log entries from data.json to logs-data.json`)
+      }
+
+      // Remove legacy keys from data.json to shrink the config file
+      this.store!.delete('logs')
+      this.store!.delete('requestLogs')
+      console.log('[Store] Removed legacy logs/requestLogs keys from data.json')
+    }
+  }
+
+  /**
    * Initialize Default Providers
    * Clear provider list, users create providers by adding accounts
    */
@@ -322,7 +364,7 @@ class StoreManager {
    * Ensure Storage is Initialized
    */
   private ensureInitialized(): void {
-    if (!this.isInitialized || !this.store) {
+    if (!this.isInitialized || !this.store || !this.logsStore) {
       const errorMsg = this.initializationError 
         ? `Storage initialization failed: ${this.initializationError.message}`
         : 'Storage not initialized, please call initialize() first'
@@ -352,26 +394,26 @@ class StoreManager {
     if (!this.isInitialized || !this.store) return
 
     if (this.pendingLogs.length > 0) {
-      const logs = this.store.get('logs') as LogEntry[] || []
+      const logs = this.logsStore!.get('logs') as LogEntry[] || []
       logs.push(...this.pendingLogs)
       const config = this.getConfig()
       const maxLogs = config.logRetentionDays * 1000
       if (logs.length > maxLogs) {
         logs.splice(0, logs.length - maxLogs)
       }
-      this.store.set('logs', logs)
+      this.logsStore!.set('logs', logs)
       this.pendingLogs = []
     }
 
     if (this.pendingRequestLogs.length > 0) {
-      const requestLogs = this.store.get('requestLogs') as RequestLogEntry[] || []
+      const requestLogs = this.logsStore!.get('requestLogs') as RequestLogEntry[] || []
       requestLogs.push(...this.pendingRequestLogs)
       const config = this.getConfig()
       const maxLogs = config.logRetentionDays * 500
       if (requestLogs.length > maxLogs) {
         requestLogs.splice(0, requestLogs.length - maxLogs)
       }
-      this.store.set('requestLogs', requestLogs)
+      this.logsStore!.set('requestLogs', requestLogs)
       this.pendingRequestLogs = []
     }
   }
@@ -837,7 +879,7 @@ class StoreManager {
    */
   getLogs(limit?: number, level?: LogLevel): LogEntry[] {
     this.ensureInitialized()
-    let logs = (this.store!.get('logs') as LogEntry[] || []).concat(this.pendingLogs)
+    let logs = (this.logsStore!.get('logs') as LogEntry[] || []).concat(this.pendingLogs)
 
     if (level) {
       logs = logs.filter((l: LogEntry) => l.level === level)
@@ -856,7 +898,7 @@ class StoreManager {
   clearLogs(): void {
     this.ensureInitialized()
     this.pendingLogs = []
-    this.store!.set('logs', [])
+    this.logsStore!.set('logs', [])
   }
 
   /**
@@ -864,7 +906,7 @@ class StoreManager {
    */
   getLogStats(): { total: number; info: number; warn: number; error: number; debug: number } {
     this.ensureInitialized()
-    const logs = this.store!.get('logs') || []
+    const logs = this.logsStore!.get('logs') || []
     
     return {
       total: logs.length,
@@ -880,7 +922,7 @@ class StoreManager {
    */
   getLogTrend(days: number = 7): { date: string; total: number; info: number; warn: number; error: number }[] {
     this.ensureInitialized()
-    const logs = this.store!.get('logs') || []
+    const logs = this.logsStore!.get('logs') || []
     const now = Date.now()
     const dayMs = 24 * 60 * 60 * 1000
     const trends: { date: string; total: number; info: number; warn: number; error: number }[] = []
@@ -912,7 +954,7 @@ class StoreManager {
    */
   getAccountLogTrend(accountId: string, days: number = 7): { date: string; total: number; info: number; warn: number; error: number }[] {
     this.ensureInitialized()
-    const logs = this.store!.get('logs') || []
+    const logs = this.logsStore!.get('logs') || []
     const accountLogs = logs.filter((l: LogEntry) => l.accountId === accountId && l.requestId)
     const now = Date.now()
     const dayMs = 24 * 60 * 60 * 1000
@@ -948,7 +990,7 @@ class StoreManager {
    */
   exportLogs(format: 'json' | 'txt' = 'json'): string {
     this.ensureInitialized()
-    const logs = this.store!.get('logs') || []
+    const logs = this.logsStore!.get('logs') || []
 
     if (format === 'json') {
       return JSON.stringify(logs, null, 2)
@@ -983,7 +1025,7 @@ class StoreManager {
    */
   getLogById(id: string): LogEntry | undefined {
     this.ensureInitialized()
-    const logs = this.store!.get('logs') || []
+    const logs = this.logsStore!.get('logs') || []
     return logs.find((l: LogEntry) => l.id === id)
   }
 
@@ -993,11 +1035,11 @@ class StoreManager {
   cleanExpiredLogs(): void {
     this.ensureInitialized()
     const config = this.getConfig()
-    const logs = this.store!.get('logs') || []
+    const logs = this.logsStore!.get('logs') || []
     const cutoff = Date.now() - config.logRetentionDays * 24 * 60 * 60 * 1000
     
     const filtered = logs.filter((l: LogEntry) => l.timestamp >= cutoff)
-    this.store!.set('logs', filtered)
+    this.logsStore!.set('logs', filtered)
   }
 
   // ==================== Request Log Operations ====================
@@ -1042,12 +1084,12 @@ class StoreManager {
       return true
     }
 
-    const requestLogs = this.store!.get('requestLogs') || []
+    const requestLogs = this.logsStore!.get('requestLogs') || []
     const index = requestLogs.findIndex((l: RequestLogEntry) => l.id === id)
     if (index === -1) return false
 
     requestLogs[index] = { ...requestLogs[index], ...updates }
-    this.store!.set('requestLogs', requestLogs)
+    this.logsStore!.set('requestLogs', requestLogs)
 
     return true
   }
@@ -1057,7 +1099,7 @@ class StoreManager {
    */
   getRequestLogs(limit?: number, filter?: { status?: 'success' | 'error'; providerId?: string }): RequestLogEntry[] {
     this.ensureInitialized()
-    let requestLogs = (this.store!.get('requestLogs') as RequestLogEntry[] || []).concat(this.pendingRequestLogs)
+    let requestLogs = (this.logsStore!.get('requestLogs') as RequestLogEntry[] || []).concat(this.pendingRequestLogs)
 
     if (filter?.status) {
       requestLogs = requestLogs.filter((l: RequestLogEntry) => l.status === filter.status)
@@ -1083,7 +1125,7 @@ class StoreManager {
     this.ensureInitialized()
     const pending = this.pendingRequestLogs.find((l) => l.id === id)
     if (pending) return pending
-    const requestLogs = this.store!.get('requestLogs') || []
+    const requestLogs = this.logsStore!.get('requestLogs') || []
     return requestLogs.find((l: RequestLogEntry) => l.id === id)
   }
 
@@ -1093,7 +1135,7 @@ class StoreManager {
   clearRequestLogs(): void {
     this.ensureInitialized()
     this.pendingRequestLogs = []
-    this.store!.set('requestLogs', [])
+    this.logsStore!.set('requestLogs', [])
     this.store!.set('statistics', DEFAULT_STATISTICS)
   }
 
@@ -1102,7 +1144,7 @@ class StoreManager {
    */
   getRequestLogStats(): { total: number; success: number; error: number; todayTotal: number; todaySuccess: number; todayError: number } {
     this.ensureInitialized()
-    const requestLogs = this.store!.get('requestLogs') || []
+    const requestLogs = this.logsStore!.get('requestLogs') || []
     
     const today = new Date().toISOString().split('T')[0]
     const todayStart = new Date(today).getTime()
@@ -1125,7 +1167,7 @@ class StoreManager {
    */
   getRequestLogTrend(days: number = 7): { date: string; total: number; success: number; error: number; avgLatency: number }[] {
     this.ensureInitialized()
-    const requestLogs = this.store!.get('requestLogs') as RequestLogEntry[] || []
+    const requestLogs = this.logsStore!.get('requestLogs') as RequestLogEntry[] || []
     const now = Date.now()
     const dayMs = 24 * 60 * 60 * 1000
     const today = new Date().toISOString().split('T')[0]
@@ -1804,11 +1846,19 @@ class StoreManager {
   }
 
   /**
+   * Get Logs Storage Instance (for internal use only)
+   */
+  getLogsStore(): StoreType | null {
+    return this.logsStore
+  }
+
+  /**
    * Clear All Data
    */
   clearAll(): void {
     this.ensureInitialized()
     this.store!.clear()
+    this.logsStore!.clear()
   }
 
   /**
@@ -1823,8 +1873,8 @@ class StoreManager {
       return rest
     })
     const config = this.store!.get('config') || DEFAULT_CONFIG
-    const logs = this.store!.get('logs') || []
-    const requestLogs = this.store!.get('requestLogs') || []
+    const logs = this.logsStore!.get('logs') || []
+    const requestLogs = this.logsStore!.get('requestLogs') || []
     const systemPrompts = this.store!.get('systemPrompts') || []
     const sessions = this.store!.get('sessions') || []
     const statistics = this.store!.get('statistics') || DEFAULT_STATISTICS
