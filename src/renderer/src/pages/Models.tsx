@@ -18,6 +18,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useProxyStore } from '@/stores/proxyStore'
+import { useProvidersStore } from '@/stores/providersStore'
 
 type InjectionMode = 'auto' | 'always' | 'never'
 type ProtocolFormat = 'bracket' | 'xml'
@@ -329,6 +330,8 @@ function ToolUsePrompts() {
 export function Models() {
   const { t } = useTranslation()
   const { fetchAppConfig } = useProxyStore()
+  const setProviders = useProvidersStore((state) => state.setProviders)
+  const setAccounts = useProvidersStore((state) => state.setAccounts)
   const [searchParams, setSearchParams] = useSearchParams()
   const tabFromUrl = searchParams.get('tab')
   const [activeTab, setActiveTab] = useState(tabFromUrl || 'list')
@@ -337,9 +340,31 @@ export function Models() {
   useEffect(() => {
     if (hasLoadedRef.current) return
     hasLoadedRef.current = true
-    
-    fetchAppConfig()
-  }, [fetchAppConfig])
+
+    const loadData = async () => {
+      // Load app config (for model mappings)
+      fetchAppConfig()
+
+      // Also load providers/accounts if not already loaded
+      // (ModelList needs them, but user may navigate directly to /models)
+      const currentProviders = useProvidersStore.getState().providers
+      const currentAccounts = useProvidersStore.getState().accounts
+      if (currentProviders.length === 0 && window.electronAPI?.providers?.getAll) {
+        try {
+          const [providersData, accountsData] = await Promise.all([
+            window.electronAPI.providers.getAll(),
+            window.electronAPI.accounts.getAll(),
+          ])
+          setProviders(providersData)
+          setAccounts(accountsData)
+        } catch (error) {
+          console.error('Failed to load providers/accounts on Models page:', error)
+        }
+      }
+    }
+
+    loadData()
+  }, [fetchAppConfig, setProviders, setAccounts])
 
   useEffect(() => {
     if (tabFromUrl && ['list', 'mapping', 'prompts'].includes(tabFromUrl)) {

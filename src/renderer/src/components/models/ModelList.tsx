@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, memo, useEffect } from 'react'
+import { useState, useMemo, useCallback, memo, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -145,30 +145,60 @@ export function ModelList() {
   const [currentPage, setCurrentPage] = useState(1)
   const [effectiveModelsMap, setEffectiveModelsMap] = useState<Record<string, EffectiveModel[]>>({})
   
+  // Use a ref to track the latest request generation for race-condition guard
+  const requestGenRef = useRef(0)
+
+  // Stable signature of enabled providers: only changes when provider list structure changes
+  const enabledProviderSignature = useMemo(() => {
+    return providers
+      .filter(p => p.enabled)
+      .map(p => p.id)
+      .sort()
+      .join(',')
+  }, [providers])
+
   const loadEffectiveModels = useCallback(async () => {
+    // Read latest providers from store to avoid stale closure
+    const enabledProviders = useProvidersStore.getState().providers.filter(p => p.enabled)
+    if (enabledProviders.length === 0) {
+      setEffectiveModelsMap({})
+      return
+    }
+
+    const gen = ++requestGenRef.current
+
     try {
-      const enabledProviders = providers.filter(p => p.enabled)
-      const newMap: Record<string, EffectiveModel[]> = {}
-      
-      for (const provider of enabledProviders) {
-        try {
-          const models = await window.electronAPI.providers.getEffectiveModels(provider.id)
-          newMap[provider.id] = models
-        } catch (error) {
-          console.error(`Failed to load models for provider ${provider.id}:`, error)
-          newMap[provider.id] = []
-        }
+      const results = await Promise.all(
+        enabledProviders.map(async (provider) => {
+          try {
+            const models = await window.electronAPI.providers.getEffectiveModels(provider.id)
+            return { id: provider.id, models }
+          } catch (error) {
+            console.error(`Failed to load models for provider ${provider.id}:`, error)
+            return { id: provider.id, models: [] }
+          }
+        })
+      )
+
+      // Race-condition guard: ignore if a newer request has started
+      if (gen !== requestGenRef.current) {
+        return
       }
-      
+
+      const newMap: Record<string, EffectiveModel[]> = {}
+      for (const { id, models } of results) {
+        newMap[id] = models
+      }
+
       setEffectiveModelsMap(newMap)
     } catch (error) {
       console.error('Failed to load effective models:', error)
     }
-  }, [providers])
-  
+  }, [])
+
   useEffect(() => {
     loadEffectiveModels()
-  }, [loadEffectiveModels, modelsLastUpdated])
+  }, [loadEffectiveModels, modelsLastUpdated, enabledProviderSignature])
   
   const modelList = useMemo(() => {
     const models: ModelInfo[] = []
