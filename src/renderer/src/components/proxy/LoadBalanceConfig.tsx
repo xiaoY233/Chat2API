@@ -91,9 +91,16 @@ export function LoadBalanceConfig({ onConfigChange }: LoadBalanceConfigProps) {
   const handleSave = async () => {
     setLoadBalanceStrategy(selectedStrategy)
     setAccountWeights(weights)
-    
+
+    // Convert AccountWeight[] to Record<string, number> for backend storage
+    const weightsRecord: Record<string, number> = {}
+    for (const w of weights) {
+      weightsRecord[w.accountId] = w.weight
+    }
+
     const success = await saveAppConfig({
       loadBalanceStrategy: selectedStrategy,
+      accountWeights: weightsRecord,
     })
 
     if (success) {

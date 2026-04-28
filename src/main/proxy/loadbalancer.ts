@@ -14,6 +14,7 @@ export class LoadBalancer {
   private providerIndex: Map<string, number> = new Map()
   private accountIndex: Map<string, number> = new Map()
   private failedAccounts: Map<string, { count: number; lastFailTime: number }> = new Map()
+  private smoothWeights: Map<string, number> = new Map()
   private static readonly FAIL_THRESHOLD = 3
   private static readonly RECOVERY_TIME = 60000 // 1 minute
 
@@ -235,9 +236,14 @@ export class LoadBalancer {
   /**
    * Round Robin strategy
    * Uses two-level round-robin: provider level + account level.
-   * This isolates each provider's account index so that adding/removing
-   * accounts (e.g., due to temporary unavailability) in one provider
-   * never drifts the round-robin pointer of another provider.
+   * At account level, uses smooth weighted round-robin when weights are configured.
+   *
+   * Smooth weighted round-robin algorithm:
+   * 1. On each selection, add each account's configured weight to its current value
+   * 2. Pick the account with the highest current value
+   * 3. Subtract total weight from the selected account's current value
+   * This ensures selection frequency is proportional to configured weights
+   * over time, without starving low-weight accounts.
    */
   private selectRoundRobin(candidates: AccountSelection[]): AccountSelection {
     // Group candidates by provider (preserve insertion order)
@@ -256,13 +262,61 @@ export class LoadBalancer {
     const chosenProviderId = providerIds[providerIdx % providerIds.length]
     this.providerIndex.set(providerKey, providerIdx + 1)
 
-    // Account-level round-robin (isolated per provider)
+    // Account-level: smooth weighted round-robin
     const providerAccounts = byProvider.get(chosenProviderId)!
-    const accountIdx = this.accountIndex.get(chosenProviderId) || 0
-    const selected = providerAccounts[accountIdx % providerAccounts.length]
-    this.accountIndex.set(chosenProviderId, accountIdx + 1)
+    return this.selectWeightedAccount(providerAccounts, chosenProviderId)
+  }
 
-    return selected
+  /**
+   * Smooth weighted round-robin for account selection.
+   * Accounts with higher weight are selected proportionally more often.
+   * Default weight is 100 for all accounts.
+   */
+  private selectWeightedAccount(
+    accounts: AccountSelection[],
+    providerId: string
+  ): AccountSelection {
+    const config = storeManager.getConfig()
+    const weights = config.accountWeights || {}
+
+    if (accounts.length === 1) {
+      return accounts[0]
+    }
+
+    // Prune stale smoothWeight entries for accounts no longer in the pool
+    const activeIds = new Set(accounts.map(a => a.account.id))
+    for (const key of this.smoothWeights.keys()) {
+      if (!activeIds.has(key)) {
+        this.smoothWeights.delete(key)
+      }
+    }
+
+    // Calculate total weight
+    let totalWeight = 0
+    for (const a of accounts) {
+      const w = weights[a.account.id] ?? 100
+      totalWeight += Math.max(w, 5) // floor at 5 to avoid zero-weight starvation
+    }
+
+    // Smooth weighted round-robin pass
+    let best: AccountSelection | null = null
+    let bestVal = -Infinity
+
+    for (const a of accounts) {
+      const w = weights[a.account.id] ?? 100
+      const effectiveW = Math.max(w, 5)
+      const current = (this.smoothWeights.get(a.account.id) || 0) + effectiveW
+      this.smoothWeights.set(a.account.id, current)
+      if (current > bestVal) {
+        bestVal = current
+        best = a
+      }
+    }
+
+    // Reduce the selected account's weight by total
+    this.smoothWeights.set(best!.account.id, bestVal - totalWeight)
+
+    return best!
   }
 
   /**
