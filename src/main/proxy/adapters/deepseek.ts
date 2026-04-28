@@ -414,14 +414,20 @@ ${message.content || ''}
       console.log('[DeepSeek] Reasoning mode enabled (from prompt)')
     }
 
+    // Detect V4 Pro (expert mode) from model name
+    const modelType = modelLower.includes('pro') ? 'expert' : 'default'
+
     const response = await axios.post(
       `${DEEPSEEK_API_BASE}/v0/chat/completion`,
       {
         chat_session_id: sessionId,
+        parent_message_id: null,
         prompt,
+        model_type: modelType,
         ref_file_ids: [],
         search_enabled: searchEnabled,
         thinking_enabled: thinkingEnabled,
+        preempt: false,
       },
       {
         headers: {

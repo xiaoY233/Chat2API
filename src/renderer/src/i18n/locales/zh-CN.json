@@ -243,10 +243,16 @@
     "userTokenPlaceholder": "请输入 DeepSeek 用户 Token",
     "userTokenHelp": "从 DeepSeek 网页版获取的认证 Token，可在浏览器开发者工具 Application -> Local Storage -> userToken 中找到",
     "models": {
-      "DeepSeek-V3.2": "DeepSeek V3.2 - 标准对话",
-      "DeepSeek-Search": "DeepSeek Search - 联网搜索",
-      "DeepSeek-R1": "DeepSeek R1 - 深度思考",
-      "DeepSeek-R1-Search": "DeepSeek R1 Search - 联网+思考"
+      "deepseek-v4-pro": "DeepSeek V4 Pro",
+      "deepseek-v4-pro-think": "DeepSeek V4 Pro - 思考",
+      "deepseek-v4-pro-search": "DeepSeek V4 Pro - 搜索",
+      "deepseek-v4-pro-think-search": "DeepSeek V4 Pro - 思考+搜索",
+      "deepseek-v4-flash": "DeepSeek V4 Flash",
+      "deepseek-v4-flash-think": "DeepSeek V4 Flash - 思考",
+      "deepseek-v4-flash-search": "DeepSeek V4 Flash - 搜索",
+      "deepseek-v4-flash-think-search": "DeepSeek V4 Flash - 思考+搜索",
+      "deepseek-chat": "DeepSeek Chat (兼容旧名)",
+      "deepseek-reasoner": "DeepSeek Reasoner (兼容旧名)"
     }
   },
   "glm": {

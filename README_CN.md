@@ -49,7 +49,7 @@
 
 | 服务商           | 认证类型          | OAuth | 模型                                                                              |
 | ------------- | ------------- | ----- | ------------------------------------------------------------------------------- |
-| DeepSeek      | User Token    | 是     | DeepSeek-V3.2                                                                   |
+| DeepSeek      | User Token    | 是     | deepseek-v4-pro, deepseek-v4-flash                                                                   |
 | GLM           | Refresh Token | 是     | GLM-5                                                                           |
 | Kimi          | JWT Token     | 是     | kimi-k2.5                                                                       |
 | MiniMax       | JWT Token     | 是     | MiniMax-M2.5                                                                    |
@@ -145,7 +145,7 @@ client = OpenAI(
 )
 
 response = client.chat.completions.create(
-    model="DeepSeek-V3.2",
+    model="deepseek-v4-pro",
     messages=[
         {"role": "user", "content": "你好，你是谁？"}
     ]

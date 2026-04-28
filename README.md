@@ -49,7 +49,7 @@
 
 | Provider         | Auth Type     | OAuth | Models                                                                          |
 | ---------------- | ------------- | ----- | ------------------------------------------------------------------------------- |
-| DeepSeek         | User Token    | Yes   | DeepSeek-V3.2                                                                   |
+| DeepSeek         | User Token    | Yes   | deepseek-v4-pro, deepseek-v4-flash                                                                   |
 | GLM              | Refresh Token | Yes   | GLM-5                                                                           |
 | Kimi             | JWT Token     | Yes   | kimi-k2.5                                                                       |
 | MiniMax          | JWT Token     | Yes   | MiniMax-M2.5                                                                    |
@@ -145,7 +145,7 @@ client = OpenAI(
 )
 
 response = client.chat.completions.create(
-    model="DeepSeek-V3.2",
+    model="deepseek-v4-pro",
     messages=[
         {"role": "user", "content": "Hello, who are you?"}
     ]
