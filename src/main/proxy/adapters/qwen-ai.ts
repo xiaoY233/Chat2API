@@ -576,13 +576,16 @@ export class QwenAiStreamHandler {
                 transStream.write(`data: ${JSON.stringify(chunk)}\n\n`)
                 console.log('[QwenAI] Content chunk written')
               }
-            } else if (phase === null && content) {
+            } else if (content) {
+              if (phase && phase !== 'answer') {
+                console.log('[QwenAI] Content from non-standard phase:', phase)
+              }
               if (!initialChunkSent) {
                 sendInitialChunk()
               }
               // Accumulate content for tool call detection
               this.content += content
-              
+
               const chunk = {
                 id: this.responseId || this.chatId,
                 model: this.model,
@@ -593,7 +596,7 @@ export class QwenAiStreamHandler {
               transStream.write(`data: ${JSON.stringify(chunk)}\n\n`)
             }
 
-            if (status === 'finished' && (phase === 'answer' || phase === null)) {
+            if (status === 'finished' && (phase === 'answer' || phase === null || content)) {
               // Check for tool calls before sending stop
               if (hasToolUse(this.content)) {
                 console.log('[QwenAI] Found tool_use in stream, sending tool_calls')
@@ -721,7 +724,10 @@ export class QwenAiStreamHandler {
 
                   resolveOnce(data)
                 }
-              } else if (phase === null && content) {
+              } else if (content) {
+                if (phase && phase !== 'answer') {
+                  console.log('[QwenAI] Non-stream content from non-standard phase:', phase)
+                }
                 data.choices[0].message.content += content
               }
             }
