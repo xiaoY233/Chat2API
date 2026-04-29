@@ -1,5 +1,5 @@
 /**
- * Kimi K2.5 Adapter
+ * Kimi K2.6 Adapter
  * Implements Kimi web API protocol with thinking mode and web search support
  */
 
