@@ -629,6 +629,10 @@
   "settings": {
     "title": "Settings",
     "description": "Manage application settings and preferences",
+    "save": "Save Settings",
+    "saving": "Saving...",
+    "saveSuccess": "Settings saved successfully",
+    "saveFailed": "Failed to save settings",
     "appearance": "Appearance",
     "theme": "Theme",
     "themeSettings": "Theme Settings",

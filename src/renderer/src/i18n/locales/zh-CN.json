@@ -629,6 +629,10 @@
   "settings": {
     "title": "设置",
     "description": "管理应用程序设置和偏好",
+    "save": "保存设置",
+    "saving": "保存中...",
+    "saveSuccess": "设置保存成功",
+    "saveFailed": "设置保存失败",
     "appearance": "外观",
     "theme": "主题",
     "themeSettings": "主题设置",

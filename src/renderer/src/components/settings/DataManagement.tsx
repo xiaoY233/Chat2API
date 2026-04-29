@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useSettingsStore, LogLevel } from '@/stores/settingsStore'
 import { useToast } from '@/hooks/use-toast'
-import { Database, Download, Upload, Trash2, RotateCcw, AlertTriangle } from 'lucide-react'
+import { Database, Download, Upload, Trash2, RotateCcw, AlertTriangle, Save } from 'lucide-react'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import {
@@ -22,20 +22,32 @@ import {
 export function DataManagement() {
   const { t } = useTranslation()
   const {
-    logLevel,
-    setLogLevel,
-    logRetentionDays,
-    setLogRetentionDays,
-    maxLogs,
-    setMaxLogs,
+    logLevel: savedLogLevel,
+    setLogLevel: saveLogLevel,
+    logRetentionDays: savedLogRetentionDays,
+    setLogRetentionDays: saveLogRetentionDays,
+    maxLogs: savedMaxLogs,
+    setMaxLogs: saveMaxLogs,
     config,
     updateConfig,
+    saveSettings,
   } = useSettingsStore()
   const { toast } = useToast()
+
+  const [logLevel, setLogLevelDraft] = useState<LogLevel>(savedLogLevel)
+  const [logRetentionDays, setLogRetentionDaysDraft] = useState(savedLogRetentionDays)
+  const [maxLogs, setMaxLogsDraft] = useState(savedMaxLogs)
+  const [isSaving, setIsSaving] = useState(false)
   const [isExporting, setIsExporting] = useState(false)
   const [isImporting, setIsImporting] = useState(false)
   const [isClearing, setIsClearing] = useState(false)
   const [isResetting, setIsResetting] = useState(false)
+
+  useEffect(() => {
+    setLogLevelDraft(savedLogLevel)
+    setLogRetentionDaysDraft(savedLogRetentionDays)
+    setMaxLogsDraft(savedMaxLogs)
+  }, [savedLogLevel, savedLogRetentionDays, savedMaxLogs])
 
   const requestLogConfig = config?.requestLogConfig ?? {
     enabled: true,
@@ -142,11 +154,11 @@ export function DataManagement() {
     try {
       localStorage.clear()
       sessionStorage.clear()
-      
+
       if (window.electronAPI?.store?.clearAll) {
         await window.electronAPI.store.clearAll()
       }
-      
+
       toast({
         title: t('common.success'),
         description: t('settings.resetSuccess'),
@@ -162,6 +174,21 @@ export function DataManagement() {
       })
     } finally {
       setIsResetting(false)
+    }
+  }
+
+  const handleSave = async () => {
+    setIsSaving(true)
+    try {
+      saveLogLevel(logLevel)
+      saveLogRetentionDays(logRetentionDays)
+      saveMaxLogs(maxLogs)
+      await saveSettings()
+      toast({ title: t('common.success'), description: t('settings.saveSuccess') })
+    } catch {
+      toast({ title: t('common.error'), description: t('settings.saveFailed'), variant: 'destructive' })
+    } finally {
+      setIsSaving(false)
     }
   }
 
@@ -181,7 +208,7 @@ export function DataManagement() {
           <div className="grid gap-4 md:grid-cols-3">
             <div className="space-y-2 p-3 rounded-xl bg-[var(--glass-bg)] border border-[var(--glass-border)]">
               <Label htmlFor="log-level">{t('settings.logLevel')}</Label>
-              <Select value={logLevel} onValueChange={(value) => setLogLevel(value as LogLevel)}>
+              <Select value={logLevel} onValueChange={(value) => setLogLevelDraft(value as LogLevel)}>
                 <SelectTrigger id="log-level">
                   <SelectValue placeholder={t('settings.selectLogLevel')} />
                 </SelectTrigger>
@@ -202,7 +229,7 @@ export function DataManagement() {
                 min={1}
                 max={365}
                 value={logRetentionDays}
-                onChange={(e) => setLogRetentionDays(parseInt(e.target.value) || 30)}
+                onChange={(e) => setLogRetentionDaysDraft(parseInt(e.target.value) || 30)}
               />
               <p className="text-xs text-muted-foreground">{t('settings.logRetentionHelp')}</p>
             </div>
@@ -214,7 +241,7 @@ export function DataManagement() {
                 min={100}
                 max={100000}
                 value={maxLogs}
-                onChange={(e) => setMaxLogs(parseInt(e.target.value) || 10000)}
+                onChange={(e) => setMaxLogsDraft(parseInt(e.target.value) || 10000)}
               />
               <p className="text-xs text-muted-foreground">{t('settings.maxLogsHelp')}</p>
             </div>
@@ -397,6 +424,13 @@ export function DataManagement() {
           </div>
         </CardContent>
       </Card>
+
+      <div className="flex justify-end">
+        <Button onClick={handleSave} disabled={isSaving} className="flex items-center gap-2">
+          <Save className="h-4 w-4" />
+          {isSaving ? t('settings.saving') : t('settings.save')}
+        </Button>
+      </div>
     </div>
   )
 }
