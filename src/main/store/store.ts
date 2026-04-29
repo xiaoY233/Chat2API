@@ -375,6 +375,10 @@ class StoreManager {
     try {
       console.log('[Store] encryptData input length:', data.length, 'content:', data.substring(0, 20) + '...')
       if (safeStorage.isEncryptionAvailable()) {
+        if (!this.getConfig().credentialEncryption) {
+          console.log('[Store] Credential encryption disabled, returning plaintext')
+          return data
+        }
         // Create new Buffer to store encryption result
         const encrypted = Buffer.from(safeStorage.encryptString(data))
         const result = encrypted.toString('base64')

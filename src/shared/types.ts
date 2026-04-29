@@ -103,6 +103,7 @@ export interface AppConfig {
   sessionConfig: SessionConfig
   toolPromptConfig: ToolPromptConfig
   language: 'zh-CN' | 'en-US'
+  credentialEncryption: boolean
 }
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error'
