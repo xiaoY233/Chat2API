@@ -5,24 +5,64 @@ import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
 import { useSettingsStore, CloseBehavior, OAuthProxyMode } from '@/stores/settingsStore'
-import { Bell, Minimize2, Power, Globe } from 'lucide-react'
+import { Bell, Minimize2, Power, Globe, Save } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { useState, useEffect } from 'react'
+import { useToast } from '@/hooks/use-toast'
 
 export function GeneralSettings() {
   const { t } = useTranslation()
   const {
-    autoStart,
-    setAutoStart,
-    autoStartProxy,
-    setAutoStartProxy,
-    minimizeToTray,
-    setMinimizeToTray,
-    closeBehavior,
-    setCloseBehavior,
-    enableNotifications,
-    setEnableNotifications,
-    oauthProxyMode,
-    setOauthProxyMode,
+    autoStart: savedAutoStart,
+    setAutoStart: saveAutoStart,
+    autoStartProxy: savedAutoStartProxy,
+    setAutoStartProxy: saveAutoStartProxy,
+    minimizeToTray: savedMinimizeToTray,
+    setMinimizeToTray: saveMinimizeToTray,
+    closeBehavior: savedCloseBehavior,
+    setCloseBehavior: saveCloseBehavior,
+    enableNotifications: savedEnableNotifications,
+    setEnableNotifications: saveEnableNotifications,
+    oauthProxyMode: savedOauthProxyMode,
+    setOauthProxyMode: saveOauthProxyMode,
+    saveSettings,
   } = useSettingsStore()
+  const { toast } = useToast()
+
+  const [autoStart, setAutoStartDraft] = useState(savedAutoStart)
+  const [autoStartProxy, setAutoStartProxyDraft] = useState(savedAutoStartProxy)
+  const [minimizeToTray, setMinimizeToTrayDraft] = useState(savedMinimizeToTray)
+  const [closeBehavior, setCloseBehaviorDraft] = useState<CloseBehavior>(savedCloseBehavior)
+  const [enableNotifications, setEnableNotificationsDraft] = useState(savedEnableNotifications)
+  const [oauthProxyMode, setOauthProxyModeDraft] = useState<OAuthProxyMode>(savedOauthProxyMode)
+  const [isSaving, setIsSaving] = useState(false)
+
+  useEffect(() => {
+    setAutoStartDraft(savedAutoStart)
+    setAutoStartProxyDraft(savedAutoStartProxy)
+    setMinimizeToTrayDraft(savedMinimizeToTray)
+    setCloseBehaviorDraft(savedCloseBehavior)
+    setEnableNotificationsDraft(savedEnableNotifications)
+    setOauthProxyModeDraft(savedOauthProxyMode)
+  }, [savedAutoStart, savedAutoStartProxy, savedMinimizeToTray, savedCloseBehavior, savedEnableNotifications, savedOauthProxyMode])
+
+  const handleSave = async () => {
+    setIsSaving(true)
+    try {
+      saveAutoStart(autoStart)
+      saveAutoStartProxy(autoStartProxy)
+      saveMinimizeToTray(minimizeToTray)
+      saveCloseBehavior(closeBehavior)
+      saveEnableNotifications(enableNotifications)
+      saveOauthProxyMode(oauthProxyMode)
+      await saveSettings()
+      toast({ title: t('common.success'), description: t('settings.saveSuccess') })
+    } catch {
+      toast({ title: t('common.error'), description: t('settings.saveFailed'), variant: 'destructive' })
+    } finally {
+      setIsSaving(false)
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -42,7 +82,7 @@ export function GeneralSettings() {
             <Switch
               id="auto-start"
               checked={autoStart}
-              onCheckedChange={setAutoStart}
+              onCheckedChange={setAutoStartDraft}
             />
           </div>
           <Separator />
@@ -54,7 +94,7 @@ export function GeneralSettings() {
             <Switch
               id="auto-start-proxy"
               checked={autoStartProxy}
-              onCheckedChange={setAutoStartProxy}
+              onCheckedChange={setAutoStartProxyDraft}
             />
           </div>
         </CardContent>
@@ -76,7 +116,7 @@ export function GeneralSettings() {
             <Switch
               id="minimize-tray"
               checked={minimizeToTray}
-              onCheckedChange={setMinimizeToTray}
+              onCheckedChange={setMinimizeToTrayDraft}
             />
           </div>
           <Separator />
@@ -87,7 +127,7 @@ export function GeneralSettings() {
             </div>
             <Select
               value={closeBehavior}
-              onValueChange={(value) => setCloseBehavior(value as CloseBehavior)}
+              onValueChange={(value) => setCloseBehaviorDraft(value as CloseBehavior)}
             >
               <SelectTrigger className="w-[180px]">
                 <SelectValue placeholder={t('settings.closeBehavior')} />
@@ -118,7 +158,7 @@ export function GeneralSettings() {
             <Switch
               id="notifications"
               checked={enableNotifications}
-              onCheckedChange={setEnableNotifications}
+              onCheckedChange={setEnableNotificationsDraft}
             />
           </div>
         </CardContent>
@@ -139,7 +179,7 @@ export function GeneralSettings() {
             </div>
             <Select
               value={oauthProxyMode}
-              onValueChange={(value) => setOauthProxyMode(value as OAuthProxyMode)}
+              onValueChange={(value) => setOauthProxyModeDraft(value as OAuthProxyMode)}
             >
               <SelectTrigger className="w-[180px]">
                 <SelectValue placeholder={t('settings.oauthProxyMode')} />
@@ -152,6 +192,13 @@ export function GeneralSettings() {
           </div>
         </CardContent>
       </Card>
+
+      <div className="flex justify-end">
+        <Button onClick={handleSave} disabled={isSaving} className="flex items-center gap-2">
+          <Save className="h-4 w-4" />
+          {isSaving ? t('settings.saving') : t('settings.save')}
+        </Button>
+      </div>
     </div>
   )
 }

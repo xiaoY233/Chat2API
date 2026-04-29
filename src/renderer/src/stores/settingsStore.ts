@@ -45,6 +45,7 @@ interface SettingsState {
   setConfig: (config: AppConfig) => void
   updateConfig: (updates: Partial<AppConfig>) => Promise<void>
   fetchConfig: () => Promise<void>
+  saveSettings: () => Promise<void>
 }
 
 export const useSettingsStore = create<SettingsState>()(
@@ -58,42 +59,16 @@ export const useSettingsStore = create<SettingsState>()(
       proxyEnabled: false,
       setProxyEnabled: (enabled) => set({ proxyEnabled: enabled }),
       oauthProxyMode: 'system',
-      setOauthProxyMode: async (mode) => {
-        set({ oauthProxyMode: mode })
-        try {
-          await window.electronAPI.config.update({ oauthProxyMode: mode })
-        } catch (error) {
-          console.error('Failed to update oauthProxyMode:', error)
-        }
-      },
+      setOauthProxyMode: (mode) => set({ oauthProxyMode: mode }),
       language: 'en-US',
-      setLanguage: async (language) => {
+      setLanguage: (language) => {
         set({ language })
-        await i18n.changeLanguage(language)
-        try {
-          await window.electronAPI.config.update({ language: language })
-        } catch (error) {
-          console.error('Failed to update language:', error)
-        }
+        i18n.changeLanguage(language)
       },
       autoStart: false,
-      setAutoStart: async (enabled) => {
-        set({ autoStart: enabled })
-        try {
-          await window.electronAPI.config.update({ autoStart: enabled })
-        } catch (error) {
-          console.error('Failed to update autoStart:', error)
-        }
-      },
+      setAutoStart: (enabled) => set({ autoStart: enabled }),
       autoStartProxy: false,
-      setAutoStartProxy: async (enabled) => {
-        set({ autoStartProxy: enabled })
-        try {
-          await window.electronAPI.config.update({ autoStartProxy: enabled })
-        } catch (error) {
-          console.error('Failed to update autoStartProxy:', error)
-        }
-      },
+      setAutoStartProxy: (enabled) => set({ autoStartProxy: enabled }),
       minimizeToTray: true,
       setMinimizeToTray: (enabled) => set({ minimizeToTray: enabled }),
       closeBehavior: 'minimize',
@@ -138,7 +113,7 @@ export const useSettingsStore = create<SettingsState>()(
       fetchConfig: async () => {
         try {
           const config = await window.electronAPI.config.get()
-          set({ 
+          set({
             config,
             autoStart: config.autoStart,
             autoStartProxy: config.autoStartProxy,
@@ -147,6 +122,24 @@ export const useSettingsStore = create<SettingsState>()(
           })
         } catch (error) {
           console.error('Failed to fetch config:', error)
+        }
+      },
+      saveSettings: async () => {
+        const state = get()
+        try {
+          await window.electronAPI.config.update({
+            theme: state.theme,
+            language: state.language,
+            autoStart: state.autoStart,
+            autoStartProxy: state.autoStartProxy,
+            minimizeToTray: state.minimizeToTray,
+            oauthProxyMode: state.oauthProxyMode,
+            logLevel: state.logLevel,
+            logRetentionDays: state.logRetentionDays,
+          })
+        } catch (error) {
+          console.error('Failed to save settings:', error)
+          throw error
         }
       },
     }),
