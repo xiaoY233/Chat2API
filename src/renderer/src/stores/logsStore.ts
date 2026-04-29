@@ -51,6 +51,31 @@ interface LogsState {
   refresh: () => Promise<void>
 }
 
+function filterLogs(logs: LogEntry[], filter: LogFilter): LogEntry[] {
+  let filtered = [...logs]
+
+  if (filter.level !== 'all') {
+    filtered = filtered.filter((log) => log.level === filter.level)
+  }
+
+  if (filter.keyword) {
+    const keyword = filter.keyword.toLowerCase()
+    filtered = filtered.filter((log) =>
+      log.message.toLowerCase().includes(keyword)
+    )
+  }
+
+  if (filter.startTime) {
+    filtered = filtered.filter((log) => log.timestamp >= filter.startTime!)
+  }
+
+  if (filter.endTime) {
+    filtered = filtered.filter((log) => log.timestamp <= filter.endTime!)
+  }
+
+  return filtered
+}
+
 export const useLogsStore = create<LogsState>((set, get) => ({
   logs: [],
   filteredLogs: [],
@@ -130,28 +155,7 @@ export const useLogsStore = create<LogsState>((set, get) => ({
 
   applyFilter: () => {
     const { logs, filter } = get()
-    let filtered = [...logs]
-
-    if (filter.level !== 'all') {
-      filtered = filtered.filter((log) => log.level === filter.level)
-    }
-
-    if (filter.keyword) {
-      const keyword = filter.keyword.toLowerCase()
-      filtered = filtered.filter((log) =>
-        log.message.toLowerCase().includes(keyword)
-      )
-    }
-
-    if (filter.startTime) {
-      filtered = filtered.filter((log) => log.timestamp >= filter.startTime!)
-    }
-
-    if (filter.endTime) {
-      filtered = filtered.filter((log) => log.timestamp <= filter.endTime!)
-    }
-
-    set({ filteredLogs: filtered })
+    set({ filteredLogs: filterLogs(logs, filter) })
   },
 
   clearLogs: () => {
@@ -209,26 +213,9 @@ export const useLogsStore = create<LogsState>((set, get) => ({
         window.electronAPI.logs.getTrend(7),
       ])
 
-      let filteredLogs = [...logs]
-      if (filter.level !== 'all') {
-        filteredLogs = filteredLogs.filter((log) => log.level === filter.level)
-      }
-      if (filter.keyword) {
-        const keyword = filter.keyword.toLowerCase()
-        filteredLogs = filteredLogs.filter((log) =>
-          log.message.toLowerCase().includes(keyword)
-        )
-      }
-      if (filter.startTime) {
-        filteredLogs = filteredLogs.filter((log) => log.timestamp >= filter.startTime!)
-      }
-      if (filter.endTime) {
-        filteredLogs = filteredLogs.filter((log) => log.timestamp <= filter.endTime!)
-      }
-
       set({
         logs,
-        filteredLogs,
+        filteredLogs: filterLogs(logs, filter),
         stats,
         trend,
         hasMore: logs.length >= pageSize,
