@@ -87,6 +87,8 @@ export interface AppConfig {
   proxyPort: number
   proxyHost: string
   loadBalanceStrategy: LoadBalanceStrategy
+  /** Account weights for weighted random selection (accountId → weight, 0-100) */
+  accountWeights: Record<string, number>
   modelMappings: Record<string, ModelMapping>
   theme: Theme
   autoStart: boolean

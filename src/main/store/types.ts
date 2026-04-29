@@ -179,6 +179,8 @@ export interface AppConfig {
   proxyHost: string
   /** Load balance strategy */
   loadBalanceStrategy: LoadBalanceStrategy
+  /** Account weights for weighted random selection (accountId → weight, 0-100) */
+  accountWeights: Record<string, number>
   /** Model mapping configuration */
   modelMappings: Record<string, ModelMapping>
   /** UI theme */
@@ -731,6 +733,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   proxyPort: 8080,
   proxyHost: '127.0.0.1',
   loadBalanceStrategy: 'round-robin',
+  accountWeights: {},
   modelMappings: {},
   theme: 'system',
   autoStart: false,
