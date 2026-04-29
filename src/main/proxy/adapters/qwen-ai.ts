@@ -289,15 +289,15 @@ export class QwenAiAdapter {
     // 1. Model name suffix: -thinking (force thinking), -fast (force fast mode)
     // 2. enable_thinking parameter for explicit control
     // 3. If neither is specified, thinking mode is disabled by default (fast mode)
-    const shouldEnableThinking = forceThinking !== undefined 
-      ? forceThinking 
-      : request.enable_thinking === true
+    const shouldEnableThinking = forceThinking !== undefined
+      ? forceThinking
+      : request.enable_thinking !== false
     
     const featureConfig: Record<string, any> = {
       thinking_enabled: shouldEnableThinking,
       output_schema: 'phase',
       research_mode: 'normal',
-      auto_thinking: shouldEnableThinking,
+      auto_thinking: true,
       thinking_format: 'summary',
       auto_search: false, // Default to disable auto search
     }
