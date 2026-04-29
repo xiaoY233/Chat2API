@@ -57,6 +57,8 @@ interface ChatCompletionRequest {
   enable_thinking?: boolean
   thinking_budget?: number
   chatId?: string
+  providerSessionId?: string
+  parentMessageId?: string
 }
 
 function uuid(): string {
@@ -256,17 +258,19 @@ export class QwenAiAdapter {
       forceThinking = (this as any)._forceThinking
     }
 
-    // Always create a new chat (single-turn mode only)
-    const chatId = await this.createChat(modelId, 'OpenAI_API_Chat')
-    console.log('[QwenAI] Created new chat:', chatId)
+    // Reuse existing chat or create a new one
+    const existingChatId = request.providerSessionId || request.chatId
+    const chatId = existingChatId || await this.createChat(modelId, 'OpenAI_API_Chat')
+    console.log('[QwenAI] Using chat:', chatId, existingChatId ? '(reused)' : '(new)')
+
+    const parentId = request.parentMessageId || null
 
     const messages = request.messages
-    
-    // Extract system message and user message
+
+    // Extract system message and last user message
     let systemContent = ''
     let userContent = ''
-    
-    // Single-turn mode: extract all messages
+
     for (const msg of messages) {
       if (msg.role === 'system') {
         systemContent += (systemContent ? '\n\n' : '') + msg.content
@@ -274,7 +278,7 @@ export class QwenAiAdapter {
         userContent = msg.content
       }
     }
-    
+
     // If system prompt exists, prepend it to user content
     if (systemContent) {
       userContent = `${systemContent}\n\nUser: ${userContent}`
@@ -289,10 +293,10 @@ export class QwenAiAdapter {
     // 1. Model name suffix: -thinking (force thinking), -fast (force fast mode)
     // 2. enable_thinking parameter for explicit control
     // 3. If neither is specified, thinking mode is disabled by default (fast mode)
-    const shouldEnableThinking = forceThinking !== undefined 
-      ? forceThinking 
+    const shouldEnableThinking = forceThinking !== undefined
+      ? forceThinking
       : request.enable_thinking === true
-    
+
     const featureConfig: Record<string, any> = {
       thinking_enabled: shouldEnableThinking,
       output_schema: 'phase',
@@ -313,11 +317,11 @@ export class QwenAiAdapter {
       chat_id: chatId,
       chat_mode: 'normal',
       model: modelId,
-      parent_id: null,
+      parent_id: parentId,
       messages: [
         {
           fid,
-          parentId: null,
+          parentId: parentId,
           childrenIds: [childId],
           role: 'user',
           content: userContent,
@@ -329,7 +333,7 @@ export class QwenAiAdapter {
           feature_config: featureConfig,
           extra: { meta: { subChatType: 't2t' } },
           sub_chat_type: 't2t',
-          parent_id: null,
+          parent_id: parentId,
         },
       ],
       timestamp: ts + 1,
