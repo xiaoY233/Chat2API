@@ -403,7 +403,7 @@ ${message.content || ''}
     // Fallback: check model name for backward compatibility
     const modelLower = request.model.toLowerCase()
 
-    if (modelLower.includes('expert')) {
+    if (modelLower.includes('pro') || modelLower.includes('expert')) {
       modelType = 'expert'
     }
     if (!searchEnabled && modelLower.includes('search')) {
@@ -424,11 +424,13 @@ ${message.content || ''}
       `${DEEPSEEK_API_BASE}/v0/chat/completion`,
       {
         chat_session_id: sessionId,
+        parent_message_id: null,
         prompt,
+        model_type: modelType,
         ref_file_ids: [],
         search_enabled: searchEnabled,
         thinking_enabled: thinkingEnabled,
-        model_type: modelType,
+        preempt: false,
       },
       {
         headers: {
