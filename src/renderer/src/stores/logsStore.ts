@@ -194,7 +194,7 @@ export const useLogsStore = create<LogsState>((set, get) => ({
   },
 
   refresh: async () => {
-    const { pageSize } = get()
+    const { pageSize, filter } = get()
     set({ isLoading: true })
 
     if (!window.electronAPI?.logs) {
@@ -209,16 +209,33 @@ export const useLogsStore = create<LogsState>((set, get) => ({
         window.electronAPI.logs.getTrend(7),
       ])
 
+      let filteredLogs = [...logs]
+      if (filter.level !== 'all') {
+        filteredLogs = filteredLogs.filter((log) => log.level === filter.level)
+      }
+      if (filter.keyword) {
+        const keyword = filter.keyword.toLowerCase()
+        filteredLogs = filteredLogs.filter((log) =>
+          log.message.toLowerCase().includes(keyword)
+        )
+      }
+      if (filter.startTime) {
+        filteredLogs = filteredLogs.filter((log) => log.timestamp >= filter.startTime!)
+      }
+      if (filter.endTime) {
+        filteredLogs = filteredLogs.filter((log) => log.timestamp <= filter.endTime!)
+      }
+
       set({
         logs,
+        filteredLogs,
         stats,
         trend,
         hasMore: logs.length >= pageSize,
+        isLoading: false,
       })
-      get().applyFilter()
     } catch (error) {
       console.error('Failed to refresh logs:', error)
-    } finally {
       set({ isLoading: false })
     }
   },

@@ -51,6 +51,7 @@ type StoreType = any
  */
 class StoreManager {
   private store: StoreType | null = null
+  private logsStore: StoreType | null = null
   private isInitialized: boolean = false
   private mainWindow: BrowserWindow | null = null
   private initializationError: Error | null = null
@@ -102,6 +103,14 @@ class StoreManager {
         encryptionKey: this.getEncryptionKey(),
       })
 
+      this.logsStore = new Store({
+        name: 'logs-data',
+        cwd: storagePath,
+        defaults: { logs: [] },
+        encryptionKey: this.getEncryptionKey(),
+      })
+
+      await this.migrateLogsToSeparateStore()
       await this.initializeRequestLogManager(storagePath)
       await this.initializeDefaultProviders()
       this.isInitialized = true
@@ -109,7 +118,7 @@ class StoreManager {
     } catch (error) {
       console.error('[Store] Failed to initialize storage:', error)
       this.initializationError = error instanceof Error ? error : new Error(String(error))
-      
+
       // Try to recover by backing up corrupted data and reinitializing
       try {
         await this.recoverFromCorruptedData(storagePath)
@@ -119,6 +128,13 @@ class StoreManager {
           defaults: this.getDefaultData(),
           encryptionKey: this.getEncryptionKey(),
         })
+        this.logsStore = new Store({
+          name: 'logs-data',
+          cwd: storagePath,
+          defaults: { logs: [] },
+          encryptionKey: this.getEncryptionKey(),
+        })
+        await this.migrateLogsToSeparateStore()
         await this.initializeRequestLogManager(storagePath)
         this.isInitialized = true
         this.initializationError = null
@@ -128,6 +144,19 @@ class StoreManager {
         throw this.initializationError
       }
     }
+  }
+
+  private async migrateLogsToSeparateStore(): Promise<void> {
+    if (!this.store || !this.logsStore) return
+
+    const oldLogs = (this.store.get('logs') as LogEntry[]) || []
+    if (oldLogs.length === 0) return
+
+    const existingLogs = (this.logsStore.get('logs') as LogEntry[]) || []
+    const merged = [...existingLogs, ...oldLogs]
+    this.logsStore.set('logs', merged)
+    this.store.set('logs', [])
+    console.log(`[Store] Migrated ${oldLogs.length} logs to logs-data.json`)
   }
 
   /**
@@ -342,7 +371,8 @@ class StoreManager {
   }
 
   private getCombinedLogs(): LogEntry[] {
-    const persistedLogs = (this.store!.get('logs') as LogEntry[]) || []
+    if (!this.logsStore) return [...this.pendingLogs]
+    const persistedLogs = (this.logsStore.get('logs') as LogEntry[]) || []
     return persistedLogs.concat(this.pendingLogs)
   }
 
@@ -352,17 +382,17 @@ class StoreManager {
   }
 
   private flushLogsSync(): void {
-    if (!this.isInitialized || !this.store || this.pendingLogs.length === 0) {
+    if (!this.isInitialized || !this.logsStore || this.pendingLogs.length === 0) {
       return
     }
 
-    const logs = ((this.store.get('logs') as LogEntry[]) || []).concat(this.pendingLogs)
+    const logs = ((this.logsStore.get('logs') as LogEntry[]) || []).concat(this.pendingLogs)
     const config = this.getConfig()
     const maxLogs = config.logRetentionDays * 1000
 
     const trimmedLogs = logs.length > maxLogs ? logs.slice(-maxLogs) : logs
 
-    this.store.set('logs', trimmedLogs)
+    this.logsStore.set('logs', trimmedLogs)
     this.pendingLogs = []
   }
 
@@ -841,7 +871,7 @@ class StoreManager {
       this.logFlushTimer = null
     }
     this.pendingLogs = []
-    this.store!.set('logs', [])
+    this.logsStore?.set('logs', [])
   }
 
   /**
@@ -980,10 +1010,10 @@ class StoreManager {
     const config = this.getConfig()
     const logs = this.getCombinedLogs()
     const cutoff = Date.now() - config.logRetentionDays * 24 * 60 * 60 * 1000
-    
+
     const filtered = logs.filter((l: LogEntry) => l.timestamp >= cutoff)
     this.pendingLogs = []
-    this.store!.set('logs', filtered)
+    this.logsStore?.set('logs', filtered)
   }
 
   // ==================== Request Log Operations ====================
@@ -1693,6 +1723,13 @@ class StoreManager {
   }
 
   /**
+   * Get Logs Storage Instance
+   */
+  getLogsStore(): StoreType | null {
+    return this.logsStore
+  }
+
+  /**
    * Clear All Data
    */
   clearAll(): void {
@@ -1703,6 +1740,7 @@ class StoreManager {
     }
     this.pendingLogs = []
     this.store!.clear()
+    this.logsStore?.clear()
     this.requestLogManager?.clearRequestLogs()
     this.requestLogManager?.flushSync()
   }
@@ -1719,7 +1757,7 @@ class StoreManager {
       return rest
     })
     const config = this.store!.get('config') || DEFAULT_CONFIG
-    const logs = this.store!.get('logs') || []
+    const logs = (this.logsStore?.get('logs') as LogEntry[]) || []
     const requestLogs = this.getRequestLogManager().exportRequestLogs()
     const systemPrompts = this.store!.get('systemPrompts') || []
     const sessions = this.store!.get('sessions') || []

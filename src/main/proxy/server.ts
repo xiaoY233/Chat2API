@@ -13,7 +13,7 @@ import { proxyStatusManager } from './status'
 import { storeManager } from '../store/store'
 import { sessionManager } from './sessionManager'
 
-const SLOW_REQUEST_THRESHOLD_MS = 1500
+const SLOW_REQUEST_THRESHOLD_MS = 1000
 
 /**
  * Proxy Server Class
