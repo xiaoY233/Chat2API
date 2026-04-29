@@ -322,6 +322,12 @@ export interface SessionRecord {
     title?: string
     tokenCount?: number
   }
+  /** Provider-side session/conversation ID */
+  providerSessionId?: string
+  /** Provider-side last message ID (for parent_message_id) */
+  parentMessageId?: string
+  /** History fingerprint for session lookup */
+  historyHash?: string
 }
 
 /**
