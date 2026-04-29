@@ -261,7 +261,7 @@
     "description": "Kimi AI assistant, supports long text processing and web search",
     "accessToken": "Access Token",
     "accessTokenPlaceholder": "Enter Kimi Access Token or Refresh Token",
-    "accessTokenHelp": "Supports JWT Token (starts with eyJ) or refresh_token"
+    "accessTokenHelp": "The kimi-auth value from browser cookies (recommended), or JWT Token / refresh_token"
   },
   "minimax": {
     "name": "MiniMax",

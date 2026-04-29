@@ -261,7 +261,7 @@
     "description": "Kimi AI 助手，支持长文本处理和联网搜索",
     "accessToken": "访问令牌",
     "accessTokenPlaceholder": "请输入 Kimi 访问令牌或刷新令牌",
-    "accessTokenHelp": "支持 JWT Token（以 eyJ 开头）或 refresh_token"
+    "accessTokenHelp": "浏览器 Cookie 中的 kimi-auth 字段值（推荐），也可使用 JWT Token 或 refresh_token"
   },
   "minimax": {
     "name": "MiniMax",
