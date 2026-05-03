@@ -239,7 +239,7 @@
     },
     "publish": {
       "provider": "github",
-      "owner": "xiaoY233",
+      "owner": "leisvip",
       "repo": "Chat2API"
     }
   }
