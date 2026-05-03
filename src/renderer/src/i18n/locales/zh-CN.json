@@ -243,6 +243,16 @@
     "userTokenPlaceholder": "请输入 DeepSeek 用户 Token",
     "userTokenHelp": "从 DeepSeek 网页版获取的认证 Token，可在浏览器开发者工具 Application -> Local Storage -> userToken 中找到",
     "models": {
+      "deepseek-v4-pro": "DeepSeek V4 Pro",
+      "deepseek-v4-pro-think": "DeepSeek V4 Pro - 思考",
+      "deepseek-v4-pro-search": "DeepSeek V4 Pro - 搜索",
+      "deepseek-v4-pro-think-search": "DeepSeek V4 Pro - 思考+搜索",
+      "deepseek-v4-flash": "DeepSeek V4 Flash",
+      "deepseek-v4-flash-think": "DeepSeek V4 Flash - 思考",
+      "deepseek-v4-flash-search": "DeepSeek V4 Flash - 搜索",
+      "deepseek-v4-flash-think-search": "DeepSeek V4 Flash - 思考+搜索",
+      "deepseek-chat": "DeepSeek Chat (兼容旧名)",
+      "deepseek-reasoner": "DeepSeek Reasoner (兼容旧名)",
       "DeepSeek-V3.2": "DeepSeek V3.2 - 标准对话",
       "DeepSeek-Search": "DeepSeek Search - 联网搜索",
       "DeepSeek-R1": "DeepSeek R1 - 深度思考",
@@ -261,7 +271,7 @@
     "description": "Kimi AI 助手，支持长文本处理和联网搜索",
     "accessToken": "访问令牌",
     "accessTokenPlaceholder": "请输入 Kimi 访问令牌或刷新令牌",
-    "accessTokenHelp": "支持 JWT Token（以 eyJ 开头）或 refresh_token"
+    "accessTokenHelp": "浏览器 Cookie 中的 kimi-auth 字段值（推荐），也可使用 JWT Token 或 refresh_token"
   },
   "minimax": {
     "name": "MiniMax",
@@ -629,6 +639,10 @@
   "settings": {
     "title": "设置",
     "description": "管理应用程序设置和偏好",
+    "save": "保存设置",
+    "saving": "保存中...",
+    "saveSuccess": "设置保存成功",
+    "saveFailed": "设置保存失败",
     "appearance": "外观",
     "theme": "主题",
     "themeSettings": "主题设置",

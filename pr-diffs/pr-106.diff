@@ -1,0 +1,338 @@
+diff --git a/src/main/proxy/adapters/qwen-ai.ts b/src/main/proxy/adapters/qwen-ai.ts
+index 631639d..9b53e2f 100644
+--- a/src/main/proxy/adapters/qwen-ai.ts
++++ b/src/main/proxy/adapters/qwen-ai.ts
+@@ -9,6 +9,7 @@ import { PassThrough } from 'stream'
+ import { createParser } from 'eventsource-parser'
+ import { Account, Provider } from '../../store/types'
+ import { hasToolUse, parseToolUse, ToolCall } from '../promptToolUse'
++import { messagesToPrompt } from '../utils/messageToPrompt'
+ 
+ const QWEN_AI_BASE = 'https://chat.qwen.ai'
+ 
+@@ -260,25 +261,10 @@ export class QwenAiAdapter {
+     const chatId = await this.createChat(modelId, 'OpenAI_API_Chat')
+     console.log('[QwenAI] Created new chat:', chatId)
+ 
+-    const messages = request.messages
+-    
+-    // Extract system message and user message
+-    let systemContent = ''
+-    let userContent = ''
+-    
+-    // Single-turn mode: extract all messages
+-    for (const msg of messages) {
+-      if (msg.role === 'system') {
+-        systemContent += (systemContent ? '\n\n' : '') + msg.content
+-      } else if (msg.role === 'user') {
+-        userContent = msg.content
+-      }
+-    }
+-    
+-    // If system prompt exists, prepend it to user content
+-    if (systemContent) {
+-      userContent = `${systemContent}\n\nUser: ${userContent}`
+-    }
++    // Convert entire conversation history to a single prompt string
++    // This ensures multi-turn context is preserved across requests
++    const userContent = messagesToPrompt(request.messages as any)
++    console.log('[QwenAI] Converted conversation history to prompt, length:', userContent.length)
+ 
+     const fid = uuid()
+     const childId = uuid()
+diff --git a/src/main/proxy/adapters/qwen.ts b/src/main/proxy/adapters/qwen.ts
+index 5f289e0..e157b3f 100644
+--- a/src/main/proxy/adapters/qwen.ts
++++ b/src/main/proxy/adapters/qwen.ts
+@@ -20,6 +20,7 @@ import {
+   createBaseChunk,
+   ToolCallState 
+ } from '../utils/streamToolHandler'
++import { messagesToPrompt, extractTextContent as extractTextContentUtil } from '../utils/messageToPrompt'
+ 
+ /**
+  * Check if content contains tool calls (both bracket and XML formats)
+@@ -70,7 +71,8 @@ interface ChatCompletionRequest {
+   web_search?: boolean
+   reasoning_effort?: 'low' | 'medium' | 'high'
+   enableThinking?: boolean
+-  enableWebSearch?: boolean
++  enableWeb?: boolean
++  originalModel?: string
+ }
+ 
+ function uuid(separator: boolean = true): string {
+@@ -152,15 +154,16 @@ export class QwenAdapter {
+     const modelLower = modelForDetection.toLowerCase()
+     
+     let enableThinking = request.enableThinking ?? false
+-    let enableWebSearch = request.enableWebSearch ?? false
++    // Use web_search from request (OpenAI standard) and fallback to model name detection
++    let enableWeb = request.web_search ?? false
+     
+     // Auto-enable based on model name (if not explicitly set)
+     if (!enableThinking && (modelLower.includes('think') || modelLower.includes('r1'))) {
+       enableThinking = true
+       console.log('[Qwen] Thinking mode enabled (from model name)')
+     }
+-    if (!enableWebSearch && modelLower.includes('search')) {
+-      enableWebSearch = true
++    if (!enableWeb && modelLower.includes('')) {
++      enableWeb = true
+       console.log('[Qwen] Web search enabled (from model name)')
+     }
+ 
+@@ -179,38 +182,21 @@ export class QwenAdapter {
+     })
+     console.log('[Qwen] Using model:', actualModel)
+ 
+-    // Find system message and user message
+-    let systemPrompt = ''
+-    let userContent = ''
+-    
+-    for (const msg of request.messages) {
+-      if (msg.role === 'system') {
+-        systemPrompt = extractTextContent(msg.content)
+-      } else if (msg.role === 'user') {
+-        userContent = extractTextContent(msg.content)
+-      }
+-    }
++    // Convert entire conversation history to a single prompt string
++    // This ensures multi-turn context is preserved across requests
++    let finalContent = messagesToPrompt(request.messages as any)
+ 
+     // Inject tools prompt if tools are provided and not already injected by client
+     if (request.tools && request.tools.length > 0 && !hasToolPromptInjected(request.messages)) {
+       const toolsPrompt = toolsToSystemPrompt(request.tools)
+-      systemPrompt = systemPrompt 
+-        ? systemPrompt + '\n\n' + toolsPrompt 
+-        : toolsPrompt
+-      // Add tool wrap hint to user content
+-      userContent = userContent + TOOL_WRAP_HINT
++      finalContent = toolsPrompt + '\n\n' + finalContent + TOOL_WRAP_HINT
+     }
+ 
+-    // If system prompt exists, prepend it to user content
+-    const finalContent = systemPrompt 
+-      ? `${systemPrompt}\n\nUser: ${userContent}`
+-      : userContent
+-
+     const timestamp = Date.now()
+     const nonce = generateNonce()
+ 
+     const requestBody = {
+-      deep_search: (enableWebSearch || enableThinking) ? '1' : '0',
++      deep_search: (enableWeb || enableThinking) ? '1' : '0',
+       req_id: reqId,
+       model: actualModel,
+       scene: 'chat',
+@@ -228,7 +214,7 @@ export class QwenAdapter {
+       ],
+       from: 'default',
+       parent_req_id: '0',
+-      enable_search: enableWebSearch,
++      enable_search: enableWeb,
+       biz_data: '{"entryPoint":"tongyigw"}',
+       scene_param: 'first_turn',
+       chat_client: 'h5',
+@@ -398,7 +384,9 @@ export class QwenStreamHandler {
+ 
+     console.log('[Qwen] Starting stream handler...')
+     
+-    const contentEncoding = response?.headers?.['content-encoding']
++      const contentEncoding = typeof response?.headers?.['content-encoding'] === 'string'
++        ? response.headers['content-encoding'] as string
++        : undefined
+     console.log('[Qwen] Content-Encoding:', contentEncoding)
+ 
+     let buffer = ''
+@@ -899,7 +887,8 @@ export class QwenStreamHandler {
+ 
+       let decompressStream: any = stream
+       
+-      const contentEncoding = response?.headers?.['content-encoding']?.toLowerCase()
++      const rawEncoding = response?.headers?.['content-encoding']
++      const contentEncoding = typeof rawEncoding === 'string' ? rawEncoding.toLowerCase() : undefined
+       if (contentEncoding === 'gzip') {
+         console.log('[Qwen] Decompressing gzip stream...')
+         decompressStream = stream.pipe(createGunzip())
+diff --git a/src/main/proxy/adapters/zai.ts b/src/main/proxy/adapters/zai.ts
+index 967b77b..d8e91fc 100644
+--- a/src/main/proxy/adapters/zai.ts
++++ b/src/main/proxy/adapters/zai.ts
+@@ -107,6 +107,8 @@ function uuid(separator: boolean = true): string {
+ }
+ 
+ export class ZaiAdapter {
++  private static chatIdCache: Map<string, string> = new Map()
++  
+   private provider: Provider
+   private account: Account
+   private token: string | null = null
+@@ -391,12 +393,41 @@ export class ZaiAdapter {
+     
+     const signaturePrompt = this.extractLastUserMessage(processedMessages)
+     
+-    // Always create a new chat (single-turn mode only)
+-    const chatResult = await this.createChat(mappedModel, signaturePrompt)
+-    const chatId = chatResult.chatId
+-    const messageId = chatResult.messageId
+-    const parentMessageId = null
+-    console.log('[Z.ai] Created new chat:', chatId)
++    // Reuse chat ID across requests for the same account when possible
++    let chatId: string
++    let messageId: string
++    let parentMessageId: string | null = null
++    
++    // If client provides an existing chat ID, use it (multi-turn support)
++    if (request.chatId) {
++      chatId = request.chatId
++      // For existing chat, we still need to generate a new message ID.
++      // The API expects a new message ID for each turn, and optionally a parent message ID.
++      messageId = uuid()
++      // We don't know the parent message ID for existing chat, but we can set it to null.
++      parentMessageId = null
++      console.log('[Z.ai] Using existing chat ID from request:', chatId)
++    } else {
++      // Check cache for this account
++      const cachedChatId = ZaiAdapter.chatIdCache.get(this.account.id)
++      if (cachedChatId) {
++        chatId = cachedChatId
++        messageId = uuid()
++        parentMessageId = null
++        console.log('[Z.ai] Reusing cached chat ID for account:', chatId)
++      } else {
++        // Create a new chat
++        const chatResult = await this.createChat(mappedModel, signaturePrompt)
++        chatId = chatResult.chatId
++        messageId = chatResult.messageId
++        // Cache it for future requests from this account
++        ZaiAdapter.chatIdCache.set(this.account.id, chatId)
++        console.log('[Z.ai] Created new chat and cached:', chatId)
++      }
++    }
++    
++    // Note: The processedMessages array already contains the full conversation history,
++    // so multi-turn context is preserved even when reusing the same chat_id.
+     
+     const requestId = uuid()
+     const timestamp = Date.now()
+diff --git a/src/main/proxy/utils/messageToPrompt.ts b/src/main/proxy/utils/messageToPrompt.ts
+new file mode 100644
+index 0000000..e60ba7c
+--- /dev/null
++++ b/src/main/proxy/utils/messageToPrompt.ts
+@@ -0,0 +1,113 @@
++/**
++ * Utility to convert an array of chat messages into a single prompt string
++ * that can be sent to any API, preserving full conversation context.
++ *
++ * This approach ensures multi-turn conversation works across all providers
++ * without relying on provider-specific session management.
++ */
++
++import type { ChatMessage } from '../types'
++
++export interface MessageContent {
++  type: string
++  text?: string
++}
++
++/**
++ * Extract plain text content from a message, regardless of format
++ */
++export function extractTextContent(content: string | MessageContent[] | null | undefined): string {
++  if (!content) return ''
++  if (typeof content === 'string') return content
++  if (Array.isArray(content)) {
++    return content
++      .filter(part => part.type === 'text' && part.text)
++      .map(part => part.text)
++      .join(' ')
++  }
++  return ''
++}
++
++/**
++ * Convert an array of messages into a single prompt string.
++ * Format:
++ *   System: <system message>
++ *
++ *   User: <user message>
++ *   Assistant: <assistant response>
++ *   User: <next user message>
++ *   ...
++ */
++export function messagesToPrompt(messages: ChatMessage[]): string {
++  const parts: string[] = []
++
++  for (const msg of messages) {
++    const content = extractTextContent(msg.content)
++    if (!content) continue
++
++    switch (msg.role) {
++      case 'system':
++        parts.push(`System: ${content}`)
++        break
++      case 'user':
++        parts.push(`User: ${content}`)
++        break
++      case 'assistant':
++        parts.push(`Assistant: ${content}`)
++        break
++      case 'tool':
++        // Tool responses are typically handled separately; include as user context
++        parts.push(`Tool result: ${content}`)
++        break
++      default:
++        // Unknown role, treat as user message to be safe
++        parts.push(`User: ${content}`)
++        break
++    }
++  }
++
++  // Join with double newline for clear separation
++  return parts.join('\n\n')
++}
++
++/**
++ * Convert messages to prompt but preserve a system message separately
++ * for providers that have a dedicated system prompt field.
++ * Returns { systemPrompt: string, userPrompt: string }
++ */
++export function splitSystemAndUserMessages(messages: ChatMessage[]): {
++  systemPrompt: string
++  userPrompt: string
++} {
++  let systemPrompt = ''
++  const userParts: string[] = []
++
++  for (const msg of messages) {
++    const content = extractTextContent(msg.content)
++    if (!content) continue
++
++    if (msg.role === 'system') {
++      systemPrompt = systemPrompt ? `${systemPrompt}\n\n${content}` : content
++    } else if (msg.role === 'user') {
++      userParts.push(`User: ${content}`)
++    } else if (msg.role === 'assistant') {
++      userParts.push(`Assistant: ${content}`)
++    } else if (msg.role === 'tool') {
++      userParts.push(`Tool result: ${content}`)
++    } else {
++      userParts.push(`User: ${content}`)
++    }
++  }
++
++  return {
++    systemPrompt,
++    userPrompt: userParts.join('\n\n'),
++  }
++}
++
++/**
++ * Estimate token count for a prompt string (rough approximation: 3 chars per token)
++ */
++export function estimatePromptTokens(prompt: string): number {
++  return Math.ceil(prompt.length / 3)
++}

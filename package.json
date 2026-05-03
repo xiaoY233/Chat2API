@@ -1,6 +1,6 @@
 {
   "name": "chat2api",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Chat2API 管理器 - 统一管理多个 AI 服务提供商，提供 OpenAI 兼容 API 接口",
   "main": "./out/main/index.js",
   "author": {

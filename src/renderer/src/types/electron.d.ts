@@ -299,14 +299,19 @@ interface SessionRecord {
   id: string
   providerId: string
   accountId: string
-  providerSessionId: string
+  providerSessionId?: string
   parentMessageId?: string
+  historyHash?: string
   sessionType: 'chat' | 'agent'
   messages: any[]
   createdAt: number
   lastActiveAt: number
   status: 'active' | 'expired' | 'deleted'
   model?: string
+  metadata?: {
+    title?: string
+    tokenCount?: number
+  }
 }
 
 interface SessionAPI {

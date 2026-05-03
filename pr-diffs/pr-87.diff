@@ -1,0 +1,1052 @@
+diff --git a/src/main/proxy/adapters/deepseek.ts b/src/main/proxy/adapters/deepseek.ts
+index 29349fc..31f17a2 100644
+--- a/src/main/proxy/adapters/deepseek.ts
++++ b/src/main/proxy/adapters/deepseek.ts
+@@ -64,6 +64,8 @@ interface ChatCompletionRequest {
+   reasoning_effort?: 'low' | 'medium' | 'high'
+   tools?: any[]
+   tool_choice?: any
++  providerSessionId?: string
++  parentMessageId?: string
+ }
+ 
+ const tokenCache = new Map<string, TokenInfo>()
+@@ -372,10 +374,13 @@ ${message.content || ''}
+ 
+   async chatCompletion(request: ChatCompletionRequest): Promise<{ response: AxiosResponse; sessionId: string }> {
+     const token = await this.acquireToken()
+-    
+-    const sessionId = await this.createSession()
+-    console.log('[DeepSeek] Created new session:', sessionId)
+-    
++
++    // Reuse existing session or create a new one
++    const sessionId = request.providerSessionId || await this.createSession()
++    console.log('[DeepSeek] Using session:', sessionId, request.providerSessionId ? '(reused)' : '(new)')
++
++    const parentMessageId = request.parentMessageId || null
++
+     const challenge = await this.getChallenge('/api/v0/chat/completion')
+     const challengeAnswer = await this.calculateChallengeAnswer(challenge)
+ 
+@@ -383,7 +388,7 @@ ${message.content || ''}
+     // Note: Tool prompt injection is already handled by Forwarder.transformRequestForPromptToolUse()
+     const messages = [...request.messages]
+ 
+-    let prompt = this.messagesToPrompt(messages, false)
++    let prompt = this.messagesToPrompt(messages, !!request.providerSessionId)
+ 
+     // Use request parameters for mode control (OpenAI compatible)
+     let searchEnabled = false
+@@ -424,6 +429,7 @@ ${message.content || ''}
+       `${DEEPSEEK_API_BASE}/v0/chat/completion`,
+       {
+         chat_session_id: sessionId,
++        parent_message_id: parentMessageId,
+         prompt,
+         ref_file_ids: [],
+         search_enabled: searchEnabled,
+diff --git a/src/main/proxy/adapters/kimi.ts b/src/main/proxy/adapters/kimi.ts
+index 5dc2484..d8bd86f 100644
+--- a/src/main/proxy/adapters/kimi.ts
++++ b/src/main/proxy/adapters/kimi.ts
+@@ -60,6 +60,8 @@ interface ChatCompletionRequest {
+   tool_choice?: any
+   conversationId?: string
+   parentId?: string
++  providerSessionId?: string
++  parentMessageId?: string
+ }
+ 
+ const accessTokenMap = new Map<string, TokenInfo>()
+@@ -272,6 +274,10 @@ export class KimiAdapter {
+   async chatCompletion(request: ChatCompletionRequest): Promise<{ response: AxiosResponse; conversationId: string }> {
+     const { accessToken } = await this.acquireToken()
+ 
++    const conversationId = request.conversationId || request.providerSessionId || ''
++    const parentId = request.parentId || request.parentMessageId || ''
++    const isMultiTurn = !!conversationId
++
+     const messages = [...request.messages]
+ 
+     // Check if tool prompt has already been injected by client
+@@ -297,17 +303,17 @@ export class KimiAdapter {
+       }
+     }
+ 
+-    const content = this.messagesPrepare(messages, toolsPrompt, false)
++    const content = this.messagesPrepare(messages, toolsPrompt, isMultiTurn)
+ 
+     // Determine if thinking and web search should be enabled
+     // Priority: explicit parameters > model name detection
+     // Use originalModel for feature detection (preserves user's intent before mapping)
+     const modelForDetection = request.originalModel || request.model
+     const modelLower = modelForDetection.toLowerCase()
+-    
++
+     let enableThinking = request.enableThinking ?? false
+     let enableWebSearch = request.enableWebSearch ?? false
+-    
++
+     // Auto-enable based on model name (if not explicitly set)
+     if (!enableThinking && (modelLower.includes('think') || modelLower.includes('r1'))) {
+       enableThinking = true
+@@ -320,10 +326,10 @@ export class KimiAdapter {
+ 
+     const jsonBody = JSON.stringify({
+       scenario: 'SCENARIO_K2D5',
+-      chat_id: '',
++      chat_id: conversationId,
+       tools: enableWebSearch ? [{ type: 'TOOL_TYPE_SEARCH', search: {} }] : [],
+       message: {
+-        parent_id: '',
++        parent_id: parentId,
+         role: 'user',
+         blocks: [{
+           message_id: '',
+@@ -371,7 +377,7 @@ export class KimiAdapter {
+       throw new Error(`Completion request failed: HTTP ${response.status}`)
+     }
+ 
+-    return { response, conversationId: '' }
++    return { response, conversationId }
+   }
+ 
+   async deleteConversation(conversationId: string): Promise<boolean> {
+diff --git a/src/main/proxy/adapters/qwen-ai.ts b/src/main/proxy/adapters/qwen-ai.ts
+index 631639d..65a726c 100644
+--- a/src/main/proxy/adapters/qwen-ai.ts
++++ b/src/main/proxy/adapters/qwen-ai.ts
+@@ -57,6 +57,8 @@ interface ChatCompletionRequest {
+   enable_thinking?: boolean
+   thinking_budget?: number
+   chatId?: string
++  providerSessionId?: string
++  parentMessageId?: string
+ }
+ 
+ function uuid(): string {
+@@ -256,17 +258,19 @@ export class QwenAiAdapter {
+       forceThinking = (this as any)._forceThinking
+     }
+ 
+-    // Always create a new chat (single-turn mode only)
+-    const chatId = await this.createChat(modelId, 'OpenAI_API_Chat')
+-    console.log('[QwenAI] Created new chat:', chatId)
++    // Reuse existing chat or create a new one
++    const existingChatId = request.providerSessionId || request.chatId
++    const chatId = existingChatId || await this.createChat(modelId, 'OpenAI_API_Chat')
++    console.log('[QwenAI] Using chat:', chatId, existingChatId ? '(reused)' : '(new)')
++
++    const parentId = request.parentMessageId || null
+ 
+     const messages = request.messages
+-    
+-    // Extract system message and user message
++
++    // Extract system message and last user message
+     let systemContent = ''
+     let userContent = ''
+-    
+-    // Single-turn mode: extract all messages
++
+     for (const msg of messages) {
+       if (msg.role === 'system') {
+         systemContent += (systemContent ? '\n\n' : '') + msg.content
+@@ -274,7 +278,7 @@ export class QwenAiAdapter {
+         userContent = msg.content
+       }
+     }
+-    
++
+     // If system prompt exists, prepend it to user content
+     if (systemContent) {
+       userContent = `${systemContent}\n\nUser: ${userContent}`
+@@ -289,10 +293,10 @@ export class QwenAiAdapter {
+     // 1. Model name suffix: -thinking (force thinking), -fast (force fast mode)
+     // 2. enable_thinking parameter for explicit control
+     // 3. If neither is specified, thinking mode is disabled by default (fast mode)
+-    const shouldEnableThinking = forceThinking !== undefined 
+-      ? forceThinking 
++    const shouldEnableThinking = forceThinking !== undefined
++      ? forceThinking
+       : request.enable_thinking === true
+-    
++
+     const featureConfig: Record<string, any> = {
+       thinking_enabled: shouldEnableThinking,
+       output_schema: 'phase',
+@@ -313,11 +317,11 @@ export class QwenAiAdapter {
+       chat_id: chatId,
+       chat_mode: 'normal',
+       model: modelId,
+-      parent_id: null,
++      parent_id: parentId,
+       messages: [
+         {
+           fid,
+-          parentId: null,
++          parentId: parentId,
+           childrenIds: [childId],
+           role: 'user',
+           content: userContent,
+@@ -329,7 +333,7 @@ export class QwenAiAdapter {
+           feature_config: featureConfig,
+           extra: { meta: { subChatType: 't2t' } },
+           sub_chat_type: 't2t',
+-          parent_id: null,
++          parent_id: parentId,
+         },
+       ],
+       timestamp: ts + 1,
+diff --git a/src/main/proxy/forwarder.ts b/src/main/proxy/forwarder.ts
+index 422a3c8..6fb6607 100644
+--- a/src/main/proxy/forwarder.ts
++++ b/src/main/proxy/forwarder.ts
+@@ -589,6 +589,8 @@ CRITICAL RULES:
+         temperature: transformedRequest.temperature,
+         web_search: transformedRequest.web_search,
+         reasoning_effort: transformedRequest.reasoning_effort,
++        providerSessionId: request.providerSessionId,
++        parentMessageId: request.parentMessageId,
+       })
+ 
+       const latency = Date.now() - startTime
+@@ -634,7 +636,8 @@ CRITICAL RULES:
+       
+       if (request.stream) {
+         const transformedStream = await handler.handleStream(response.data)
+-        
++        ;(transformedStream as any)._handler = handler
++
+         return {
+           success: true,
+           status: response.status,
+@@ -804,6 +807,8 @@ CRITICAL RULES:
+         temperature: request.temperature,
+         enableThinking: !!request.reasoning_effort,
+         enableWebSearch: !!request.web_search,
++        providerSessionId: request.providerSessionId,
++        parentMessageId: request.parentMessageId,
+       })
+ 
+       const latency = Date.now() - startTime
+@@ -837,6 +842,9 @@ CRITICAL RULES:
+           }
+         }
+         
++        // Attach handler to stream for post-stream session ID extraction
++        (transformedStream as any)._handler = handler
++
+         return {
+           success: true,
+           status: response.status,
+@@ -844,7 +852,7 @@ CRITICAL RULES:
+           stream: transformedStream,
+           skipTransform: true,
+           latency,
+-          providerSessionId: undefined,
++          providerSessionId: handler.getConversationId() || conversationId || undefined,
+         }
+       }
+ 
+@@ -992,6 +1000,8 @@ CRITICAL RULES:
+         stream: request.stream,
+         temperature: request.temperature,
+         enable_thinking: !!request.reasoning_effort,
++        providerSessionId: request.providerSessionId,
++        parentMessageId: request.parentMessageId,
+       })
+ 
+       const latency = Date.now() - startTime
+@@ -1011,6 +1021,7 @@ CRITICAL RULES:
+ 
+       if (request.stream) {
+         const transformedStream = await handler.handleStream(response.data)
++        ;(transformedStream as any)._handler = handler
+ 
+         if (shouldDeleteSession()) {
+           const originalEnd = transformedStream.end.bind(transformedStream)
+diff --git a/src/main/proxy/routes/chat.ts b/src/main/proxy/routes/chat.ts
+index cd07ce7..3d6f513 100644
+--- a/src/main/proxy/routes/chat.ts
++++ b/src/main/proxy/routes/chat.ts
+@@ -13,7 +13,9 @@ import { streamHandler } from '../stream'
+ import { proxyStatusManager } from '../status'
+ import { modelMapper } from '../modelMapper'
+ import { storeManager } from '../../store/store'
+-import { 
++import { sessionManager } from '../sessionManager'
++import type { ChatMessage as StoreChatMessage } from '../../store/types'
++import {
+   isAnthropicToolFormat,
+   transformResponseToAnthropic,
+   transformChunkToAnthropic
+@@ -165,6 +167,21 @@ router.post('/completions', async (ctx: Context) => {
+ 
+   const { account, provider, actualModel } = selection
+ 
++  // Get or create session for multi-turn conversation continuation
++  const storeMessages: StoreChatMessage[] = request.messages.map(m => ({
++    role: m.role,
++    content: m.content === null ? '' : m.content,
++    timestamp: startTime,
++  }))
++  const sessionContext = sessionManager.getOrCreateSession({
++    providerId: provider.id,
++    accountId: account.id,
++    model: request.model,
++    messages: storeMessages,
++  })
++  request.providerSessionId = sessionContext.providerSessionId
++  request.parentMessageId = sessionContext.parentMessageId
++
+   const context: ProxyContext = {
+     requestId,
+     providerId: provider.id,
+@@ -331,6 +348,14 @@ router.post('/completions', async (ctx: Context) => {
+ 
+     storeManager.recordRequestInStats(true, latency, request.model, provider.id, account.id)
+ 
++    // Update session with provider-side IDs for multi-turn continuation
++    sessionManager.updateProviderSession(
++      sessionContext.sessionId,
++      result.providerSessionId,
++      result.parentMessageId,
++      storeMessages,
++    )
++
+     if (request.stream === true && result.stream) {
+       ctx.set('Content-Type', 'text/event-stream')
+       ctx.set('Cache-Control', 'no-cache')
+@@ -391,6 +416,18 @@ router.post('/completions', async (ctx: Context) => {
+               responseBody: collectedContent || undefined,
+             })
+           }
++          // Update session with final provider IDs from stream handler
++          const handler = (result.stream as any)._handler
++          if (handler) {
++            const finalSessionId = handler.getConversationId?.() || handler.getChatId?.()
++            const finalParentId = handler.getLastMessageId?.() || handler.getResponseId?.()
++            sessionManager.updateProviderSession(
++              sessionContext.sessionId,
++              finalSessionId ?? result.providerSessionId,
++              finalParentId ?? result.parentMessageId,
++              storeMessages,
++            )
++          }
+           wrapperStream.end()
+         })
+       } else {
+diff --git a/src/main/proxy/sessionManager.ts b/src/main/proxy/sessionManager.ts
+index 200f351..74ecdb2 100644
+--- a/src/main/proxy/sessionManager.ts
++++ b/src/main/proxy/sessionManager.ts
+@@ -3,6 +3,7 @@
+  * Manages conversation sessions for stateless single-turn dialogue
+  */
+ 
++import { createHash } from 'crypto'
+ import { storeManager } from '../store/store'
+ import { SessionRecord, SessionConfig, ChatMessage, DEFAULT_SESSION_CONFIG } from '../store/types'
+ 
+@@ -11,6 +12,7 @@ export interface CreateSessionOptions {
+   accountId: string
+   model?: string
+   sessionType?: 'chat' | 'agent'
++  messages?: ChatMessage[]
+ }
+ 
+ export interface SessionContext {
+@@ -21,6 +23,21 @@ export interface SessionContext {
+   isNew: boolean
+ }
+ 
++export function computeHistoryHash(messages: ChatMessage[]): string | undefined {
++  if (!messages || messages.length === 0) return undefined
++
++  // Hash the first user message as a stable conversation identifier.
++  // This stays constant across all turns, unlike hashing the full prefix.
++  const firstUserMsg = messages.find(m => m.role === 'user')
++  if (!firstUserMsg) return undefined
++
++  const content = typeof firstUserMsg.content === 'string'
++    ? firstUserMsg.content
++    : JSON.stringify(firstUserMsg.content)
++
++  return createHash('md5').update(`${firstUserMsg.role}:${content}`).digest('hex')
++}
++
+ class SessionManagerClass {
+   private cleanupInterval: NodeJS.Timeout | null = null
+ 
+@@ -39,11 +56,11 @@ class SessionManagerClass {
+ 
+   private startCleanupScheduler(): void {
+     const CLEANUP_INTERVAL_MS = 60 * 1000
+-    
++
+     this.cleanupInterval = setInterval(() => {
+       this.cleanExpiredSessions()
+     }, CLEANUP_INTERVAL_MS)
+-    
++
+     console.log('[SessionManager] Cleanup scheduler started, interval: 1 minute')
+   }
+ 
+@@ -58,26 +75,66 @@ class SessionManagerClass {
+   }
+ 
+   getOrCreateSession(options: CreateSessionOptions): SessionContext {
+-    const { providerId, accountId, model } = options
+-    
++    const { providerId, accountId, model, messages } = options
++
++    // Compute hash from shared message prefix to find matching sessions
++    const hash = computeHistoryHash(messages || [])
++
++    // 1) Look up by history hash — matches an ongoing conversation
++    if (hash) {
++      const sessions = storeManager.getSessionsByProviderId(providerId)
++      const config = this.getSessionConfig()
++      const timeoutMs = config.sessionTimeout * 60 * 1000
++      const now = Date.now()
++
++      const matched = sessions.find(s =>
++        s.accountId === accountId &&
++        s.status === 'active' &&
++        s.historyHash === hash &&
++        (now - s.lastActiveAt) < timeoutMs
++      )
++
++      if (matched) {
++        matched.lastActiveAt = now
++        matched.messages = messages || matched.messages
++        return {
++          sessionId: matched.id,
++          providerSessionId: matched.providerSessionId,
++          parentMessageId: matched.parentMessageId,
++          messages: matched.messages,
++          isNew: false,
++        }
++      }
++    }
++
++    // 2) Fall back to active session for this provider+account (backward compat)
+     const existingSession = this.getActiveSession(providerId, accountId)
+-    
+     if (existingSession) {
++      existingSession.messages = messages || existingSession.messages
++      if (hash) {
++        existingSession.historyHash = hash
++      }
+       return {
+         sessionId: existingSession.id,
+-        providerSessionId: undefined,
+-        parentMessageId: undefined,
++        providerSessionId: existingSession.providerSessionId,
++        parentMessageId: existingSession.parentMessageId,
+         messages: existingSession.messages,
+         isNew: false,
+       }
+     }
+-    
++
++    // 3) Create a brand-new session
+     const newSession = this.createSession({
+       providerId,
+       accountId,
+       model,
++      messages: messages || [],
+     })
+-    
++
++    if (hash) {
++      newSession.historyHash = hash
++    }
++
+     return {
+       sessionId: newSession.id,
+       providerSessionId: undefined,
+@@ -87,6 +144,27 @@ class SessionManagerClass {
+     }
+   }
+ 
++  updateProviderSession(
++    sessionId: string,
++    providerSessionId: string | undefined,
++    parentMessageId: string | undefined,
++    messages?: ChatMessage[],
++  ): void {
++    const session = storeManager.getSessionById(sessionId)
++    if (!session) return
++
++    session.providerSessionId = providerSessionId || session.providerSessionId
++    session.parentMessageId = parentMessageId || session.parentMessageId
++    if (messages) {
++      session.messages = messages
++      const hash = computeHistoryHash(messages)
++      if (hash) {
++        session.historyHash = hash
++      }
++    }
++    session.lastActiveAt = Date.now()
++  }
++
+   getActiveSession(providerId: string, accountId: string): SessionRecord | undefined {
+     const sessions = storeManager.getSessionsByProviderId(providerId)
+     const accountSessions = sessions.filter(s => s.accountId === accountId)
+@@ -101,15 +179,15 @@ class SessionManagerClass {
+   }
+ 
+   createSession(options: CreateSessionOptions): SessionRecord {
+-    const { providerId, accountId, model, sessionType = 'chat' } = options
++    const { providerId, accountId, model, sessionType = 'chat', messages } = options
+     const now = Date.now()
+-    
++
+     const session: SessionRecord = {
+       id: this.generateSessionId(),
+       providerId,
+       accountId,
+       sessionType,
+-      messages: [],
++      messages: messages || [],
+       createdAt: now,
+       lastActiveAt: now,
+       status: 'active',
+diff --git a/src/main/proxy/types.ts b/src/main/proxy/types.ts
+index 2320b96..90a2f32 100644
+--- a/src/main/proxy/types.ts
++++ b/src/main/proxy/types.ts
+@@ -102,6 +102,10 @@ export interface ChatCompletionRequest {
+   tool_choice?: ChatCompletionToolChoice
+   /** Tool format - determines response format for tool calls */
+   tool_format?: 'native' | 'json' | 'auto'
++  /** Provider-side session ID (for multi-turn conversation continuation) */
++  providerSessionId?: string
++  /** Provider-side last message ID (for parent_message_id injection) */
++  parentMessageId?: string
+ }
+ 
+ /**
+diff --git a/src/main/store/types.ts b/src/main/store/types.ts
+index 4d69ea6..018feb5 100644
+--- a/src/main/store/types.ts
++++ b/src/main/store/types.ts
+@@ -322,6 +322,12 @@ export interface SessionRecord {
+     title?: string
+     tokenCount?: number
+   }
++  /** Provider-side session/conversation ID */
++  providerSessionId?: string
++  /** Provider-side last message ID (for parent_message_id) */
++  parentMessageId?: string
++  /** History fingerprint for session lookup */
++  historyHash?: string
+ }
+ 
+ /**
+diff --git a/src/renderer/src/types/electron.d.ts b/src/renderer/src/types/electron.d.ts
+index 91ebc24..67257e9 100644
+--- a/src/renderer/src/types/electron.d.ts
++++ b/src/renderer/src/types/electron.d.ts
+@@ -299,14 +299,19 @@ interface SessionRecord {
+   id: string
+   providerId: string
+   accountId: string
+-  providerSessionId: string
++  providerSessionId?: string
+   parentMessageId?: string
++  historyHash?: string
+   sessionType: 'chat' | 'agent'
+   messages: any[]
+   createdAt: number
+   lastActiveAt: number
+   status: 'active' | 'expired' | 'deleted'
+   model?: string
++  metadata?: {
++    title?: string
++    tokenCount?: number
++  }
+ }
+ 
+ interface SessionAPI {
+diff --git a/tests/session-manager.test.ts b/tests/session-manager.test.ts
+new file mode 100644
+index 0000000..012a0e6
+--- /dev/null
++++ b/tests/session-manager.test.ts
+@@ -0,0 +1,472 @@
++/**
++ * Session Manager Test Suite
++ *
++ * Tests computeHistoryHash and sessionManager multi-turn conversation flow.
++ * Mocks storeManager since Electron is not available in test environment.
++ *
++ * Run: npx -y tsx tests/session-manager.test.ts
++ */
++
++// ─── Mock StoreManager ──────────────────────────────────────────────────────────
++
++interface MockSessionRecord {
++  id: string
++  providerId: string
++  accountId: string
++  sessionType: 'chat' | 'agent'
++  messages: Array<{ role: string; content: string | any[]; timestamp: number; providerMessageId?: string; toolCallId?: string }>
++  createdAt: number
++  lastActiveAt: number
++  status: 'active' | 'expired' | 'deleted'
++  model?: string
++  metadata?: { title?: string; tokenCount?: number }
++  providerSessionId?: string
++  parentMessageId?: string
++  historyHash?: string
++}
++
++const mockSessions: MockSessionRecord[] = []
++let mockConfig = {
++  sessionTimeout: 30,
++  maxMessagesPerSession: 50,
++  deleteAfterTimeout: false,
++  maxSessionsPerAccount: 3,
++}
++
++const mockStoreManager = {
++  getSessionConfig: () => mockConfig,
++  updateSessionConfig: (updates: Partial<typeof mockConfig>) => {
++    Object.assign(mockConfig, updates)
++    return mockConfig
++  },
++  getSessionsByProviderId: (providerId: string) =>
++    mockSessions.filter(s => s.providerId === providerId),
++  getSessionById: (id: string) =>
++    mockSessions.find(s => s.id === id),
++  getActiveSessions: () =>
++    mockSessions.filter(s => s.status === 'active'),
++  addSession: (session: MockSessionRecord) => {
++    mockSessions.push(session)
++  },
++  deleteSession: (id: string) => {
++    const idx = mockSessions.findIndex(s => s.id === id)
++    if (idx !== -1) {
++      mockSessions.splice(idx, 1)
++      return true
++    }
++    return false
++  },
++  cleanExpiredSessions: () => {
++    const timeoutMs = mockConfig.sessionTimeout * 60 * 1000
++    const now = Date.now()
++    const before = mockSessions.length
++    for (let i = mockSessions.length - 1; i >= 0; i--) {
++      const s = mockSessions[i]
++      if (s.status === 'active' && (now - s.lastActiveAt) >= timeoutMs) {
++        s.status = 'expired'
++      }
++    }
++    return before - mockSessions.filter(s => s.status === 'active').length
++  },
++  clearAllSessions: () => { mockSessions.length = 0 },
++  getSessionsByAccountId: (accountId: string) =>
++    mockSessions.filter(s => s.accountId === accountId),
++  getSessions: () => mockSessions,
++}
++
++// ─── Import computeHistoryHash (pure function, no Electron dependency) ──────────
++
++// We can't directly import from src/main due to Electron deps,
++// so we copy the function here for pure testing.
++
++import { createHash } from 'crypto'
++
++interface ChatMessage {
++  role: 'user' | 'assistant' | 'system' | 'tool'
++  content: string | any[]
++  timestamp: number
++  providerMessageId?: string
++  toolCallId?: string
++}
++
++function computeHistoryHash(messages: ChatMessage[]): string | undefined {
++  if (!messages || messages.length === 0) return undefined
++
++  // Hash the first user message as a stable conversation identifier.
++  const firstUserMsg = messages.find(m => m.role === 'user')
++  if (!firstUserMsg) return undefined
++
++  const content = typeof firstUserMsg.content === 'string'
++    ? firstUserMsg.content
++    : JSON.stringify(firstUserMsg.content)
++
++  return createHash('md5').update(`${firstUserMsg.role}:${content}`).digest('hex')
++}
++
++// ─── Tests ─────────────────────────────────────────────────────────────────────
++
++const passed: string[] = []
++const failed: string[] = []
++
++function assert(condition: boolean, name: string, detail?: string): void {
++  if (condition) {
++    passed.push(name)
++  } else {
++    failed.push(`FAIL: ${name}${detail ? ` — ${detail}` : ''}`)
++  }
++}
++
++function assertEqual<T>(actual: T, expected: T, name: string): void {
++  const ok = JSON.stringify(actual) === JSON.stringify(expected)
++  if (ok) {
++    passed.push(name)
++  } else {
++    failed.push(`FAIL: ${name} — expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`)
++  }
++}
++
++// ─── 1) computeHistoryHash ─────────────────────────────────────────────────────
++
++// Empty array returns undefined
++assert(
++  computeHistoryHash([]) === undefined,
++  'empty array → undefined'
++)
++
++// Single user message returns hash of that message
++const h1 = computeHistoryHash([
++  { role: 'user', content: 'Hello', timestamp: 1 },
++])
++assert(
++  h1 !== undefined && h1.length === 32,
++  'single user message → valid MD5 hash'
++)
++
++// Multiple messages — still hashes first user message
++const h2a = computeHistoryHash([
++  { role: 'system', content: 'You are helpful', timestamp: 1 },
++  { role: 'user', content: 'Hello', timestamp: 2 },
++])
++const h2b = computeHistoryHash([
++  { role: 'user', content: 'Hello', timestamp: 1 },
++  { role: 'assistant', content: 'Hi!', timestamp: 2 },
++  { role: 'user', content: 'How are you?', timestamp: 3 },
++])
++assertEqual(h2a, h2b, 'same first user message → same hash regardless of later messages')
++
++// Different first user message → different hash
++const h3 = computeHistoryHash([
++  { role: 'user', content: 'Different', timestamp: 1 },
++])
++assert(
++  h3 !== h2a,
++  'different first user message → different hash'
++)
++
++// No user messages → undefined
++const h4 = computeHistoryHash([
++  { role: 'system', content: 'System prompt', timestamp: 1 },
++  { role: 'assistant', content: 'Response', timestamp: 2 },
++])
++assert(
++  h4 === undefined,
++  'no user message → undefined'
++)
++
++// Content is array (multimodal)
++const h5 = computeHistoryHash([
++  { role: 'user', content: [{ type: 'text', text: 'Describe this' }], timestamp: 1 },
++])
++assert(
++  h5 !== undefined && h5.length === 32,
++  'multimodal content (array) → valid hash'
++)
++
++// Null content
++const h6 = computeHistoryHash([
++  { role: 'user', content: null as any, timestamp: 1 },
++])
++assert(
++  h6 !== undefined,
++  'null content → still produces hash (from stringified)'
++)
++
++// ─── 2) Session flow simulation (mock-based) ────────────────────────────────────
++
++// Replicate sessionManager logic with mock store
++
++let nextId = 1
++function generateSessionId(): string {
++  return `session-test-${nextId++}`
++}
++
++function getActiveSession(providerId: string, accountId: string): MockSessionRecord | undefined {
++  const sessions = mockStoreManager.getSessionsByProviderId(providerId)
++  const accountSessions = sessions.filter(s => s.accountId === accountId)
++  const config = mockStoreManager.getSessionConfig()
++  const timeoutMs = config.sessionTimeout * 60 * 1000
++  const now = Date.now()
++
++  return accountSessions.find(s =>
++    s.status === 'active' &&
++    (now - s.lastActiveAt) < timeoutMs
++  )
++}
++
++function getOrCreateSession(options: {
++  providerId: string
++  accountId: string
++  model?: string
++  messages?: ChatMessage[]
++}): {
++  sessionId: string
++  providerSessionId: string | undefined
++  parentMessageId: string | undefined
++  messages: ChatMessage[]
++  isNew: boolean
++} {
++  const { providerId, accountId, model, messages } = options
++  const hash = computeHistoryHash(messages || [])
++
++  // 1) Hash lookup
++  if (hash) {
++    const sessions = mockStoreManager.getSessionsByProviderId(providerId)
++    const config = mockStoreManager.getSessionConfig()
++    const timeoutMs = config.sessionTimeout * 60 * 1000
++    const now = Date.now()
++
++    const matched = sessions.find(s =>
++      s.accountId === accountId &&
++      s.status === 'active' &&
++      s.historyHash === hash &&
++      (now - s.lastActiveAt) < timeoutMs
++    )
++
++    if (matched) {
++      matched.lastActiveAt = now
++      matched.messages = messages || matched.messages
++      return {
++        sessionId: matched.id,
++        providerSessionId: matched.providerSessionId,
++        parentMessageId: matched.parentMessageId,
++        messages: matched.messages,
++        isNew: false,
++      }
++    }
++  }
++
++  // 2) Fallback to active session
++  const existingSession = getActiveSession(providerId, accountId)
++  if (existingSession) {
++    existingSession.messages = messages || existingSession.messages
++    if (hash) {
++      existingSession.historyHash = hash
++    }
++    return {
++      sessionId: existingSession.id,
++      providerSessionId: existingSession.providerSessionId,
++      parentMessageId: existingSession.parentMessageId,
++      messages: existingSession.messages,
++      isNew: false,
++    }
++  }
++
++  // 3) Create new
++  const session: MockSessionRecord = {
++    id: generateSessionId(),
++    providerId,
++    accountId,
++    sessionType: 'chat',
++    messages: messages || [],
++    createdAt: Date.now(),
++    lastActiveAt: Date.now(),
++    status: 'active',
++    model,
++  }
++  if (hash) {
++    session.historyHash = hash
++  }
++
++  mockStoreManager.addSession(session)
++  return {
++    sessionId: session.id,
++    providerSessionId: undefined,
++    parentMessageId: undefined,
++    messages: session.messages,
++    isNew: true,
++  }
++}
++
++function updateProviderSession(
++  sessionId: string,
++  providerSessionId: string | undefined,
++  parentMessageId: string | undefined,
++  messages?: ChatMessage[],
++): void {
++  const session = mockStoreManager.getSessionById(sessionId)
++  if (!session) return
++
++  session.providerSessionId = providerSessionId || session.providerSessionId
++  session.parentMessageId = parentMessageId || session.parentMessageId
++  if (messages) {
++    session.messages = messages
++    const hash = computeHistoryHash(messages)
++    if (hash) {
++      session.historyHash = hash
++    }
++  }
++  session.lastActiveAt = Date.now()
++}
++
++// Reset state before session flow tests
++mockSessions.length = 0
++nextId = 1
++mockConfig.sessionTimeout = 30
++
++// Test: First request creates new session
++{
++  const ctx1 = getOrCreateSession({
++    providerId: 'deepseek',
++    accountId: 'account-1',
++    model: 'deepseek-chat',
++    messages: [{ role: 'user', content: 'Hello', timestamp: 1 }],
++  })
++  assert(ctx1.isNew, 'first request → new session')
++  assert(ctx1.providerSessionId === undefined, 'first request → no providerSessionId')
++  assert(mockSessions.length === 1, 'first request → one session in store')
++}
++
++// Test: Second request with same first user message → hash match (or fallback)
++{
++  const ctx2 = getOrCreateSession({
++    providerId: 'deepseek',
++    accountId: 'account-1',
++    model: 'deepseek-chat',
++    messages: [
++      { role: 'user', content: 'Hello', timestamp: 1 },
++      { role: 'assistant', content: 'Hi!', timestamp: 2 },
++      { role: 'user', content: 'How are you?', timestamp: 3 },
++    ],
++  })
++  assert(!ctx2.isNew, 'second request → reused session')
++  assert(mockSessions.length === 1, 'second request → still one session')
++}
++
++// Test: After response, updateProviderSession stores provider IDs
++{
++  const session = mockSessions[0]
++  updateProviderSession(
++    session.id,
++    'upstream-session-123',
++    'upstream-msg-456',
++    [
++      { role: 'user', content: 'Hello', timestamp: 1 },
++      { role: 'assistant', content: 'Hi!', timestamp: 2 },
++      { role: 'user', content: 'How are you?', timestamp: 3 },
++    ],
++  )
++  assert(session.providerSessionId === 'upstream-session-123', 'update stores providerSessionId')
++  assert(session.parentMessageId === 'upstream-msg-456', 'update stores parentMessageId')
++  assert(session.historyHash !== undefined, 'update sets historyHash')
++}
++
++// Test: Third request with same first user message → hash match returns stored IDs
++{
++  const ctx3 = getOrCreateSession({
++    providerId: 'deepseek',
++    accountId: 'account-1',
++    model: 'deepseek-chat',
++    messages: [
++      { role: 'user', content: 'Hello', timestamp: 1 },
++      { role: 'assistant', content: 'Hi!', timestamp: 2 },
++      { role: 'user', content: 'How are you?', timestamp: 3 },
++      { role: 'assistant', content: 'I am fine!', timestamp: 4 },
++      { role: 'user', content: 'Tell me a joke', timestamp: 5 },
++    ],
++  })
++  assert(!ctx3.isNew, 'third request → reused session')
++  assert(ctx3.providerSessionId === 'upstream-session-123', 'third request → has stored providerSessionId')
++  assert(ctx3.parentMessageId === 'upstream-msg-456', 'third request → has stored parentMessageId')
++}
++
++// Test: Different account → different session
++{
++  const ctx4 = getOrCreateSession({
++    providerId: 'deepseek',
++    accountId: 'account-2',
++    model: 'deepseek-chat',
++    messages: [{ role: 'user', content: 'Hello', timestamp: 1 }],
++  })
++  assert(ctx4.isNew, 'different account → new session')
++  assert(ctx4.providerSessionId === undefined, 'different account → no providerSessionId')
++  assert(mockSessions.length === 2, 'different account → two sessions total')
++}
++
++// Test: Different provider → different session
++{
++  const ctx5 = getOrCreateSession({
++    providerId: 'kimi',
++    accountId: 'account-1',
++    model: 'kimi-k2',
++    messages: [{ role: 'user', content: 'Hello', timestamp: 1 }],
++  })
++  assert(ctx5.isNew, 'different provider → new session')
++  assert(mockSessions.length === 3, 'different provider → three sessions total')
++}
++
++// Test: updateProviderSession with falsy IDs preserves existing
++{
++  const session = mockSessions[0]
++  const before = { ...session }
++  updateProviderSession(session.id, undefined, undefined)
++  assert(session.providerSessionId === before.providerSessionId, 'undefined providerSessionId → preserves existing')
++  assert(session.parentMessageId === before.parentMessageId, 'undefined parentMessageId → preserves existing')
++}
++
++// Test: updateProviderSession with non-existent session does nothing
++{
++  updateProviderSession('non-existent-id', 'foo', 'bar')
++  assert(true, 'update of non-existent session → no crash') // should not throw
++}
++
++// Test: Session timeout — expired session not matched
++{
++  // Create a session in the past
++  const oldSession: MockSessionRecord = {
++    id: 'old-session',
++    providerId: 'deepseek',
++    accountId: 'account-3',
++    sessionType: 'chat',
++    messages: [{ role: 'user', content: 'Old', timestamp: 1 }],
++    createdAt: Date.now() - 3600000,
++    lastActiveAt: Date.now() - 3600000,
++    status: 'active',
++    historyHash: computeHistoryHash([{ role: 'user', content: 'Old', timestamp: 1 }]),
++  }
++  mockSessions.push(oldSession)
++
++  const ctx = getOrCreateSession({
++    providerId: 'deepseek',
++    accountId: 'account-3',
++    messages: [{ role: 'user', content: 'Old', timestamp: 1 }],
++  })
++  // The old session should be filtered out due to timeout, so a new one is created
++  // But with matching hash on a timed-out session, we fall through to getActiveSession
++  // which also filters by timeout, so we create new
++  assert(ctx.isNew, 'expired session → new session created')
++}
++
++// ─── Report ─────────────────────────────────────────────────────────────────────
++
++console.log('')
++console.log(`Passed: ${passed.length}`)
++console.log(`Failed: ${failed.length}`)
++if (failed.length > 0) {
++  console.log('')
++  for (const f of failed) {
++    console.log(`  ${f}`)
++  }
++  process.exit(1)
++} else {
++  console.log('All session manager tests passed!')
++}

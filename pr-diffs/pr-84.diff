@@ -1,0 +1,149 @@
+diff --git a/src/main/proxy/loadbalancer.ts b/src/main/proxy/loadbalancer.ts
+index 9124cd3..5d47f71 100644
+--- a/src/main/proxy/loadbalancer.ts
++++ b/src/main/proxy/loadbalancer.ts
+@@ -233,17 +233,62 @@ export class LoadBalancer {
+ 
+   /**
+    * Round Robin strategy
++   * Uses two-level round-robin: provider level + account level.
++   * At account level, uses weighted random when weights are configured.
+    */
+   private selectRoundRobin(candidates: AccountSelection[]): AccountSelection {
+-    const providerIds = [...new Set(candidates.map(c => c.provider.id))]
+-    const key = providerIds.join(',')
++    // Group candidates by provider (preserve insertion order)
++    const byProvider = new Map<string, AccountSelection[]>()
++    const providerIds: string[] = []
++    for (const c of candidates) {
++      if (!byProvider.has(c.provider.id)) {
++        byProvider.set(c.provider.id, [])
++        providerIds.push(c.provider.id)
++      }
++      byProvider.get(c.provider.id)!.push(c)
++    }
++
++    // Provider-level round-robin
++    const providerKey = providerIds.join(',')
++    const providerIdx = this.roundRobinIndex.get(providerKey) || 0
++    const chosenProviderId = providerIds[providerIdx % providerIds.length]
++    this.roundRobinIndex.set(providerKey, providerIdx + 1)
++
++    // Account-level: weighted random
++    const providerAccounts = byProvider.get(chosenProviderId)!
++    return this.selectWeightedAccount(providerAccounts, chosenProviderId)
++  }
++
++  /**
++   * Weighted random account selection.
++   * Each account is selected with probability proportional to its configured weight.
++   * Stateless — immune to dynamic pool changes (accounts entering/leaving).
++   */
++  private selectWeightedAccount(
++    accounts: AccountSelection[],
++    providerId: string
++  ): AccountSelection {
++    if (accounts.length === 1) {
++      return accounts[0]
++    }
+ 
+-    const currentIndex = this.roundRobinIndex.get(key) || 0
+-    const selected = candidates[currentIndex % candidates.length]
++    const config = storeManager.getConfig()
++    const weights = config.accountWeights || {}
+ 
+-    this.roundRobinIndex.set(key, (currentIndex + 1) % candidates.length)
++    let totalWeight = 0
++    for (const a of accounts) {
++      totalWeight += Math.max(weights[a.account.id] ?? 100, 5)
++    }
++
++    let random = Math.random() * totalWeight
++    for (const a of accounts) {
++      random -= Math.max(weights[a.account.id] ?? 100, 5)
++      if (random <= 0) {
++        return a
++      }
++    }
+ 
+-    return selected
++    return accounts[accounts.length - 1]
+   }
+ 
+   /**
+diff --git a/src/main/store/types.ts b/src/main/store/types.ts
+index 4d69ea6..53bae32 100644
+--- a/src/main/store/types.ts
++++ b/src/main/store/types.ts
+@@ -179,6 +179,8 @@ export interface AppConfig {
+   proxyHost: string
+   /** Load balance strategy */
+   loadBalanceStrategy: LoadBalanceStrategy
++  /** Account weights for weighted random selection (accountId → weight, 0-100) */
++  accountWeights: Record<string, number>
+   /** Model mapping configuration */
+   modelMappings: Record<string, ModelMapping>
+   /** UI theme */
+@@ -731,6 +733,7 @@ export const DEFAULT_CONFIG: AppConfig = {
+   proxyPort: 8080,
+   proxyHost: '127.0.0.1',
+   loadBalanceStrategy: 'round-robin',
++  accountWeights: {},
+   modelMappings: {},
+   theme: 'system',
+   autoStart: false,
+diff --git a/src/renderer/src/components/proxy/LoadBalanceConfig.tsx b/src/renderer/src/components/proxy/LoadBalanceConfig.tsx
+index ca66ad3..13b1967 100644
+--- a/src/renderer/src/components/proxy/LoadBalanceConfig.tsx
++++ b/src/renderer/src/components/proxy/LoadBalanceConfig.tsx
+@@ -92,8 +92,15 @@ export function LoadBalanceConfig({ onConfigChange }: LoadBalanceConfigProps) {
+     setLoadBalanceStrategy(selectedStrategy)
+     setAccountWeights(weights)
+     
++    // Convert AccountWeight[] to Record<string, number> for backend storage
++    const weightsRecord: Record<string, number> = {}
++    for (const w of weights) {
++      weightsRecord[w.accountId] = w.weight
++    }
++
+     const success = await saveAppConfig({
+       loadBalanceStrategy: selectedStrategy,
++      accountWeights: weightsRecord,
+     })
+ 
+     if (success) {
+diff --git a/src/renderer/src/stores/proxyStore.ts b/src/renderer/src/stores/proxyStore.ts
+index 7390e6f..4424894 100644
+--- a/src/renderer/src/stores/proxyStore.ts
++++ b/src/renderer/src/stores/proxyStore.ts
+@@ -167,9 +167,17 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
+       set({ isLoading: true })
+       const config = await window.electronAPI.store.get<AppConfig>('config')
+       if (config) {
++        // Restore account weights from backend
++        const weights = config.accountWeights || {}
++        const accountWeights = Object.entries(weights).map(([accountId, weight]) => ({
++          accountId,
++          weight,
++        }))
++
+         set({
+           appConfig: config,
+           loadBalanceStrategy: config.loadBalanceStrategy,
++          accountWeights,
+           modelMappings: Object.values(config.modelMappings || {}),
+           proxyConfig: {
+             ...DEFAULT_PROXY_CONFIG,
+diff --git a/src/shared/types.ts b/src/shared/types.ts
+index e6a649f..851c4af 100644
+--- a/src/shared/types.ts
++++ b/src/shared/types.ts
+@@ -87,6 +87,8 @@ export interface AppConfig {
+   proxyPort: number
+   proxyHost: string
+   loadBalanceStrategy: LoadBalanceStrategy
++  /** Account weights for weighted random selection (accountId → weight, 0-100) */
++  accountWeights: Record<string, number>
+   modelMappings: Record<string, ModelMapping>
+   theme: Theme
+   autoStart: boolean

@@ -1,0 +1,959 @@
+diff --git a/src/main/index.ts b/src/main/index.ts
+index 5d6163e..ef31d5e 100644
+--- a/src/main/index.ts
++++ b/src/main/index.ts
+@@ -5,6 +5,7 @@ import { createTrayManager, TrayManager } from './tray/TrayManager'
+ import { registerIpcHandlers } from './ipc/handlers'
+ import { UpdaterManager } from './updater'
+ import { storeManager } from './store/store'
++import { logManager } from './logger/manager'
+ 
+ // Prevent uncaught exceptions from crashing the app
+ process.on('uncaughtException', (error) => {
+@@ -126,6 +127,7 @@ async function loadAppContent(mainWindow: BrowserWindow): Promise<void> {
+ 
+ function cleanup(): void {
+   console.log('Application is exiting, performing cleanup...')
++  logManager.flush()
+   storeManager.flushPendingWrites()
+   const updaterManager = UpdaterManager.getInstance()
+   updaterManager.destroy()
+diff --git a/src/main/ipc/handlers.ts b/src/main/ipc/handlers.ts
+index d9abe85..39539ad 100644
+--- a/src/main/ipc/handlers.ts
++++ b/src/main/ipc/handlers.ts
+@@ -193,16 +193,30 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow | null): Pro
+   })
+ 
+   ipcMain.handle(IpcChannels.STORE_GET, async (_, key: string): Promise<unknown> => {
++    if (key === 'logs' || key === 'requestLogs') {
++      const logsStore = storeManager.getLogsStore()
++      return logsStore?.get(key)
++    }
+     const store = storeManager.getStore()
+     return store?.get(key)
+   })
+ 
+   ipcMain.handle(IpcChannels.STORE_SET, async (_, key: string, value: unknown): Promise<void> => {
++    if (key === 'logs' || key === 'requestLogs') {
++      const logsStore = storeManager.getLogsStore()
++      logsStore?.set(key as 'logs', value as never)
++      return
++    }
+     const store = storeManager.getStore()
+     store?.set(key as 'providers' | 'accounts' | 'config' | 'logs', value as never)
+   })
+ 
+   ipcMain.handle(IpcChannels.STORE_DELETE, async (_, key: string): Promise<void> => {
++    if (key === 'logs' || key === 'requestLogs') {
++      const logsStore = storeManager.getLogsStore()
++      logsStore?.delete(key as 'logs')
++      return
++    }
+     const store = storeManager.getStore()
+     store?.delete(key as 'providers' | 'accounts' | 'config' | 'logs')
+   })
+diff --git a/src/main/logger/manager.ts b/src/main/logger/manager.ts
+index 6fe60dd..f21a5af 100644
+--- a/src/main/logger/manager.ts
++++ b/src/main/logger/manager.ts
+@@ -31,20 +31,23 @@ interface LogTrend {
+ 
+ class LogManager {
+   private logs: LogEntry[] = []
++  private pendingLogs: LogEntry[] = []
+   private logFile: string
+   private maxLogs: number = 10000
+   private retentionDays: number = 7
+   private initialized: boolean = false
+   private mainWindow: BrowserWindow | null = null
++  private saveTimer: NodeJS.Timeout | null = null
++  private readonly saveDelayMs = 2000
+ 
+   constructor() {
+     const userDataPath = app.getPath('userData')
+     const logDir = path.join(userDataPath, 'logs')
+-    
++
+     if (!fs.existsSync(logDir)) {
+       fs.mkdirSync(logDir, { recursive: true })
+     }
+-    
++
+     this.logFile = path.join(logDir, 'app.log')
+   }
+ 
+@@ -116,18 +119,48 @@ class LogManager {
+     }
+ 
+     this.logs.push(entry)
++    this.pendingLogs.push(entry)
+ 
+     if (this.logs.length > this.maxLogs) {
+       this.logs = this.logs.slice(-this.maxLogs)
+     }
+ 
+-    this.saveLogs().catch(console.error)
++    this.scheduleSave()
+ 
+     this.mainWindow?.webContents.send(IpcChannels.LOGS_NEW_LOG, entry)
+ 
+     return entry
+   }
+ 
++  private scheduleSave(): void {
++    if (this.saveTimer) {
++      clearTimeout(this.saveTimer)
++    }
++
++    this.saveTimer = setTimeout(() => {
++      this.saveTimer = null
++      this.flushLogs()
++    }, this.saveDelayMs)
++  }
++
++  private flushLogs(): void {
++    if (this.pendingLogs.length === 0) return
++
++    const toWrite = this.pendingLogs
++    this.pendingLogs = []
++
++    const content = toWrite.map(log => JSON.stringify(log)).join('\n') + '\n'
++    fs.appendFileSync(this.logFile, content, 'utf-8')
++  }
++
++  async flush(): Promise<void> {
++    if (this.saveTimer) {
++      clearTimeout(this.saveTimer)
++      this.saveTimer = null
++    }
++    this.flushLogs()
++  }
++
+   info(message: string, data?: Parameters<LogManager['log']>[2]): LogEntry {
+     return this.log('info', message, data)
+   }
+@@ -223,14 +256,20 @@ class LogManager {
+ 
+   async clearLogs(): Promise<void> {
+     this.logs = []
++    this.pendingLogs = []
++    if (this.saveTimer) {
++      clearTimeout(this.saveTimer)
++      this.saveTimer = null
++    }
+     await this.saveLogs()
+   }
+ 
+   async cleanOldLogs(): Promise<void> {
+     const now = Date.now()
+     const retentionMs = this.retentionDays * 24 * 60 * 60 * 1000
+-    
++
+     this.logs = this.logs.filter(log => now - log.timestamp < retentionMs)
++    this.pendingLogs = this.pendingLogs.filter(log => now - log.timestamp < retentionMs)
+     await this.saveLogs()
+   }
+ 
+diff --git a/src/main/proxy/routes/completions.ts b/src/main/proxy/routes/completions.ts
+index 1924a86..7c3c27b 100644
+--- a/src/main/proxy/routes/completions.ts
++++ b/src/main/proxy/routes/completions.ts
+@@ -5,6 +5,7 @@
+ 
+ import Router from '@koa/router'
+ import type { Context } from 'koa'
++import { PassThrough } from 'stream'
+ import { loadBalancer } from '../loadbalancer'
+ import { requestForwarder } from '../forwarder'
+ import { streamHandler } from '../stream'
+@@ -33,6 +34,16 @@ function generateRequestId(): string {
+   return `cmpl-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+ }
+ 
++/**
++ * Extract user input from prompt
++ */
++function extractUserInput(prompt: string | string[]): string | undefined {
++  if (Array.isArray(prompt)) {
++    return prompt.filter(p => p).join(' ')
++  }
++  return prompt || undefined
++}
++
+ /**
+  * Convert prompt to messages format
+  */
+@@ -159,6 +170,37 @@ router.post('/completions', async (ctx: Context) => {
+           type: 'api_error',
+         },
+       }
++
++      storeManager.addLog('error', `Request failed: ${result.error}`, {
++        requestId,
++        providerId: provider.id,
++        accountId: account.id,
++        model: request.model,
++        latency,
++      })
++
++      storeManager.addRequestLog({
++        timestamp: startTime,
++        status: 'error',
++        statusCode: result.status || 500,
++        method: 'POST',
++        url: '/v1/completions',
++        model: request.model,
++        actualModel,
++        providerId: provider.id,
++        providerName: provider.name,
++        accountId: account.id,
++        accountName: account.name,
++        requestBody: JSON.stringify(request),
++        userInput: extractUserInput(request.prompt),
++        responseStatus: result.status || 500,
++        latency,
++        isStream: request.stream || false,
++        errorMessage: result.error,
++      })
++
++      storeManager.recordRequestInStats(false, latency, request.model, provider.id, account.id)
++
+       return
+     }
+ 
+@@ -180,6 +222,58 @@ router.post('/completions', async (ctx: Context) => {
+       isStream: request.stream,
+     })
+ 
++    const userInput = extractUserInput(request.prompt)
++    const responseBodyForLog = !request.stream && result.body
++      ? JSON.stringify(result.body)
++      : undefined
++
++    let logEntryId: string | undefined
++
++    if (!request.stream) {
++      const logEntry = storeManager.addRequestLog({
++        timestamp: startTime,
++        status: 'success',
++        statusCode: 200,
++        method: 'POST',
++        url: '/v1/completions',
++        model: request.model,
++        actualModel,
++        providerId: provider.id,
++        providerName: provider.name,
++        accountId: account.id,
++        accountName: account.name,
++        requestBody: JSON.stringify(request),
++        userInput,
++        responseStatus: 200,
++        responseBody: responseBodyForLog,
++        latency,
++        isStream: false,
++      })
++      logEntryId = logEntry.id
++    } else {
++      const logEntry = storeManager.addRequestLog({
++        timestamp: startTime,
++        status: 'success',
++        statusCode: 200,
++        method: 'POST',
++        url: '/v1/completions',
++        model: request.model,
++        actualModel,
++        providerId: provider.id,
++        providerName: provider.name,
++        accountId: account.id,
++        accountName: account.name,
++        requestBody: JSON.stringify(request),
++        userInput,
++        responseStatus: 200,
++        latency,
++        isStream: true,
++      })
++      logEntryId = logEntry.id
++    }
++
++    storeManager.recordRequestInStats(true, latency, request.model, provider.id, account.id)
++
+     if (request.stream && result.stream) {
+       ctx.set('Content-Type', 'text/event-stream')
+       ctx.set('Cache-Control', 'no-cache')
+@@ -187,7 +281,23 @@ router.post('/completions', async (ctx: Context) => {
+       ctx.set('X-Accel-Buffering', 'no')
+ 
+       const transformStream = streamHandler.createTransformStream(actualModel, requestId)
++
++      // Collect stream content for log update
++      let collectedContent = ''
++      transformStream.on('data', (chunk: Buffer) => {
++        collectedContent += chunk.toString()
++      })
++
+       result.stream.pipe(transformStream)
++
++      transformStream.once('end', () => {
++        if (logEntryId) {
++          storeManager.updateRequestLog(logEntryId, {
++            responseBody: collectedContent || undefined,
++          })
++        }
++      })
++
+       ctx.body = transformStream
+     } else {
+       ctx.set('Content-Type', 'application/json')
+@@ -197,13 +307,46 @@ router.post('/completions', async (ctx: Context) => {
+     const latency = Date.now() - startTime
+     proxyStatusManager.recordRequestFailure(latency)
+ 
++    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
++
+     ctx.status = 500
+     ctx.body = {
+       error: {
+-        message: error instanceof Error ? error.message : 'Unknown error',
++        message: errorMessage,
+         type: 'internal_error',
+       },
+     }
++
++    storeManager.addLog('error', `Request exception: ${errorMessage}`, {
++      requestId,
++      providerId: provider.id,
++      accountId: account.id,
++      model: request.model,
++      latency,
++      error: errorMessage,
++    })
++
++    storeManager.addRequestLog({
++      timestamp: startTime,
++      status: 'error',
++      statusCode: 500,
++      method: 'POST',
++      url: '/v1/completions',
++      model: request.model,
++      actualModel,
++      providerId: provider.id,
++      providerName: provider.name,
++      accountId: account.id,
++      accountName: account.name,
++      requestBody: JSON.stringify(request),
++      userInput: extractUserInput(request.prompt),
++      responseStatus: 500,
++      latency,
++      isStream: request.stream || false,
++      errorMessage,
++    })
++
++    storeManager.recordRequestInStats(false, latency, request.model, provider.id, account.id)
+   }
+ })
+ 
+diff --git a/src/main/proxy/server.ts b/src/main/proxy/server.ts
+index d11c770..2315bf3 100644
+--- a/src/main/proxy/server.ts
++++ b/src/main/proxy/server.ts
+@@ -13,7 +13,7 @@ import { proxyStatusManager } from './status'
+ import { storeManager } from '../store/store'
+ import { sessionManager } from './sessionManager'
+ 
+-const SLOW_REQUEST_THRESHOLD_MS = 1500
++const SLOW_REQUEST_THRESHOLD_MS = 1000
+ 
+ /**
+  * Proxy Server Class
+@@ -131,12 +131,14 @@ export class ProxyServer {
+       await next()
+ 
+       const latency = Date.now() - startTime
+-      const shouldRecordAccessLog =
+-        !ctx.path.startsWith('/v1/models') &&
+-        (ctx.status >= 400 || latency >= SLOW_REQUEST_THRESHOLD_MS)
+ 
+-      if (shouldRecordAccessLog) {
+-        storeManager.addLog('warn', `${ctx.method} ${ctx.path} ${ctx.status} ${latency}ms`, {
++      if (!ctx.path.startsWith('/v1/models')) {
++        const level =
++          ctx.status >= 400 ? 'error' :
++          latency >= SLOW_REQUEST_THRESHOLD_MS ? 'warn' :
++          'info'
++
++        storeManager.addLog(level, `${ctx.method} ${ctx.path} ${ctx.status} ${latency}ms`, {
+           data: {
+             method: ctx.method,
+             path: ctx.path,
+diff --git a/src/main/store/store.ts b/src/main/store/store.ts
+index 10202f8..f8ae1e9 100644
+--- a/src/main/store/store.ts
++++ b/src/main/store/store.ts
+@@ -51,6 +51,7 @@ type StoreType = any
+  */
+ class StoreManager {
+   private store: StoreType | null = null
++  private logsStore: StoreType | null = null
+   private isInitialized: boolean = false
+   private mainWindow: BrowserWindow | null = null
+   private initializationError: Error | null = null
+@@ -102,6 +103,14 @@ class StoreManager {
+         encryptionKey: this.getEncryptionKey(),
+       })
+ 
++      this.logsStore = new Store({
++        name: 'logs-data',
++        cwd: storagePath,
++        defaults: { logs: [] },
++        encryptionKey: this.getEncryptionKey(),
++      })
++
++      await this.migrateLogsToSeparateStore()
+       await this.initializeRequestLogManager(storagePath)
+       await this.initializeDefaultProviders()
+       this.isInitialized = true
+@@ -109,7 +118,7 @@ class StoreManager {
+     } catch (error) {
+       console.error('[Store] Failed to initialize storage:', error)
+       this.initializationError = error instanceof Error ? error : new Error(String(error))
+-      
++
+       // Try to recover by backing up corrupted data and reinitializing
+       try {
+         await this.recoverFromCorruptedData(storagePath)
+@@ -119,6 +128,13 @@ class StoreManager {
+           defaults: this.getDefaultData(),
+           encryptionKey: this.getEncryptionKey(),
+         })
++        this.logsStore = new Store({
++          name: 'logs-data',
++          cwd: storagePath,
++          defaults: { logs: [] },
++          encryptionKey: this.getEncryptionKey(),
++        })
++        await this.migrateLogsToSeparateStore()
+         await this.initializeRequestLogManager(storagePath)
+         this.isInitialized = true
+         this.initializationError = null
+@@ -130,6 +146,19 @@ class StoreManager {
+     }
+   }
+ 
++  private async migrateLogsToSeparateStore(): Promise<void> {
++    if (!this.store || !this.logsStore) return
++
++    const oldLogs = (this.store.get('logs') as LogEntry[]) || []
++    if (oldLogs.length === 0) return
++
++    const existingLogs = (this.logsStore.get('logs') as LogEntry[]) || []
++    const merged = [...existingLogs, ...oldLogs]
++    this.logsStore.set('logs', merged)
++    this.store.set('logs', [])
++    console.log(`[Store] Migrated ${oldLogs.length} logs to logs-data.json`)
++  }
++
+   /**
+    * Recover from corrupted data file
+    * Backup the corrupted file and create a new one
+@@ -342,7 +371,8 @@ class StoreManager {
+   }
+ 
+   private getCombinedLogs(): LogEntry[] {
+-    const persistedLogs = (this.store!.get('logs') as LogEntry[]) || []
++    if (!this.logsStore) return [...this.pendingLogs]
++    const persistedLogs = (this.logsStore.get('logs') as LogEntry[]) || []
+     return persistedLogs.concat(this.pendingLogs)
+   }
+ 
+@@ -352,17 +382,17 @@ class StoreManager {
+   }
+ 
+   private flushLogsSync(): void {
+-    if (!this.isInitialized || !this.store || this.pendingLogs.length === 0) {
++    if (!this.isInitialized || !this.logsStore || this.pendingLogs.length === 0) {
+       return
+     }
+ 
+-    const logs = ((this.store.get('logs') as LogEntry[]) || []).concat(this.pendingLogs)
++    const logs = ((this.logsStore.get('logs') as LogEntry[]) || []).concat(this.pendingLogs)
+     const config = this.getConfig()
+     const maxLogs = config.logRetentionDays * 1000
+ 
+     const trimmedLogs = logs.length > maxLogs ? logs.slice(-maxLogs) : logs
+ 
+-    this.store.set('logs', trimmedLogs)
++    this.logsStore.set('logs', trimmedLogs)
+     this.pendingLogs = []
+   }
+ 
+@@ -841,7 +871,7 @@ class StoreManager {
+       this.logFlushTimer = null
+     }
+     this.pendingLogs = []
+-    this.store!.set('logs', [])
++    this.logsStore?.set('logs', [])
+   }
+ 
+   /**
+@@ -980,10 +1010,10 @@ class StoreManager {
+     const config = this.getConfig()
+     const logs = this.getCombinedLogs()
+     const cutoff = Date.now() - config.logRetentionDays * 24 * 60 * 60 * 1000
+-    
++
+     const filtered = logs.filter((l: LogEntry) => l.timestamp >= cutoff)
+     this.pendingLogs = []
+-    this.store!.set('logs', filtered)
++    this.logsStore?.set('logs', filtered)
+   }
+ 
+   // ==================== Request Log Operations ====================
+@@ -1692,6 +1722,13 @@ class StoreManager {
+     return this.store
+   }
+ 
++  /**
++   * Get Logs Storage Instance
++   */
++  getLogsStore(): StoreType | null {
++    return this.logsStore
++  }
++
+   /**
+    * Clear All Data
+    */
+@@ -1703,6 +1740,7 @@ class StoreManager {
+     }
+     this.pendingLogs = []
+     this.store!.clear()
++    this.logsStore?.clear()
+     this.requestLogManager?.clearRequestLogs()
+     this.requestLogManager?.flushSync()
+   }
+@@ -1719,7 +1757,7 @@ class StoreManager {
+       return rest
+     })
+     const config = this.store!.get('config') || DEFAULT_CONFIG
+-    const logs = this.store!.get('logs') || []
++    const logs = (this.logsStore?.get('logs') as LogEntry[]) || []
+     const requestLogs = this.getRequestLogManager().exportRequestLogs()
+     const systemPrompts = this.store!.get('systemPrompts') || []
+     const sessions = this.store!.get('sessions') || []
+diff --git a/src/renderer/src/components/models/ModelEditor.tsx b/src/renderer/src/components/models/ModelEditor.tsx
+index 2a807e3..f9b5a55 100644
+--- a/src/renderer/src/components/models/ModelEditor.tsx
++++ b/src/renderer/src/components/models/ModelEditor.tsx
+@@ -200,7 +200,7 @@ export function ModelEditor({
+     }
+   }
+ 
+-  const renderModelTable = (modelList: EffectiveModel[], isCustom: boolean) => {
++  const renderModelTable = (modelList: EffectiveModel[], _isCustom: boolean) => {
+     if (modelList.length === 0) {
+       return (
+         <div className="text-center py-8 text-muted-foreground border rounded-lg">
+diff --git a/src/renderer/src/stores/dashboardStore.ts b/src/renderer/src/stores/dashboardStore.ts
+index e0d2b73..93dc38d 100644
+--- a/src/renderer/src/stores/dashboardStore.ts
++++ b/src/renderer/src/stores/dashboardStore.ts
+@@ -1,5 +1,5 @@
+ import { create } from 'zustand'
+-import type { ProxyStatus, ProxyStatistics, Provider, Account, ProviderCheckResult, LogEntry } from '@/types/electron'
++import type { ProxyStatus, ProxyStatistics, Provider, Account, LogEntry } from '@/types/electron'
+ import type { ProviderStats, ActivityItem, ChartDataPoint } from '@/components/dashboard'
+ 
+ interface DashboardStats {
+@@ -150,22 +150,20 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
+       const persistentStatsPromise = window.electronAPI?.statistics?.get?.() ?? Promise.resolve(null)
+       const providersPromise = window.electronAPI?.providers?.getAll?.() ?? Promise.resolve([])
+       const accountsPromise = window.electronAPI?.accounts?.getAll?.() ?? Promise.resolve([])
+-      const providerStatusPromise = window.electronAPI?.providers?.checkAllStatus?.() ?? Promise.resolve({})
+       const logsPromise = window.electronAPI?.logs?.get?.({ limit: 10 }) ?? Promise.resolve([])
+       const trendPromise = window.electronAPI?.logs?.getTrend?.(7) ?? Promise.resolve([])
+       const requestLogTrendPromise = window.electronAPI?.requestLogs?.getTrend?.(7) ?? Promise.resolve([])
+ 
+-      const [proxyStatus, statistics, persistentStats, providers, accounts, providerStatuses, logs, trends, requestLogTrends] = await Promise.all([
++      const [proxyStatus, statistics, persistentStats, providers, accounts, logs, trends, requestLogTrends] = await Promise.all([
+         proxyStatusPromise,
+         statisticsPromise,
+         persistentStatsPromise,
+         providersPromise,
+         accountsPromise,
+-        providerStatusPromise,
+         logsPromise,
+         trendPromise,
+         requestLogTrendPromise,
+-      ]) as [ProxyStatus | null, ProxyStatistics | null, any, Provider[], Account[], Record<string, ProviderCheckResult>, LogEntry[], LogTrend[], any[]]
++      ]) as [ProxyStatus | null, ProxyStatistics | null, any, Provider[], Account[], LogEntry[], LogTrend[], any[]]
+ 
+       setProxyStatus(proxyStatus)
+       setStatistics(statistics)
+@@ -242,18 +240,17 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
+       }
+       
+       const providerStats: ProviderStats[] = (providers ?? []).map((provider: Provider) => {
+-        const status = providerStatuses?.[provider.id]
+         const usage = providerUsage[provider.id] ?? 0
+         const successCount = providerSuccessCount[provider.id] ?? usage
+         const totalCount = providerTotalCount[provider.id] ?? usage
+-        
++
+         return {
+           id: provider.id,
+           name: provider.name,
+-          status: status?.status ?? 'unknown',
++          status: provider.status ?? 'unknown',
+           requestCount: totalCount,
+           successCount: successCount,
+-          latency: status?.latency,
++          latency: undefined,
+         }
+       })
+       setProviders(providerStats)
+diff --git a/src/renderer/src/stores/logsStore.ts b/src/renderer/src/stores/logsStore.ts
+index 9e029c0..2f0a489 100644
+--- a/src/renderer/src/stores/logsStore.ts
++++ b/src/renderer/src/stores/logsStore.ts
+@@ -51,6 +51,31 @@ interface LogsState {
+   refresh: () => Promise<void>
+ }
+ 
++function filterLogs(logs: LogEntry[], filter: LogFilter): LogEntry[] {
++  let filtered = [...logs]
++
++  if (filter.level !== 'all') {
++    filtered = filtered.filter((log) => log.level === filter.level)
++  }
++
++  if (filter.keyword) {
++    const keyword = filter.keyword.toLowerCase()
++    filtered = filtered.filter((log) =>
++      log.message.toLowerCase().includes(keyword)
++    )
++  }
++
++  if (filter.startTime) {
++    filtered = filtered.filter((log) => log.timestamp >= filter.startTime!)
++  }
++
++  if (filter.endTime) {
++    filtered = filtered.filter((log) => log.timestamp <= filter.endTime!)
++  }
++
++  return filtered
++}
++
+ export const useLogsStore = create<LogsState>((set, get) => ({
+   logs: [],
+   filteredLogs: [],
+@@ -130,28 +155,7 @@ export const useLogsStore = create<LogsState>((set, get) => ({
+ 
+   applyFilter: () => {
+     const { logs, filter } = get()
+-    let filtered = [...logs]
+-
+-    if (filter.level !== 'all') {
+-      filtered = filtered.filter((log) => log.level === filter.level)
+-    }
+-
+-    if (filter.keyword) {
+-      const keyword = filter.keyword.toLowerCase()
+-      filtered = filtered.filter((log) =>
+-        log.message.toLowerCase().includes(keyword)
+-      )
+-    }
+-
+-    if (filter.startTime) {
+-      filtered = filtered.filter((log) => log.timestamp >= filter.startTime!)
+-    }
+-
+-    if (filter.endTime) {
+-      filtered = filtered.filter((log) => log.timestamp <= filter.endTime!)
+-    }
+-
+-    set({ filteredLogs: filtered })
++    set({ filteredLogs: filterLogs(logs, filter) })
+   },
+ 
+   clearLogs: () => {
+@@ -194,7 +198,7 @@ export const useLogsStore = create<LogsState>((set, get) => ({
+   },
+ 
+   refresh: async () => {
+-    const { pageSize } = get()
++    const { pageSize, filter } = get()
+     set({ isLoading: true })
+ 
+     if (!window.electronAPI?.logs) {
+@@ -211,14 +215,14 @@ export const useLogsStore = create<LogsState>((set, get) => ({
+ 
+       set({
+         logs,
++        filteredLogs: filterLogs(logs, filter),
+         stats,
+         trend,
+         hasMore: logs.length >= pageSize,
++        isLoading: false,
+       })
+-      get().applyFilter()
+     } catch (error) {
+       console.error('Failed to refresh logs:', error)
+-    } finally {
+       set({ isLoading: false })
+     }
+   },
+diff --git a/tests/store/log-buffering.test.ts b/tests/store/log-buffering.test.ts
+new file mode 100644
+index 0000000..5626d4b
+--- /dev/null
++++ b/tests/store/log-buffering.test.ts
+@@ -0,0 +1,236 @@
++import test from 'node:test'
++import assert from 'node:assert/strict'
++import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
++import { tmpdir } from 'node:os'
++import { join } from 'node:path'
++
++// Test LogManager buffering behavior (same pattern as StoreManager log buffering)
++// Since LogManager uses raw fs and is importable without Electron,
++// we mock the Electron app module and test the buffering/flush logic.
++
++test('LogManager buffers writes and flushes to disk', async (t) => {
++  const root = mkdtempSync(join(tmpdir(), 'log-manager-test-'))
++  t.after(() => rmSync(root, { recursive: true, force: true }))
++
++  const logFile = join(root, 'app.log')
++  const pendingLogs: string[] = []
++
++  // Simulate the LogManager buffering pattern
++  function addLog(line: string): void {
++    pendingLogs.push(line)
++  }
++
++  function flushSync(): void {
++    if (pendingLogs.length === 0) return
++    const { appendFileSync } = require('fs')
++    appendFileSync(logFile, pendingLogs.map(l => l).join('\n') + '\n', 'utf-8')
++    pendingLogs.length = 0
++  }
++
++  // Buffer 3 logs
++  addLog('{"level":"info","message":"log1"}')
++  addLog('{"level":"warn","message":"log2"}')
++  addLog('{"level":"error","message":"log3"}')
++
++  // Not yet written
++  assert.equal(existsSync(logFile), false)
++
++  // Flush
++  flushSync()
++
++  // Now written
++  assert.equal(existsSync(logFile), true)
++  const content = readFileSync(logFile, 'utf-8')
++  const lines = content.trim().split('\n')
++  assert.equal(lines.length, 3)
++  assert.match(lines[0], /log1/)
++  assert.match(lines[1], /log2/)
++  assert.match(lines[2], /log3/)
++
++  // Flush again should be a no-op
++  flushSync()
++  const content2 = readFileSync(logFile, 'utf-8')
++  assert.equal(content, content2)
++})
++
++test('LogManager trim keeps only the newest entries', async (t) => {
++  const root = mkdtempSync(join(tmpdir(), 'log-manager-trim-'))
++  t.after(() => rmSync(root, { recursive: true, force: true }))
++
++  const logFile = join(root, 'app.log')
++  const maxEntries = 3
++  let entries: string[] = []
++
++  function addLog(line: string): void {
++    entries.push(line)
++    if (entries.length > maxEntries) {
++      entries = entries.slice(-maxEntries)
++    }
++  }
++
++  function flushSync(): void {
++    const { writeFileSync } = require('fs')
++    writeFileSync(logFile, entries.join('\n') + '\n', 'utf-8')
++  }
++
++  addLog('entry-1')
++  addLog('entry-2')
++  addLog('entry-3')
++  addLog('entry-4')
++  addLog('entry-5')
++
++  flushSync()
++
++  const content = readFileSync(logFile, 'utf-8')
++  const lines = content.trim().split('\n')
++  assert.equal(lines.length, 3)
++  assert.match(lines[0], /entry-3/)
++  assert.match(lines[1], /entry-4/)
++  assert.match(lines[2], /entry-5/)
++})
++
++test('StoreManager log migration moves logs to separate store', async (t) => {
++  const root = mkdtempSync(join(tmpdir(), 'store-migration-'))
++  t.after(() => rmSync(root, { recursive: true, force: true }))
++
++  const Store = require('electron-store').default
++
++  // Create main store with logs
++  const mainStore = new Store({
++    name: 'data',
++    cwd: root,
++    defaults: { logs: [], config: {} },
++  })
++
++  // Create logs store (initially empty)
++  const logsStore = new Store({
++    name: 'logs-data',
++    cwd: root,
++    defaults: { logs: [] },
++  })
++
++  // Add logs to main store
++  const testLogs = [
++    { id: '1', timestamp: 1, level: 'info', message: 'test1' },
++    { id: '2', timestamp: 2, level: 'warn', message: 'test2' },
++    { id: '3', timestamp: 3, level: 'error', message: 'test3' },
++  ]
++  mainStore.set('logs', testLogs)
++
++  // Simulate migration
++  const oldLogs = (mainStore.get('logs') as unknown[]) || []
++  const existingLogs = (logsStore.get('logs') as unknown[]) || []
++  const merged = [...existingLogs, ...oldLogs]
++  logsStore.set('logs', merged)
++  mainStore.set('logs', [])
++
++  // Verify main store logs cleared
++  assert.deepEqual(mainStore.get('logs'), [])
++
++  // Verify logs moved to logs store
++  const migratedLogs = logsStore.get('logs') as unknown[]
++  assert.equal(migratedLogs.length, 3)
++
++  // Verify idempotent: re-run migration should not duplicate
++  const oldLogs2 = (mainStore.get('logs') as unknown[]) || []
++  const existingLogs2 = (logsStore.get('logs') as unknown[]) || []
++  const merged2 = [...existingLogs2, ...oldLogs2]
++  logsStore.set('logs', merged2)
++
++  const afterIdempotent = logsStore.get('logs') as unknown[]
++  assert.equal(afterIdempotent.length, 3, 'migration should be idempotent')
++})
++
++test('StoreManager log buffering flushes on demand', async (t) => {
++  const root = mkdtempSync(join(tmpdir(), 'store-buffer-'))
++  t.after(() => rmSync(root, { recursive: true, force: true }))
++
++  const Store = require('electron-store').default
++
++  const logsStore = new Store({
++    name: 'logs-data',
++    cwd: root,
++    defaults: { logs: [] },
++  })
++
++  const pendingLogs: unknown[] = []
++
++  // Simulate addLog buffering
++  function addLog(entry: unknown): void {
++    pendingLogs.push(entry)
++  }
++
++  function flushLogsSync(): void {
++    if (pendingLogs.length === 0) return
++    const logs = ((logsStore.get('logs') as unknown[]) || []).concat(pendingLogs)
++    logsStore.set('logs', logs)
++    pendingLogs.length = 0
++  }
++
++  // Buffer some logs
++  addLog({ id: '1', level: 'info', message: 'buffered1' })
++  addLog({ id: '2', level: 'warn', message: 'buffered2' })
++
++  // Not yet persisted
++  assert.deepEqual(logsStore.get('logs'), [])
++
++  // Flush
++  flushLogsSync()
++
++  // Now persisted
++  const persisted = logsStore.get('logs') as unknown[]
++  assert.equal(persisted.length, 2)
++
++  // Pending cleared
++  assert.equal(pendingLogs.length, 0)
++
++  // Flush again is no-op
++  flushLogsSync()
++  const persisted2 = logsStore.get('logs') as unknown[]
++  assert.equal(persisted2.length, 2)
++})
++
++test('StoreManager log count cap respects max entries', async (t) => {
++  const root = mkdtempSync(join(tmpdir(), 'store-cap-'))
++  t.after(() => rmSync(root, { recursive: true, force: true }))
++
++  const Store = require('electron-store').default
++
++  const logsStore = new Store({
++    name: 'logs-data',
++    cwd: root,
++    defaults: { logs: [] },
++  })
++
++  const maxLogs = 3
++  let pendingLogs: unknown[] = []
++
++  function addLog(entry: unknown): void {
++    pendingLogs.push(entry)
++    if (pendingLogs.length > maxLogs) {
++      pendingLogs = pendingLogs.slice(-maxLogs)
++    }
++  }
++
++  function flushLogsSync(): void {
++    if (pendingLogs.length === 0) return
++    const logs = ((logsStore.get('logs') as unknown[]) || []).concat(pendingLogs)
++    const trimmed = logs.length > maxLogs ? logs.slice(-maxLogs) : logs
++    logsStore.set('logs', trimmed)
++    pendingLogs.length = 0
++  }
++
++  // Add more than max
++  addLog({ id: '1' })
++  addLog({ id: '2' })
++  addLog({ id: '3' })
++  addLog({ id: '4' })
++  addLog({ id: '5' })
++
++  flushLogsSync()
++
++  const persisted = logsStore.get('logs') as unknown[]
++  assert.equal(persisted.length, 3)
++  const ids = persisted.map((e: any) => e.id)
++  assert.deepEqual(ids, ['3', '4', '5'])
++})
+diff --git a/tsconfig.node.json b/tsconfig.node.json
+index 40b6586..d877c54 100644
+--- a/tsconfig.node.json
++++ b/tsconfig.node.json
+@@ -15,7 +15,6 @@
+     "electron.vite.config.ts",
+     "src/main/**/*.ts",
+     "src/preload/**/*.ts",
+-    "src/shared/**/*.ts",
+     "src/types/**/*.d.ts",
+     "src/main/types/**/*.d.ts"
+   ]

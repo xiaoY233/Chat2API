@@ -51,6 +51,31 @@ interface LogsState {
   refresh: () => Promise<void>
 }
 
+function filterLogs(logs: LogEntry[], filter: LogFilter): LogEntry[] {
+  let filtered = [...logs]
+
+  if (filter.level !== 'all') {
+    filtered = filtered.filter((log) => log.level === filter.level)
+  }
+
+  if (filter.keyword) {
+    const keyword = filter.keyword.toLowerCase()
+    filtered = filtered.filter((log) =>
+      log.message.toLowerCase().includes(keyword)
+    )
+  }
+
+  if (filter.startTime) {
+    filtered = filtered.filter((log) => log.timestamp >= filter.startTime!)
+  }
+
+  if (filter.endTime) {
+    filtered = filtered.filter((log) => log.timestamp <= filter.endTime!)
+  }
+
+  return filtered
+}
+
 export const useLogsStore = create<LogsState>((set, get) => ({
   logs: [],
   filteredLogs: [],
@@ -130,28 +155,7 @@ export const useLogsStore = create<LogsState>((set, get) => ({
 
   applyFilter: () => {
     const { logs, filter } = get()
-    let filtered = [...logs]
-
-    if (filter.level !== 'all') {
-      filtered = filtered.filter((log) => log.level === filter.level)
-    }
-
-    if (filter.keyword) {
-      const keyword = filter.keyword.toLowerCase()
-      filtered = filtered.filter((log) =>
-        log.message.toLowerCase().includes(keyword)
-      )
-    }
-
-    if (filter.startTime) {
-      filtered = filtered.filter((log) => log.timestamp >= filter.startTime!)
-    }
-
-    if (filter.endTime) {
-      filtered = filtered.filter((log) => log.timestamp <= filter.endTime!)
-    }
-
-    set({ filteredLogs: filtered })
+    set({ filteredLogs: filterLogs(logs, filter) })
   },
 
   clearLogs: () => {
@@ -194,7 +198,7 @@ export const useLogsStore = create<LogsState>((set, get) => ({
   },
 
   refresh: async () => {
-    const { pageSize } = get()
+    const { pageSize, filter } = get()
     set({ isLoading: true })
 
     if (!window.electronAPI?.logs) {
@@ -211,14 +215,14 @@ export const useLogsStore = create<LogsState>((set, get) => ({
 
       set({
         logs,
+        filteredLogs: filterLogs(logs, filter),
         stats,
         trend,
         hasMore: logs.length >= pageSize,
+        isLoading: false,
       })
-      get().applyFilter()
     } catch (error) {
       console.error('Failed to refresh logs:', error)
-    } finally {
       set({ isLoading: false })
     }
   },
