@@ -1,6 +1,6 @@
 /**
  * Credential Storage Module - Core Storage Implementation
- * Uses electron-store for persistent storage
+ * Uses SQLite for persistent storage (replaced electron-store for better performance)
  * Uses Electron's safeStorage API for sensitive data encryption
  */
 
@@ -36,29 +36,23 @@ import {
 import { BUILTIN_PROMPTS } from '../data/builtin-prompts'
 import { RequestLogManager } from '../requestLogs/manager'
 import { normalizeRequestLogConfig } from '../requestLogs/types'
-
-// Dynamically import electron-store (ESM module)
-let Store: any = null
-
-/**
- * Storage Instance Type Definition
- */
-type StoreType = any
+import { sqliteStore, SQLiteStore } from './sqlite'
 
 /**
  * Storage Manager Class
  * Responsible for data persistence and encryption
+ * Now backed by SQLite instead of electron-store
  */
 class StoreManager {
-  private store: StoreType | null = null
-  private logsStore: StoreType | null = null
   private isInitialized: boolean = false
   private mainWindow: BrowserWindow | null = null
   private initializationError: Error | null = null
   private requestLogManager: RequestLogManager | null = null
-  private pendingLogs: LogEntry[] = []
-  private logFlushTimer: NodeJS.Timeout | null = null
-  private readonly logFlushDelayMs = 2000
+  private db: SQLiteStore
+
+  constructor() {
+    this.db = sqliteStore
+  }
 
   setMainWindow(window: BrowserWindow | null): void {
     this.mainWindow = window
@@ -80,259 +74,45 @@ class StoreManager {
 
   /**
    * Initialize Storage
-   * Create storage instance and initialize default data
+   * Initialize SQLite database and migrate from electron-store if needed
    */
   async initialize(): Promise<void> {
     if (this.isInitialized) {
       return
     }
 
-    // Dynamically import electron-store (ESM module)
-    if (!Store) {
-      const module = await import('electron-store')
-      Store = module.default
-    }
-
-    const storagePath = this.getStoragePath()
-
     try {
-      this.store = new Store({
-        name: 'data',
-        cwd: storagePath,
-        defaults: this.getDefaultData(),
-        encryptionKey: this.getEncryptionKey(),
-      })
-
-      this.logsStore = new Store({
-        name: 'logs-data',
-        cwd: storagePath,
-        defaults: { logs: [] },
-        encryptionKey: this.getEncryptionKey(),
-      })
-
-      await this.migrateLogsToSeparateStore()
-      await this.initializeRequestLogManager(storagePath)
-      await this.initializeDefaultProviders()
+      await this.db.initialize()
+      // Get config directly from db to avoid ensureInitialized check
+      const config = this.db.getConfig()
+      if (!config) {
+        throw new Error('Failed to load configuration after database initialization')
+      }
+      await this.initializeRequestLogManager(config)
       this.isInitialized = true
       this.initializationError = null
+
+      // Ensure credentials encryption consistency after migration
+      await this.ensureCredentialsEncryptionConsistency()
     } catch (error) {
       console.error('[Store] Failed to initialize storage:', error)
       this.initializationError = error instanceof Error ? error : new Error(String(error))
-
-      // Try to recover by backing up corrupted data and reinitializing
-      try {
-        await this.recoverFromCorruptedData(storagePath)
-        this.store = new Store({
-          name: 'data',
-          cwd: storagePath,
-          defaults: this.getDefaultData(),
-          encryptionKey: this.getEncryptionKey(),
-        })
-        this.logsStore = new Store({
-          name: 'logs-data',
-          cwd: storagePath,
-          defaults: { logs: [] },
-          encryptionKey: this.getEncryptionKey(),
-        })
-        await this.migrateLogsToSeparateStore()
-        await this.initializeRequestLogManager(storagePath)
-        this.isInitialized = true
-        this.initializationError = null
-        console.log('[Store] Successfully recovered from corrupted data')
-      } catch (recoveryError) {
-        console.error('[Store] Failed to recover from corrupted data:', recoveryError)
-        throw this.initializationError
-      }
+      throw this.initializationError
     }
   }
 
-  private async migrateLogsToSeparateStore(): Promise<void> {
-    if (!this.store || !this.logsStore) return
-
-    const oldLogs = (this.store.get('logs') as LogEntry[]) || []
-    if (oldLogs.length === 0) return
-
-    const existingLogs = (this.logsStore.get('logs') as LogEntry[]) || []
-    const merged = [...existingLogs, ...oldLogs]
-    this.logsStore.set('logs', merged)
-    this.store.set('logs', [])
-    console.log(`[Store] Migrated ${oldLogs.length} logs to logs-data.json`)
-  }
-
-  /**
-   * Recover from corrupted data file
-   * Backup the corrupted file and create a new one
-   */
-  private async recoverFromCorruptedData(storagePath: string): Promise<void> {
-    const { renameSync, existsSync } = await import('fs')
-    const { join } = await import('path')
-    
-    const dataPath = join(storagePath, 'data.json')
-    const backupPath = join(storagePath, `data.corrupted.${Date.now()}.json`)
-    
-    if (existsSync(dataPath)) {
-      console.log('[Store] Backing up corrupted data file to:', backupPath)
-      try {
-        renameSync(dataPath, backupPath)
-        console.log('[Store] Corrupted data file backed up successfully')
-      } catch (backupError) {
-        console.error('[Store] Failed to backup corrupted data:', backupError)
-        throw backupError
-      }
-    }
-  }
-
-  /**
-   * Get Storage Path
-   * Storage path: ~/.chat2api/
-   */
-  private getStoragePath(): string {
-    return join(homedir(), '.chat2api')
-  }
-
-  /**
-   * Get Encryption Key
-   * Returns a fixed encryption key for electron-store
-   * Note: electron-store uses this key to encrypt/decrypt the data file,
-   * so it must be stable across app restarts
-   */
-  private getEncryptionKey(): string | undefined {
-    try {
-      if (safeStorage.isEncryptionAvailable()) {
-        // Use a fixed key - electron-store will use this to encrypt/decrypt data
-        // The key itself is not stored in the data file, only used for encryption
-        return 'chat2api-fixed-encryption-key-v1'
-      }
-    } catch (error) {
-      console.warn('Encryption unavailable, using unencrypted storage:', error)
-    }
-    return undefined
-  }
-
-  /**
-   * Get Default Data Structure
-   */
-  private getDefaultData(): StoreSchema {
-    return {
-      providers: [],
-      accounts: [],
-      config: DEFAULT_CONFIG,
-      logs: [],
-      requestLogs: [],
-      systemPrompts: [],
-      sessions: [],
-      statistics: DEFAULT_STATISTICS,
-      userModelOverrides: DEFAULT_USER_MODEL_OVERRIDES,
-    }
-  }
-
-  private async initializeRequestLogManager(storagePath: string): Promise<void> {
-    const config = this.normalizeConfig(this.store?.get('config') || DEFAULT_CONFIG)
+  private async initializeRequestLogManager(config: AppConfig): Promise<void> {
+    const storagePath = join(homedir(), '.chat2api')
     this.requestLogManager = new RequestLogManager({
       storageDir: join(storagePath, 'request-logs'),
       config: config.requestLogConfig,
     })
     await this.requestLogManager.initialize()
-
-    const legacyRequestLogs = this.store?.get('requestLogs') || []
-    if (legacyRequestLogs.length > 0) {
-      await this.requestLogManager.migrateLegacyLogs(legacyRequestLogs)
-      this.store?.set('requestLogs', [])
-    }
   }
 
-  private normalizeConfig(config: AppConfig): AppConfig {
-    return {
-      ...DEFAULT_CONFIG,
-      ...config,
-      requestLogConfig: normalizeRequestLogConfig(
-        config.requestLogConfig || DEFAULT_REQUEST_LOG_CONFIG,
-      ),
-    }
-  }
-
-  /**
-   * Initialize Default Providers
-   * Clear provider list, users create providers by adding accounts
-   */
-  private async initializeDefaultProviders(): Promise<void> {
-    const providers = this.store?.get('providers') || []
-    const builtinIds = BUILTIN_PROVIDERS.map(p => p.id)
-    
-    const validProviders = providers.filter((p: Provider) => {
-      if (p.type === 'builtin') {
-        return builtinIds.includes(p.id)
-      }
-      return true
-    })
-    
-    const userModelOverrides = this.store?.get('userModelOverrides') || {}
-    
-    const updatedProviders = validProviders.map((p: Provider) => {
-      if (p.type === 'builtin') {
-        const builtinConfig = BUILTIN_PROVIDERS.find(bp => bp.id === p.id)
-        if (builtinConfig) {
-          const hasUserOverrides = userModelOverrides[p.id] && 
-            ((userModelOverrides[p.id].addedModels && userModelOverrides[p.id].addedModels.length > 0) ||
-             (userModelOverrides[p.id].excludedModels && userModelOverrides[p.id].excludedModels.length > 0))
-          
-          return { 
-            ...p, 
-            apiEndpoint: builtinConfig.apiEndpoint,
-            chatPath: builtinConfig.chatPath,
-            supportedModels: hasUserOverrides ? p.supportedModels : builtinConfig.supportedModels,
-            modelMappings: hasUserOverrides ? p.modelMappings : builtinConfig.modelMappings,
-            headers: builtinConfig.headers,
-            description: builtinConfig.description,
-          }
-        }
-      }
-      return p
-    })
-    
-    this.store?.set('providers', updatedProviders)
-  }
-
-  /**
-   * Ensure provider exists, create if not
-   */
-  ensureProviderExists(providerId: string): void {
-    this.ensureInitialized()
-    const providers = this.store!.get('providers') || []
-    const exists = providers.some((p: Provider) => p.id === providerId)
-    
-    if (!exists) {
-      const builtinConfig = BUILTIN_PROVIDERS.find(bp => bp.id === providerId)
-      if (builtinConfig) {
-        const now = Date.now()
-        const newProvider: Provider = {
-          id: builtinConfig.id,
-          name: builtinConfig.name,
-          type: 'builtin',
-          authType: builtinConfig.authType,
-          apiEndpoint: builtinConfig.apiEndpoint,
-          chatPath: builtinConfig.chatPath,
-          headers: builtinConfig.headers,
-          enabled: true,
-          createdAt: now,
-          updatedAt: now,
-          description: builtinConfig.description,
-          supportedModels: builtinConfig.supportedModels,
-          modelMappings: builtinConfig.modelMappings,
-        }
-        providers.push(newProvider)
-        this.store!.set('providers', providers)
-        console.log('[Store] Created missing provider:', providerId)
-      }
-    }
-  }
-
-  /**
-   * Ensure Storage is Initialized
-   */
   private ensureInitialized(): void {
-    if (!this.isInitialized || !this.store) {
-      const errorMsg = this.initializationError 
+    if (!this.isInitialized) {
+      const errorMsg = this.initializationError
         ? `Storage initialization failed: ${this.initializationError.message}`
         : 'Storage not initialized, please call initialize() first'
       throw new Error(errorMsg)
@@ -355,45 +135,8 @@ class StoreManager {
   }
 
   private shouldRecordLog(level: LogLevel): boolean {
-    const config = this.normalizeConfig(this.store!.get('config') || DEFAULT_CONFIG)
-    return this.getLogPriority(level) >= this.getLogPriority(config.logLevel)
-  }
-
-  private scheduleLogFlush(): void {
-    if (this.logFlushTimer) {
-      clearTimeout(this.logFlushTimer)
-    }
-
-    this.logFlushTimer = setTimeout(() => {
-      this.logFlushTimer = null
-      this.flushLogsSync()
-    }, this.logFlushDelayMs)
-  }
-
-  private getCombinedLogs(): LogEntry[] {
-    if (!this.logsStore) return [...this.pendingLogs]
-    const persistedLogs = (this.logsStore.get('logs') as LogEntry[]) || []
-    return persistedLogs.concat(this.pendingLogs)
-  }
-
-  flushPendingWrites(): void {
-    this.flushLogsSync()
-    this.requestLogManager?.flushSync()
-  }
-
-  private flushLogsSync(): void {
-    if (!this.isInitialized || !this.logsStore || this.pendingLogs.length === 0) {
-      return
-    }
-
-    const logs = ((this.logsStore.get('logs') as LogEntry[]) || []).concat(this.pendingLogs)
     const config = this.getConfig()
-    const maxLogs = config.logRetentionDays * 1000
-
-    const trimmedLogs = logs.length > maxLogs ? logs.slice(-maxLogs) : logs
-
-    this.logsStore.set('logs', trimmedLogs)
-    this.pendingLogs = []
+    return this.getLogPriority(level) >= this.getLogPriority(config.logLevel)
   }
 
   /**
@@ -403,22 +146,12 @@ class StoreManager {
    */
   encryptData(data: string): string {
     try {
-      console.log('[Store] encryptData input length:', data.length, 'content:', data.substring(0, 20) + '...')
       if (safeStorage.isEncryptionAvailable()) {
         if (!this.getConfig().credentialEncryption) {
-          console.log('[Store] Credential encryption disabled, returning plaintext')
           return data
         }
-        // Create new Buffer to store encryption result
         const encrypted = Buffer.from(safeStorage.encryptString(data))
-        const result = encrypted.toString('base64')
-        console.log('[Store] encryptData output length:', result.length, 'content:', result.substring(0, 20) + '...')
-        // Verify encryption is correct
-        const decrypted = safeStorage.decryptString(encrypted)
-        console.log('[Store] encryptData verify decryption:', decrypted.substring(0, 20) + '...', 'match:', decrypted === data)
-        return result
-      } else {
-        console.log('[Store] Encryption unavailable, returning original data')
+        return encrypted.toString('base64')
       }
     } catch (error) {
       console.error('Failed to encrypt data:', error)
@@ -432,15 +165,27 @@ class StoreManager {
    * @returns Decrypted string
    */
   decryptData(encryptedData: string): string {
-    try {
-      if (safeStorage.isEncryptionAvailable()) {
-        const buffer = Buffer.from(encryptedData, 'base64')
-        return safeStorage.decryptString(buffer)
-      }
-    } catch (error) {
-      console.error('Failed to decrypt data:', error)
+    // If global credential encryption is disabled, return as plaintext directly
+    const config = this.getConfig()
+    if (!config.credentialEncryption || !safeStorage.isEncryptionAvailable()) {
+      return encryptedData
     }
-    return encryptedData
+
+    // If not a base64 string, assume it's already plaintext
+    if (!encryptedData || !/^[A-Za-z0-9+/]*={0,2}$/.test(encryptedData)) {
+      return encryptedData
+    }
+
+    try {
+      const buffer = Buffer.from(encryptedData, 'base64')
+      return safeStorage.decryptString(buffer)
+    } catch (error) {
+      // Only log if it looks like it should have been encrypted
+      if (encryptedData.length > 20) {
+        console.warn('[Store] Failed to decrypt data, returning as plaintext:', error instanceof Error ? error.message : String(error))
+      }
+      return encryptedData
+    }
   }
 
   /**
@@ -450,11 +195,9 @@ class StoreManager {
    */
   encryptCredentials(credentials: Record<string, string>): Record<string, string> {
     const encrypted: Record<string, string> = {}
-    
     for (const [key, value] of Object.entries(credentials)) {
       encrypted[key] = this.encryptData(value)
     }
-    
     return encrypted
   }
 
@@ -465,294 +208,153 @@ class StoreManager {
    */
   decryptCredentials(encryptedCredentials: Record<string, string>): Record<string, string> {
     const decrypted: Record<string, string> = {}
-    
     for (const [key, value] of Object.entries(encryptedCredentials)) {
       decrypted[key] = this.decryptData(value)
     }
-    
     return decrypted
   }
 
   // ==================== Provider Operations ====================
 
-  /**
-   * Get All Providers
-   */
   getProviders(): Provider[] {
     this.ensureInitialized()
-    return this.store!.get('providers') || []
+    return this.db.getProviders()
   }
 
-  /**
-   * Get Provider By ID
-   */
   getProviderById(id: string): Provider | undefined {
     this.ensureInitialized()
-    const providers = this.store!.get('providers') as Provider[] || []
-    return providers.find((p: Provider) => p.id === id)
+    return this.db.getProviderById(id)
   }
 
-  /**
-   * Add Provider
-   */
   addProvider(provider: Provider): void {
     this.ensureInitialized()
-    const providers = this.store!.get('providers') as Provider[] || []
-    providers.push(provider)
-    this.store!.set('providers', providers)
+    this.db.addProvider(provider)
   }
 
-  /**
-   * Update Provider
-   */
   updateProvider(id: string, updates: Partial<Provider>): Provider | null {
     this.ensureInitialized()
-    const providers = this.store!.get('providers') as Provider[] || []
-    const index = providers.findIndex((p: Provider) => p.id === id)
-    
-    if (index === -1) {
-      return null
-    }
-    
-    providers[index] = {
-      ...providers[index],
-      ...updates,
-      updatedAt: Date.now(),
-    }
-    
-    this.store!.set('providers', providers)
-    return providers[index]
+    return this.db.updateProvider(id, updates)
   }
 
-  /**
-   * Delete Provider
-   */
   deleteProvider(id: string): boolean {
     this.ensureInitialized()
-    const providers = this.store!.get('providers') as Provider[] || []
-    const index = providers.findIndex((p: Provider) => p.id === id)
-    
-    if (index === -1) {
-      return false
-    }
-    
-    providers.splice(index, 1)
-    this.store!.set('providers', providers)
-    
-    const accounts = this.store!.get('accounts') as Account[] || []
-    const filteredAccounts = accounts.filter((a: Account) => a.providerId !== id)
-    this.store!.set('accounts', filteredAccounts)
-    
-    return true
+    return this.db.deleteProvider(id)
   }
 
   // ==================== Model Overrides Operations ====================
 
-  /**
-   * Get Model Overrides for a Provider
-   * Returns user customizations to built-in provider models
-   */
   getModelOverrides(providerId: string): ProviderModelOverrides | undefined {
     this.ensureInitialized()
-    const userModelOverrides = this.store!.get('userModelOverrides') || DEFAULT_USER_MODEL_OVERRIDES
-    return userModelOverrides[providerId]
+    const overrides = this.db.getUserModelOverrides()
+    return overrides[providerId]
   }
 
-  /**
-   * Check if Provider has Model Overrides
-   * Returns true if provider has user-added models or excluded models
-   */
   hasModelOverrides(providerId: string): boolean {
     const overrides = this.getModelOverrides(providerId)
-    if (!overrides) return false
-    
-    return (
-      (overrides.addedModels && overrides.addedModels.length > 0) ||
-      (overrides.excludedModels && overrides.excludedModels.length > 0)
-    )
+    return !!(overrides && (overrides.addedModels?.length || overrides.excludedModels?.length))
   }
 
   // ==================== Account Operations ====================
 
-  /**
-   * Get All Accounts
-   * @param includeCredentials Whether to include decrypted credentials
-   */
   getAccounts(includeCredentials: boolean = false): Account[] {
     this.ensureInitialized()
-    const accounts = this.store!.get('accounts') as Account[] || []
-    
+    const accounts = this.db.getAccounts()
     if (includeCredentials) {
-      return accounts.map((account: Account) => ({
+      return accounts.map(account => ({
         ...account,
         credentials: this.decryptCredentials(account.credentials),
       }))
     }
-    
     return accounts
   }
 
-  /**
-   * Get Account By ID
-   * @param includeCredentials Whether to include decrypted credentials
-   */
   getAccountById(id: string, includeCredentials: boolean = false): Account | undefined {
     this.ensureInitialized()
-    const accounts = this.store!.get('accounts') as Account[] || []
-    const account = accounts.find((a: Account) => a.id === id)
-    
+    const account = this.db.getAccountById(id)
     if (account && includeCredentials) {
       return {
         ...account,
         credentials: this.decryptCredentials(account.credentials),
       }
     }
-    
     return account
   }
 
-  /**
-   * Get Accounts By Provider ID
-   */
   getAccountsByProviderId(providerId: string, includeCredentials: boolean = false): Account[] {
     this.ensureInitialized()
-    const accounts = this.store!.get('accounts') as Account[] || []
-    const filtered = accounts.filter((a: Account) => a.providerId === providerId)
-    
+    const accounts = this.db.getAccountsByProviderId(providerId)
     if (includeCredentials) {
-      return filtered.map((account: Account) => ({
+      return accounts.map(account => ({
         ...account,
         credentials: this.decryptCredentials(account.credentials),
       }))
     }
-    
-    return filtered
+    return accounts
   }
 
-  /**
-   * Add Account
-   * Credentials are automatically encrypted before storage
-   */
   addAccount(account: Account): void {
     this.ensureInitialized()
-    const accounts = this.store!.get('accounts') || []
-    
     const encryptedAccount: Account = {
       ...account,
       credentials: this.encryptCredentials(account.credentials),
     }
-    
-    accounts.push(encryptedAccount)
-    this.store!.set('accounts', accounts)
+    this.db.addAccount(encryptedAccount)
   }
 
-  /**
-   * Update Account
-   */
   updateAccount(id: string, updates: Partial<Account>): Account | null {
     this.ensureInitialized()
-    const accounts = this.store!.get('accounts') as Account[] || []
-    const index = accounts.findIndex((a: Account) => a.id === id)
-    
-    if (index === -1) {
-      return null
-    }
-    
-    console.log('[Store] Update account:', {
-      id,
-      updatesCredentials: updates.credentials,
-      oldCredentials: accounts[index].credentials,
-      oldCredentialsDecrypted: this.decryptCredentials(accounts[index].credentials),
-    })
-    
-    const updatedAccount: Account = {
-      ...accounts[index],
-      ...updates,
-      updatedAt: Date.now(),
-    }
-    
+    const existing = this.db.getAccountById(id)
+    if (!existing) return null
+
+    let encryptedUpdates = { ...updates }
     if (updates.credentials) {
-      updatedAccount.credentials = this.encryptCredentials(updates.credentials)
-      console.log('[Store] Encrypted credentials:', updatedAccount.credentials)
-      console.log('[Store] Old credentials:', accounts[index].credentials)
-      console.log('[Store] Credentials match:', JSON.stringify(updatedAccount.credentials) === JSON.stringify(accounts[index].credentials))
+      encryptedUpdates.credentials = this.encryptCredentials(updates.credentials)
     }
-    
-    accounts[index] = updatedAccount
-    this.store!.set('accounts', accounts)
-    
-    // Verify save was successful
-    const savedAccounts = this.store!.get('accounts') as Account[]
-    const savedAccount = savedAccounts.find(a => a.id === id)
-    console.log('[Store] Verify after save:', {
-      id,
-      savedCredentials: savedAccount?.credentials,
-    })
-    
+
+    const updated = { ...existing, ...encryptedUpdates, updatedAt: Date.now() }
+    this.db.updateAccount(id, updated)
     return {
-      ...updatedAccount,
-      credentials: updates.credentials || this.decryptCredentials(accounts[index].credentials),
+      ...updated,
+      credentials: updates.credentials || this.decryptCredentials(existing.credentials),
     }
   }
 
-  /**
-   * Delete Account
-   */
   deleteAccount(id: string): boolean {
     this.ensureInitialized()
-    const accounts = this.store!.get('accounts') as Account[] || []
-    const index = accounts.findIndex((a: Account) => a.id === id)
-    
-    if (index === -1) {
-      return false
-    }
-    
-    accounts.splice(index, 1)
-    this.store!.set('accounts', accounts)
-    return true
+    return this.db.deleteAccount(id)
   }
 
-  /**
-   * Get Active Accounts
-   */
   getActiveAccounts(includeCredentials: boolean = false): Account[] {
     this.ensureInitialized()
-    const accounts = this.store!.get('accounts') as Account[] || []
-    const active = accounts.filter((a: Account) => a.status === 'active')
-    
+    const accounts = this.db.getAccounts()
+    const active = accounts.filter(a => a.status === 'active')
     if (includeCredentials) {
-      return active.map((account: Account) => ({
+      return active.map(account => ({
         ...account,
         credentials: this.decryptCredentials(account.credentials),
       }))
     }
-    
     return active
   }
 
   // ==================== Configuration Operations ====================
 
-  /**
-   * Get Application Configuration
-   */
   getConfig(): AppConfig {
     this.ensureInitialized()
-    return this.normalizeConfig(this.store!.get('config') || DEFAULT_CONFIG)
+    const config = this.db.getConfig()
+    if (!config) {
+      // This should not happen as db initializes default config
+      return DEFAULT_CONFIG
+    }
+    return config
   }
 
-  /**
-   * Set Application Configuration
-   */
   setConfig(config: AppConfig): void {
     this.ensureInitialized()
-    const normalized = this.normalizeConfig(config)
-    this.store!.set('config', normalized)
-    this.requestLogManager?.setConfig(normalized.requestLogConfig)
+    this.db.setConfig(config)
+    this.requestLogManager?.setConfig(config.requestLogConfig)
   }
 
-  /**
-   * Update Application Configuration
-   */
   updateConfig(updates: Partial<AppConfig>): AppConfig {
     this.ensureInitialized()
     const currentConfig = this.getConfig()
@@ -760,15 +362,14 @@ class StoreManager {
       ...currentConfig,
       ...updates,
     }
-    
-    // Deep merge for nested objects
+
     if (updates.toolPromptConfig && currentConfig.toolPromptConfig) {
       newConfig.toolPromptConfig = {
         ...currentConfig.toolPromptConfig,
         ...updates.toolPromptConfig,
       }
     }
-    
+
     if (updates.sessionConfig && currentConfig.sessionConfig) {
       newConfig.sessionConfig = {
         ...currentConfig.sessionConfig,
@@ -783,27 +384,29 @@ class StoreManager {
       })
     }
 
-    const normalized = this.normalizeConfig(newConfig)
-    this.store!.set('config', normalized)
-    this.requestLogManager?.setConfig(normalized.requestLogConfig)
-    return normalized
+    this.db.setConfig(newConfig)
+    this.requestLogManager?.setConfig(newConfig.requestLogConfig)
+
+    // If credential encryption setting changed, re-normalize credentials
+    if (updates.credentialEncryption !== undefined && updates.credentialEncryption !== currentConfig.credentialEncryption) {
+      // Run asynchronously without awaiting to avoid blocking the config update
+      this.ensureCredentialsEncryptionConsistency().catch(err => {
+        console.error('[Store] Failed to re-normalize credentials after encryption setting change:', err)
+      })
+    }
+
+    return newConfig
   }
 
-  /**
-   * Reset Configuration to Default Values
-   */
   resetConfig(): AppConfig {
     this.ensureInitialized()
-    this.store!.set('config', DEFAULT_CONFIG)
+    this.db.setConfig(DEFAULT_CONFIG)
     this.requestLogManager?.setConfig(DEFAULT_CONFIG.requestLogConfig)
     return DEFAULT_CONFIG
   }
 
   // ==================== Log Operations ====================
 
-  /**
-   * Add Log Entry
-   */
   addLog(
     level: LogLevel,
     message: string,
@@ -832,74 +435,35 @@ class StoreManager {
       return entry
     }
 
-    this.pendingLogs.push(entry)
-
-    const config = this.getConfig()
-    const maxLogs = config.logRetentionDays * 1000
-    if (this.pendingLogs.length > maxLogs) {
-      this.pendingLogs = this.pendingLogs.slice(-maxLogs)
-    }
-
-    this.scheduleLogFlush()
-
+    this.db.addLog(entry)
     return entry
   }
 
-  /**
-   * Get Logs
-   * @param limit Limit count
-   * @param level Log level filter
-   */
   getLogs(limit?: number, level?: LogLevel): LogEntry[] {
     this.ensureInitialized()
-    let logs = this.getCombinedLogs()
-    
-    if (level) {
-      logs = logs.filter((l: LogEntry) => l.level === level)
-    }
-    
-    if (limit && logs.length > limit) {
-      logs = logs.slice(-limit)
-    }
-    
-    return logs
+    return this.db.getLogs(limit, level)
   }
 
-  /**
-   * Clear Logs
-   */
   clearLogs(): void {
     this.ensureInitialized()
-    if (this.logFlushTimer) {
-      clearTimeout(this.logFlushTimer)
-      this.logFlushTimer = null
-    }
-    this.pendingLogs = []
-    this.logsStore?.set('logs', [])
+    this.db.clearLogs()
   }
 
-  /**
-   * Get Log Statistics
-   */
   getLogStats(): { total: number; info: number; warn: number; error: number; debug: number } {
     this.ensureInitialized()
-    const logs = this.getCombinedLogs()
-    
+    const logs = this.db.getLogs(undefined, undefined)
     return {
       total: logs.length,
-      info: logs.filter((l: LogEntry) => l.level === 'info').length,
-      warn: logs.filter((l: LogEntry) => l.level === 'warn').length,
-      error: logs.filter((l: LogEntry) => l.level === 'error').length,
-      debug: logs.filter((l: LogEntry) => l.level === 'debug').length,
+      info: logs.filter(l => l.level === 'info').length,
+      warn: logs.filter(l => l.level === 'warn').length,
+      error: logs.filter(l => l.level === 'error').length,
+      debug: logs.filter(l => l.level === 'debug').length,
     }
   }
 
-  /**
-   * Get Log Trend
-   */
   getLogTrend(days: number = 7): { date: string; total: number; info: number; warn: number; error: number }[] {
     this.ensureInitialized()
-    const logs = this.getCombinedLogs()
+    const logs = this.db.getLogs(undefined, undefined)
     const now = Date.now()
     const dayMs = 24 * 60 * 60 * 1000
     const trends: { date: string; total: number; info: number; warn: number; error: number }[] = []
@@ -909,30 +473,24 @@ class StoreManager {
       const dayEnd = now - i * dayMs
       const date = new Date(dayStart).toISOString().split('T')[0]
 
-      const dayLogs = logs.filter(
-        (l: LogEntry) => l.timestamp >= dayStart && l.timestamp < dayEnd
-      )
+      const dayLogs = logs.filter(l => l.timestamp >= dayStart && l.timestamp < dayEnd)
 
       trends.push({
         date,
         total: dayLogs.length,
-        info: dayLogs.filter((l: LogEntry) => l.level === 'info').length,
-        warn: dayLogs.filter((l: LogEntry) => l.level === 'warn').length,
-        error: dayLogs.filter((l: LogEntry) => l.level === 'error').length,
+        info: dayLogs.filter(l => l.level === 'info').length,
+        warn: dayLogs.filter(l => l.level === 'warn').length,
+        error: dayLogs.filter(l => l.level === 'error').length,
       })
     }
 
     return trends
   }
 
-  /**
-   * Get Log Trend for specific account
-   * Only counts successful API requests (logs with requestId) to match requestCount
-   */
   getAccountLogTrend(accountId: string, days: number = 7): { date: string; total: number; info: number; warn: number; error: number }[] {
     this.ensureInitialized()
-    const logs = this.getCombinedLogs()
-    const accountLogs = logs.filter((l: LogEntry) => l.accountId === accountId && l.requestId)
+    const logs = this.db.getLogs(undefined, undefined)
+    const accountLogs = logs.filter(l => l.accountId === accountId && l.requestId)
     const now = Date.now()
     const dayMs = 24 * 60 * 60 * 1000
     const trends: { date: string; total: number; info: number; warn: number; error: number }[] = []
@@ -942,139 +500,88 @@ class StoreManager {
       const dayEnd = now - i * dayMs
       const date = new Date(dayStart).toISOString().split('T')[0]
 
-      const dayLogs = accountLogs.filter(
-        (l: LogEntry) => l.timestamp >= dayStart && l.timestamp < dayEnd
-      )
-
-      const infoCount = dayLogs.filter((l: LogEntry) => l.level === 'info').length
-      const warnCount = dayLogs.filter((l: LogEntry) => l.level === 'warn').length
-      const errorCount = dayLogs.filter((l: LogEntry) => l.level === 'error').length
+      const dayLogs = accountLogs.filter(l => l.timestamp >= dayStart && l.timestamp < dayEnd)
 
       trends.push({
         date,
-        total: infoCount,
-        info: infoCount,
-        warn: warnCount,
-        error: errorCount,
+        total: dayLogs.length,
+        info: dayLogs.filter(l => l.level === 'info').length,
+        warn: dayLogs.filter(l => l.level === 'warn').length,
+        error: dayLogs.filter(l => l.level === 'error').length,
       })
     }
 
     return trends
   }
 
-  /**
-   * Export Logs
-   */
   exportLogs(format: 'json' | 'txt' = 'json'): string {
     this.ensureInitialized()
-    const logs = this.getCombinedLogs()
+    const logs = this.db.getLogs(undefined, undefined)
 
     if (format === 'json') {
       return JSON.stringify(logs, null, 2)
     }
 
     return logs
-      .map((log: LogEntry) => {
+      .map(log => {
         const time = new Date(log.timestamp).toISOString()
         const level = log.level.toUpperCase().padEnd(5)
         let line = `[${time}] [${level}] ${log.message}`
-        
-        if (log.providerId) {
-          line += ` | Provider: ${log.providerId}`
-        }
-        if (log.accountId) {
-          line += ` | Account: ${log.accountId}`
-        }
-        if (log.requestId) {
-          line += ` | Request: ${log.requestId}`
-        }
-        if (log.data) {
-          line += ` | Data: ${JSON.stringify(log.data)}`
-        }
-        
+        if (log.providerId) line += ` | Provider: ${log.providerId}`
+        if (log.accountId) line += ` | Account: ${log.accountId}`
+        if (log.requestId) line += ` | Request: ${log.requestId}`
+        if (log.data) line += ` | Data: ${JSON.stringify(log.data)}`
         return line
       })
       .join('\n')
   }
 
-  /**
-   * Get Log By ID
-   */
   getLogById(id: string): LogEntry | undefined {
     this.ensureInitialized()
-    const logs = this.getCombinedLogs()
-    return logs.find((l: LogEntry) => l.id === id)
+    const logs = this.db.getLogs(undefined, undefined)
+    return logs.find(l => l.id === id)
   }
 
-  /**
-   * Clear Expired Logs
-   */
   cleanExpiredLogs(): void {
     this.ensureInitialized()
     const config = this.getConfig()
-    const logs = this.getCombinedLogs()
-    const cutoff = Date.now() - config.logRetentionDays * 24 * 60 * 60 * 1000
-
-    const filtered = logs.filter((l: LogEntry) => l.timestamp >= cutoff)
-    this.pendingLogs = []
-    this.logsStore?.set('logs', filtered)
+    this.db.cleanExpiredLogs(config.logRetentionDays)
   }
 
   // ==================== Request Log Operations ====================
 
-  /**
-   * Add Request Log Entry
-   */
   addRequestLog(entry: Omit<RequestLogEntry, 'id'>): RequestLogEntry {
     this.ensureInitialized()
-    const newEntry = this.getRequestLogManager().addRequestLog(entry)
-    return newEntry
+    return this.getRequestLogManager().addRequestLog(entry)
   }
 
-  /**
-   * Update Request Log Entry
-   */
   updateRequestLog(id: string, updates: Partial<RequestLogEntry>): boolean {
     this.ensureInitialized()
     return this.getRequestLogManager().updateRequestLog(id, updates)
   }
 
-  /**
-   * Get Request Logs
-   */
   getRequestLogs(limit?: number, filter?: { status?: 'success' | 'error'; providerId?: string }): RequestLogEntry[] {
     this.ensureInitialized()
     return this.getRequestLogManager().getRequestLogs(limit, filter)
   }
 
-  /**
-   * Get Request Log By ID
-   */
   getRequestLogById(id: string): RequestLogEntry | undefined {
     this.ensureInitialized()
     return this.getRequestLogManager().getRequestLogById(id)
   }
 
-  /**
-   * Clear Request Logs
-   */
   clearRequestLogs(): void {
     this.ensureInitialized()
     this.getRequestLogManager().clearRequestLogs()
-    this.store!.set('statistics', DEFAULT_STATISTICS)
+    // Reset statistics as well
+    this.db.setStatistics(DEFAULT_STATISTICS)
   }
 
-  /**
-   * Get Request Log Statistics
-   */
   getRequestLogStats(): { total: number; success: number; error: number; todayTotal: number; todaySuccess: number; todayError: number } {
     this.ensureInitialized()
     return this.getRequestLogManager().getRequestLogStats()
   }
 
-  /**
-   * Get Request Log Trend
-   */
   getRequestLogTrend(days: number = 7): { date: string; total: number; success: number; error: number; avgLatency: number }[] {
     this.ensureInitialized()
     return this.getRequestLogManager().getRequestLogTrend(days)
@@ -1082,32 +589,24 @@ class StoreManager {
 
   // ==================== Statistics Operations ====================
 
-  /**
-   * Get Persistent Statistics
-   */
   getStatistics(): PersistentStatistics {
     this.ensureInitialized()
-    return this.store!.get('statistics') || DEFAULT_STATISTICS
+    const stats = this.db.getStatistics()
+    return stats || DEFAULT_STATISTICS
   }
 
-  /**
-   * Update Statistics
-   */
   updateStatistics(updates: Partial<PersistentStatistics>): PersistentStatistics {
     this.ensureInitialized()
-    const currentStats = this.store!.get('statistics') || DEFAULT_STATISTICS
+    const currentStats = this.getStatistics()
     const newStats = {
       ...currentStats,
       ...updates,
       lastUpdated: Date.now(),
     }
-    this.store!.set('statistics', newStats)
+    this.db.setStatistics(newStats)
     return newStats
   }
 
-  /**
-   * Record Request in Statistics
-   */
   recordRequestInStats(
     success: boolean,
     latency: number,
@@ -1116,9 +615,9 @@ class StoreManager {
     accountId?: string
   ): PersistentStatistics {
     this.ensureInitialized()
-    const stats = this.store!.get('statistics') || DEFAULT_STATISTICS
+    const stats = this.getStatistics()
     const today = new Date().toISOString().split('T')[0]
-    
+
     const newStats: PersistentStatistics = {
       ...stats,
       totalRequests: stats.totalRequests + 1,
@@ -1131,19 +630,17 @@ class StoreManager {
       accountUsage: { ...stats.accountUsage },
       dailyStats: { ...stats.dailyStats },
     }
-    
+
     if (model) {
       newStats.modelUsage[model] = (newStats.modelUsage[model] || 0) + 1
     }
-    
     if (providerId) {
       newStats.providerUsage[providerId] = (newStats.providerUsage[providerId] || 0) + 1
     }
-    
     if (accountId) {
       newStats.accountUsage[accountId] = (newStats.accountUsage[accountId] || 0) + 1
     }
-    
+
     if (!newStats.dailyStats[today]) {
       newStats.dailyStats[today] = {
         date: today,
@@ -1155,7 +652,7 @@ class StoreManager {
         providerUsage: {},
       }
     }
-    
+
     newStats.dailyStats[today].totalRequests++
     if (success) {
       newStats.dailyStats[today].successRequests++
@@ -1163,25 +660,21 @@ class StoreManager {
     } else {
       newStats.dailyStats[today].failedRequests++
     }
-    
+
     if (model) {
       newStats.dailyStats[today].modelUsage[model] = (newStats.dailyStats[today].modelUsage[model] || 0) + 1
     }
-    
     if (providerId) {
       newStats.dailyStats[today].providerUsage[providerId] = (newStats.dailyStats[today].providerUsage[providerId] || 0) + 1
     }
-    
-    this.store!.set('statistics', newStats)
+
+    this.db.setStatistics(newStats)
     return newStats
   }
 
-  /**
-   * Get Today Statistics
-   */
   getTodayStatistics(): DailyStatistics {
     this.ensureInitialized()
-    const stats = this.store!.get('statistics') || DEFAULT_STATISTICS
+    const stats = this.getStatistics()
     const today = new Date().toISOString().split('T')[0]
     return stats.dailyStats[today] || {
       date: today,
@@ -1194,319 +687,159 @@ class StoreManager {
     }
   }
 
-  /**
-   * Clean Old Daily Statistics (older than 30 days)
-   */
   cleanOldDailyStats(): void {
     this.ensureInitialized()
-    const stats = this.store!.get('statistics') || DEFAULT_STATISTICS
+    const stats = this.getStatistics()
     const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000
     const cutoffDate = new Date(cutoff).toISOString().split('T')[0]
-    
+
     const filteredDailyStats: Record<string, DailyStatistics> = {}
     for (const [date, dayStats] of Object.entries(stats.dailyStats)) {
       if (date >= cutoffDate) {
         filteredDailyStats[date] = dayStats as DailyStatistics
       }
     }
-    
+
     if (Object.keys(filteredDailyStats).length !== Object.keys(stats.dailyStats).length) {
       stats.dailyStats = filteredDailyStats
-      this.store!.set('statistics', stats)
+      this.db.setStatistics(stats)
     }
   }
 
   // ==================== System Prompts Operations ====================
 
-  /**
-   * Get All System Prompts
-   * Merges built-in prompts with custom prompts
-   */
   getSystemPrompts(): SystemPrompt[] {
     this.ensureInitialized()
-    const customPrompts = this.store!.get('systemPrompts') || []
-    return [...BUILTIN_PROMPTS, ...customPrompts]
+    return this.db.getSystemPrompts()
   }
 
-  /**
-   * Get Built-in System Prompts
-   */
   getBuiltinPrompts(): SystemPrompt[] {
     return BUILTIN_PROMPTS
   }
 
-  /**
-   * Get Custom System Prompts
-   */
   getCustomPrompts(): SystemPrompt[] {
     this.ensureInitialized()
-    return this.store!.get('systemPrompts') || []
+    return this.db.getCustomPrompts()
   }
 
-  /**
-   * Get System Prompt By ID
-   */
   getSystemPromptById(id: string): SystemPrompt | undefined {
     return this.getSystemPrompts().find(p => p.id === id)
   }
 
-  /**
-   * Add Custom System Prompt
-   */
   addSystemPrompt(prompt: Omit<SystemPrompt, 'id' | 'createdAt' | 'updatedAt'>): SystemPrompt {
     this.ensureInitialized()
-    const prompts = this.store!.get('systemPrompts') || []
-    
-    const newPrompt: SystemPrompt = {
-      ...prompt,
-      id: this.generateId(),
-      isBuiltin: false,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    }
-    
-    prompts.push(newPrompt)
-    this.store!.set('systemPrompts', prompts)
-    
-    return newPrompt
+    return this.db.addSystemPrompt(prompt)
   }
 
-  /**
-   * Update Custom System Prompt
-   * Cannot update built-in prompts
-   */
   updateSystemPrompt(id: string, updates: Partial<SystemPrompt>): SystemPrompt | null {
     this.ensureInitialized()
-    
-    // Check if it's a built-in prompt
-    if (BUILTIN_PROMPTS.some(p => p.id === id)) {
-      console.warn('Cannot update built-in prompt:', id)
-      return null
-    }
-    
-    const prompts = this.store!.get('systemPrompts') || []
-    const index = prompts.findIndex((p: SystemPrompt) => p.id === id)
-    
-    if (index === -1) {
-      return null
-    }
-    
-    prompts[index] = {
-      ...prompts[index],
-      ...updates,
-      updatedAt: Date.now(),
-    }
-    
-    this.store!.set('systemPrompts', prompts)
-    return prompts[index]
+    return this.db.updateSystemPrompt(id, updates)
   }
 
-  /**
-   * Delete Custom System Prompt
-   * Cannot delete built-in prompts
-   */
   deleteSystemPrompt(id: string): boolean {
     this.ensureInitialized()
-    
-    // Check if it's a built-in prompt
-    if (BUILTIN_PROMPTS.some(p => p.id === id)) {
-      console.warn('Cannot delete built-in prompt:', id)
-      return false
-    }
-    
-    const prompts = this.store!.get('systemPrompts') || []
-    const index = prompts.findIndex((p: SystemPrompt) => p.id === id)
-    
-    if (index === -1) {
-      return false
-    }
-    
-    prompts.splice(index, 1)
-    this.store!.set('systemPrompts', prompts)
-    
-    return true
+    return this.db.deleteSystemPrompt(id)
   }
 
-  /**
-   * Get System Prompts By Type
-   */
   getSystemPromptsByType(type: SystemPrompt['type']): SystemPrompt[] {
     return this.getSystemPrompts().filter(p => p.type === type)
   }
 
   // ==================== Session Operations ====================
 
-  /**
-   * Get Session Configuration
-   */
   getSessionConfig(): SessionConfig {
     this.ensureInitialized()
-    const config = this.store!.get('config') || DEFAULT_CONFIG
+    const config = this.getConfig()
     return config.sessionConfig || DEFAULT_SESSION_CONFIG
   }
 
-  /**
-   * Update Session Configuration
-   */
   updateSessionConfig(updates: Partial<SessionConfig>): SessionConfig {
     this.ensureInitialized()
-    const currentConfig = this.store!.get('config') || DEFAULT_CONFIG
+    const currentConfig = this.getConfig()
     const newSessionConfig = {
       ...(currentConfig.sessionConfig || DEFAULT_SESSION_CONFIG),
       ...updates,
     }
-    const newConfig = {
-      ...currentConfig,
-      sessionConfig: newSessionConfig,
-    }
-    this.store!.set('config', newConfig)
+    this.updateConfig({ sessionConfig: newSessionConfig })
     return newSessionConfig
   }
 
-  /**
-   * Get All Sessions
-   */
   getSessions(): SessionRecord[] {
     this.ensureInitialized()
-    return this.store!.get('sessions') || []
+    return this.db.getSessions()
   }
 
-  /**
-   * Get Session By ID
-   */
   getSessionById(id: string): SessionRecord | undefined {
     this.ensureInitialized()
-    const sessions = this.store!.get('sessions') || []
-    return sessions.find((s: SessionRecord) => s.id === id)
+    return this.db.getSessionById(id)
   }
 
-  /**
-   * Get Active Sessions
-   */
   getActiveSessions(): SessionRecord[] {
     this.ensureInitialized()
-    const sessions = this.store!.get('sessions') || []
     const config = this.getSessionConfig()
     const timeoutMs = config.sessionTimeout * 60 * 1000
     const now = Date.now()
-    
-    return sessions.filter((s: SessionRecord) => 
-      s.status === 'active' && 
-      (now - s.lastActiveAt) < timeoutMs
-    )
+    const sessions = this.db.getSessions()
+    return sessions.filter(s => s.status === 'active' && (now - s.lastActiveAt) < timeoutMs)
   }
 
-  /**
-   * Add Session
-   */
   addSession(session: SessionRecord): void {
     this.ensureInitialized()
-    const sessions = this.store!.get('sessions') || []
-    sessions.push(session)
-    this.store!.set('sessions', sessions)
+    this.db.addSession(session)
   }
 
-  /**
-   * Update Session
-   */
   updateSession(id: string, updates: Partial<SessionRecord>): SessionRecord | null {
     this.ensureInitialized()
-    const sessions = this.store!.get('sessions') || []
-    const index = sessions.findIndex((s: SessionRecord) => s.id === id)
-    
-    if (index === -1) {
-      return null
-    }
-    
-    sessions[index] = {
-      ...sessions[index],
-      ...updates,
-    }
-    
-    this.store!.set('sessions', sessions)
-    return sessions[index]
+    return this.db.updateSession(id, updates)
   }
 
-  /**
-   * Add Message to Session
-   */
   addMessageToSession(sessionId: string, message: ChatMessage): SessionRecord | null {
     this.ensureInitialized()
-    const sessions = this.store!.get('sessions') || []
-    const index = sessions.findIndex((s: SessionRecord) => s.id === sessionId)
-    
-    if (index === -1) {
-      return null
-    }
-    
+    const session = this.db.getSessionById(sessionId)
+    if (!session) return null
+
     const config = this.getSessionConfig()
-    const session = sessions[index]
-    
-    if (session.messages.length >= config.maxMessagesPerSession) {
-      session.messages = session.messages.slice(-config.maxMessagesPerSession + 1)
+    let messages = session.messages
+    if (messages.length >= config.maxMessagesPerSession) {
+      messages = messages.slice(-config.maxMessagesPerSession + 1)
     }
-    
-    session.messages.push(message)
-    session.lastActiveAt = Date.now()
-    
-    sessions[index] = session
-    this.store!.set('sessions', sessions)
-    return session
+    messages.push(message)
+
+    const updated = { ...session, messages, lastActiveAt: Date.now() }
+    this.db.updateSession(sessionId, updated)
+    return updated
   }
 
-  /**
-   * Delete Session
-   */
   deleteSession(id: string): boolean {
     this.ensureInitialized()
-    const sessions = this.store!.get('sessions') || []
-    const index = sessions.findIndex((s: SessionRecord) => s.id === id)
-    
-    if (index === -1) {
-      return false
-    }
-    
-    sessions.splice(index, 1)
-    this.store!.set('sessions', sessions)
-    return true
+    return this.db.deleteSession(id)
   }
 
-  /**
-   * Mark Session as Expired
-   */
   expireSession(id: string): SessionRecord | null {
     return this.updateSession(id, { status: 'expired' })
   }
 
-  /**
-   * Clean Expired Sessions
-   * Always delete sessions with 'expired' status
-   * For timed-out active sessions, behavior depends on deleteAfterTimeout config:
-   * - If true: Delete them from storage
-   * - If false: Mark them as 'expired' (will be deleted on next clean)
-   */
   cleanExpiredSessions(): number {
     this.ensureInitialized()
-    const sessions = this.store!.get('sessions') || []
+    const sessions = this.db.getSessions()
     const config = this.getSessionConfig()
     const timeoutMs = config.sessionTimeout * 60 * 1000
     const now = Date.now()
-    
+
     let removedCount = 0
-    
-    // Always delete sessions that are already expired
-    let remainingSessions = sessions.filter((s: SessionRecord) => {
+
+    // Delete sessions with expired status directly
+    let remaining = sessions.filter(s => {
       if (s.status === 'expired') {
         removedCount++
         return false
       }
       return true
     })
-    
-    // Handle timed-out active sessions based on config
+
+    // Handle timed-out active sessions
     if (config.deleteAfterTimeout) {
-      // Delete timed-out sessions from storage
-      remainingSessions = remainingSessions.filter((s: SessionRecord) => {
+      remaining = remaining.filter(s => {
         if (s.status === 'active' && (now - s.lastActiveAt) >= timeoutMs) {
           removedCount++
           return false
@@ -1514,8 +847,7 @@ class StoreManager {
         return true
       })
     } else {
-      // Mark timed-out sessions as expired (will be deleted on next clean)
-      remainingSessions = remainingSessions.map((s: SessionRecord) => {
+      remaining = remaining.map(s => {
         if (s.status === 'active' && (now - s.lastActiveAt) >= timeoutMs) {
           removedCount++
           return { ...s, status: 'expired' as const }
@@ -1523,78 +855,52 @@ class StoreManager {
         return s
       })
     }
-    
-    this.store!.set('sessions', remainingSessions)
-    
+
+    // Clear and re-insert
+    this.db.clearAllSessions()
+    for (const s of remaining) {
+      this.db.addSession(s)
+    }
+
     return removedCount
   }
 
-  /**
-   * Get Sessions By Account ID
-   */
   getSessionsByAccountId(accountId: string): SessionRecord[] {
     this.ensureInitialized()
-    const sessions = this.store!.get('sessions') || []
-    return sessions.filter((s: SessionRecord) => s.accountId === accountId)
+    return this.db.getSessionsByAccountId(accountId)
   }
 
-  /**
-   * Get Sessions By Provider ID
-   */
   getSessionsByProviderId(providerId: string): SessionRecord[] {
     this.ensureInitialized()
-    const sessions = this.store!.get('sessions') || []
-    return sessions.filter((s: SessionRecord) => s.providerId === providerId)
+    return this.db.getSessionsByProviderId(providerId)
   }
 
-  /**
-   * Clear All Sessions
-   */
   clearAllSessions(): void {
     this.ensureInitialized()
-    this.store!.set('sessions', [])
+    this.db.clearAllSessions()
   }
 
   // ==================== Model Management Operations ====================
 
-  /**
-   * Get User Model Overrides
-   */
   private getUserModelOverrides(): UserModelOverrides {
     this.ensureInitialized()
-    return this.store!.get('userModelOverrides') || DEFAULT_USER_MODEL_OVERRIDES
+    return this.db.getUserModelOverrides()
   }
 
-  /**
-   * Set User Model Overrides
-   */
   private setUserModelOverrides(overrides: UserModelOverrides): void {
     this.ensureInitialized()
-    this.store!.set('userModelOverrides', overrides)
+    this.db.setUserModelOverrides(overrides)
   }
 
-  /**
-   * Get Provider Model Overrides
-   */
   private getProviderModelOverrides(providerId: string): ProviderModelOverrides {
     const overrides = this.getUserModelOverrides()
-    return overrides[providerId] || {
-      addedModels: [],
-      excludedModels: [],
-    }
+    return overrides[providerId] || { addedModels: [], excludedModels: [] }
   }
 
-  /**
-   * Get Effective Models for a Provider
-   * Merges default models with user overrides
-   */
   getEffectiveModels(providerId: string): EffectiveModel[] {
     this.ensureInitialized()
-    
     const provider = this.getProviderById(providerId)
-    if (!provider) {
-      return []
-    }
+    if (!provider) return []
 
     const defaultModels = provider.supportedModels || []
     const modelMappings = provider.modelMappings || {}
@@ -1605,11 +911,7 @@ class StoreManager {
     defaultModels.forEach(displayName => {
       if (!overrides.excludedModels.includes(displayName)) {
         const actualModelId = modelMappings[displayName] || displayName
-        effectiveModels.push({
-          displayName,
-          actualModelId,
-          isCustom: false,
-        })
+        effectiveModels.push({ displayName, actualModelId, isCustom: false })
       }
     })
 
@@ -1624,55 +926,33 @@ class StoreManager {
     return effectiveModels
   }
 
-  /**
-   * Add Custom Model to Provider
-   */
   addCustomModel(providerId: string, model: CustomModel): EffectiveModel[] {
     this.ensureInitialized()
-    
     const overrides = this.getUserModelOverrides()
-    
     if (!overrides[providerId]) {
-      overrides[providerId] = {
-        addedModels: [],
-        excludedModels: [],
-      }
+      overrides[providerId] = { addedModels: [], excludedModels: [] }
     }
 
-    const existingModel = overrides[providerId].addedModels.find(
+    const existing = overrides[providerId].addedModels.find(
       m => m.displayName === model.displayName || m.actualModelId === model.actualModelId
     )
-    
-    if (existingModel) {
+    if (existing) {
       throw new Error(`Model with display name "${model.displayName}" or actual ID "${model.actualModelId}" already exists`)
     }
 
     overrides[providerId].addedModels.push(model)
     this.setUserModelOverrides(overrides)
-
     return this.getEffectiveModels(providerId)
   }
 
-  /**
-   * Remove Model from Provider
-   * For default models: add to excludedModels
-   * For custom models: remove from addedModels
-   */
   removeModel(providerId: string, modelName: string): EffectiveModel[] {
     this.ensureInitialized()
-    
     const provider = this.getProviderById(providerId)
-    if (!provider) {
-      throw new Error('Provider not found')
-    }
+    if (!provider) throw new Error('Provider not found')
 
     const overrides = this.getUserModelOverrides()
-    
     if (!overrides[providerId]) {
-      overrides[providerId] = {
-        addedModels: [],
-        excludedModels: [],
-      }
+      overrides[providerId] = { addedModels: [], excludedModels: [] }
     }
 
     const defaultModels = provider.supportedModels || []
@@ -1683,91 +963,152 @@ class StoreManager {
         overrides[providerId].excludedModels.push(modelName)
       }
     } else {
-      overrides[providerId].addedModels = overrides[providerId].addedModels.filter(
-        m => m.displayName !== modelName
-      )
+      overrides[providerId].addedModels = overrides[providerId].addedModels.filter(m => m.displayName !== modelName)
     }
 
     this.setUserModelOverrides(overrides)
-
     return this.getEffectiveModels(providerId)
   }
 
-  /**
-   * Reset Provider Models to Default
-   * Removes all user overrides for the provider
-   */
   resetModels(providerId: string): EffectiveModel[] {
     this.ensureInitialized()
-    
     const overrides = this.getUserModelOverrides()
-    
     if (overrides[providerId]) {
       delete overrides[providerId]
       this.setUserModelOverrides(overrides)
     }
-
     return this.getEffectiveModels(providerId)
+  }
+
+  // ==================== Generic Key-Value Store (for backward compatibility) ====================
+
+  async getItem(key: string): Promise<unknown> {
+    this.ensureInitialized()
+    // Handle known keys
+    switch (key) {
+      case 'providers':
+        return this.db.getProviders()
+      case 'accounts':
+        return this.db.getAccounts()
+      case 'config':
+        return this.db.getConfig() || DEFAULT_CONFIG
+      case 'systemPrompts':
+        return this.db.getCustomPrompts()
+      case 'sessions':
+        return this.db.getSessions()
+      case 'statistics':
+        return this.db.getStatistics() || DEFAULT_STATISTICS
+      case 'userModelOverrides':
+        return this.db.getUserModelOverrides()
+      case 'logs':
+        return this.db.getLogs(undefined, undefined)
+      case 'requestLogs':
+        return this.requestLogManager?.getRequestLogs(undefined, undefined) || []
+      default:
+        // For unknown keys, try generic table
+        return this.db.getGeneric(key)
+    }
+  }
+
+  async setItem(key: string, value: unknown): Promise<void> {
+    this.ensureInitialized()
+    switch (key) {
+      case 'providers':
+        // Not implemented (use addProvider/updateProvider)
+        console.warn('[Store] Direct set of providers not supported')
+        break
+      case 'accounts':
+        console.warn('[Store] Direct set of accounts not supported')
+        break
+      case 'config':
+        this.db.setConfig(value as AppConfig)
+        break
+      case 'systemPrompts':
+        console.warn('[Store] Direct set of systemPrompts not supported')
+        break
+      case 'sessions':
+        console.warn('[Store] Direct set of sessions not supported')
+        break
+      case 'statistics':
+        this.db.setStatistics(value as PersistentStatistics)
+        break
+      case 'userModelOverrides':
+        this.db.setUserModelOverrides(value as UserModelOverrides)
+        break
+      case 'logs':
+        // Not supported, use addLog
+        console.warn('[Store] Direct set of logs not supported')
+        break
+      case 'requestLogs':
+        console.warn('[Store] Direct set of requestLogs not supported')
+        break
+      default:
+        await this.db.setGeneric(key, value)
+    }
+  }
+
+  async deleteItem(key: string): Promise<void> {
+    this.ensureInitialized()
+    switch (key) {
+      case 'logs':
+        this.db.clearLogs()
+        break
+      case 'requestLogs':
+        this.requestLogManager?.clearRequestLogs()
+        break
+      default:
+        await this.db.deleteGeneric(key)
+    }
   }
 
   // ==================== Utility Methods ====================
 
-  /**
-   * Generate Unique ID
-   */
   generateId(): string {
     return `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`
   }
 
-  /**
-   * Get Storage Instance (for internal use only)
-   */
-  getStore(): StoreType | null {
-    return this.store
+  flushPendingWrites(): void {
+    // No-op for SQLite (writes are immediate)
   }
 
-  /**
-   * Get Logs Storage Instance
-   */
-  getLogsStore(): StoreType | null {
-    return this.logsStore
-  }
-
-  /**
-   * Clear All Data
-   */
   clearAll(): void {
     this.ensureInitialized()
-    if (this.logFlushTimer) {
-      clearTimeout(this.logFlushTimer)
-      this.logFlushTimer = null
+    // Clear all tables
+    this.db.clearLogs()
+    this.db.clearAllSessions()
+    this.db.setUserModelOverrides({})
+    // Delete all accounts and providers but keep built-in providers?
+    // Simpler: reinitialize with defaults
+    const providers = this.db.getProviders()
+    const builtinIds = BUILTIN_PROVIDERS.map(p => p.id)
+    for (const p of providers) {
+      if (!builtinIds.includes(p.id)) {
+        this.db.deleteProvider(p.id)
+      }
     }
-    this.pendingLogs = []
-    this.store!.clear()
-    this.logsStore?.clear()
+    for (const acc of this.db.getAccounts()) {
+      this.db.deleteAccount(acc.id)
+    }
+    this.db.setStatistics(DEFAULT_STATISTICS)
+    this.db.setConfig(DEFAULT_CONFIG)
     this.requestLogManager?.clearRequestLogs()
-    this.requestLogManager?.flushSync()
   }
 
-  /**
-   * Export Data (for backup)
-   * Does not include encrypted credential data
-   */
   exportData(): Omit<StoreSchema, 'accounts'> & { accounts: Omit<Account, 'credentials'>[] } {
     this.ensureInitialized()
-    const providers = this.store!.get('providers') || []
-    const accounts = (this.store!.get('accounts') || []).map((a: Account) => {
+    const providers = this.db.getProviders()
+    const accounts = this.db.getAccounts().map(a => {
       const { credentials, ...rest } = a
       return rest
     })
-    const config = this.store!.get('config') || DEFAULT_CONFIG
-    const logs = (this.logsStore?.get('logs') as LogEntry[]) || []
-    const requestLogs = this.getRequestLogManager().exportRequestLogs()
-    const systemPrompts = this.store!.get('systemPrompts') || []
-    const sessions = this.store!.get('sessions') || []
-    const statistics = this.store!.get('statistics') || DEFAULT_STATISTICS
-    const userModelOverrides = this.store!.get('userModelOverrides') || DEFAULT_USER_MODEL_OVERRIDES
-    
+    const config = this.db.getConfig() || DEFAULT_CONFIG
+    const logs = this.db.getLogs(undefined, undefined)
+    const requestLogs = this.requestLogManager?.exportRequestLogs() || []
+    const systemPrompts = this.db.getCustomPrompts()
+    const sessions = this.db.getSessions()
+    const statistics = this.db.getStatistics() || DEFAULT_STATISTICS
+    const userModelOverrides = this.db.getUserModelOverrides()
+
     return {
       providers,
       accounts,
@@ -1781,11 +1122,92 @@ class StoreManager {
     }
   }
 
-  /**
-   * Get Storage Path
-   */
   getStorePath(): string {
-    return this.getStoragePath()
+    return join(homedir(), '.chat2api')
+  }
+
+  /**
+   * Get Store instance (for backward compatibility with electron-store)
+   * Returns null since SQLite doesn't have a store instance
+   */
+  getStore(): null {
+    return null
+  }
+
+  /**
+   * Get Logs Store instance (for backward compatibility with electron-store)
+   * Returns null since SQLite doesn't have a separate logs store
+   */
+  getLogsStore(): null {
+    return null
+  }
+
+  /**
+   * Ensure credentials encryption consistency with current config
+   * Converts all stored credentials to match the current encryption setting
+   */
+  private async ensureCredentialsEncryptionConsistency(): Promise<void> {
+    const config = this.getConfig()
+    const shouldEncrypt = config.credentialEncryption && safeStorage.isEncryptionAvailable()
+    const accounts = this.db.getAccounts()
+    let modifiedCount = 0
+
+    for (const account of accounts) {
+      const storedCreds = account.credentials
+      const newCreds: Record<string, string> = {}
+      let needsUpdate = false
+
+      for (const [key, value] of Object.entries(storedCreds)) {
+        // Determine if the current value is encrypted
+        let isEncrypted = false
+        if (safeStorage.isEncryptionAvailable() && /^[A-Za-z0-9+/]*={0,2}$/.test(value) && value.length > 20) {
+          // Attempt to decrypt to see if it's valid encrypted data
+          try {
+            const buffer = Buffer.from(value, 'base64')
+            safeStorage.decryptString(buffer)
+            isEncrypted = true
+          } catch {
+            // Not valid encrypted data
+          }
+        }
+
+        if (shouldEncrypt && !isEncrypted) {
+          // Need to encrypt plaintext
+          try {
+            const encrypted = safeStorage.encryptString(value)
+            newCreds[key] = encrypted.toString('base64')
+            needsUpdate = true
+          } catch (err) {
+            console.error(`[Store] Failed to encrypt credential ${key} for account ${account.id}:`, err)
+            newCreds[key] = value // keep as plaintext
+          }
+        } else if (!shouldEncrypt && isEncrypted) {
+          // Need to decrypt to plaintext
+          try {
+            const buffer = Buffer.from(value, 'base64')
+            const decrypted = safeStorage.decryptString(buffer)
+            newCreds[key] = decrypted
+            needsUpdate = true
+          } catch (err) {
+            console.error(`[Store] Failed to decrypt credential ${key} for account ${account.id}:`, err)
+            newCreds[key] = value // keep as is
+          }
+        } else {
+          // Already correct format
+          newCreds[key] = value
+        }
+      }
+
+      if (needsUpdate) {
+        const updatedAccount = { ...account, credentials: newCreds, updatedAt: Date.now() }
+        this.db.updateAccount(account.id, updatedAccount)
+        modifiedCount++
+      }
+    }
+
+    if (modifiedCount > 0) {
+      console.log(`[Store] Normalized credentials encryption for ${modifiedCount} accounts (encryption=${shouldEncrypt})`)
+    }
   }
 
   private getRequestLogManager(): RequestLogManager {
@@ -1798,6 +1220,3 @@ class StoreManager {
 
 // Export singleton instance
 export const storeManager = new StoreManager()
-
-// Export types
-export type { StoreType }
