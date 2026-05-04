@@ -589,6 +589,8 @@ CRITICAL RULES:
         temperature: transformedRequest.temperature,
         web_search: transformedRequest.web_search,
         reasoning_effort: transformedRequest.reasoning_effort,
+        providerSessionId: request.providerSessionId,
+        parentMessageId: request.parentMessageId,
       })
 
       const latency = Date.now() - startTime
@@ -634,7 +636,8 @@ CRITICAL RULES:
       
       if (request.stream) {
         const transformedStream = await handler.handleStream(response.data)
-        
+        ;(transformedStream as any)._handler = handler
+
         return {
           success: true,
           status: response.status,
@@ -804,6 +807,8 @@ CRITICAL RULES:
         temperature: request.temperature,
         enableThinking: !!request.reasoning_effort,
         enableWebSearch: !!request.web_search,
+        providerSessionId: request.providerSessionId,
+        parentMessageId: request.parentMessageId,
       })
 
       const latency = Date.now() - startTime
@@ -837,6 +842,9 @@ CRITICAL RULES:
           }
         }
         
+        // Attach handler to stream for post-stream session ID extraction
+        (transformedStream as any)._handler = handler
+
         return {
           success: true,
           status: response.status,
@@ -844,7 +852,7 @@ CRITICAL RULES:
           stream: transformedStream,
           skipTransform: true,
           latency,
-          providerSessionId: undefined,
+          providerSessionId: handler.getConversationId() || conversationId || undefined,
         }
       }
 
@@ -992,6 +1000,8 @@ CRITICAL RULES:
         stream: request.stream,
         temperature: request.temperature,
         enable_thinking: !!request.reasoning_effort,
+        providerSessionId: request.providerSessionId,
+        parentMessageId: request.parentMessageId,
       })
 
       const latency = Date.now() - startTime
@@ -1011,6 +1021,7 @@ CRITICAL RULES:
 
       if (request.stream) {
         const transformedStream = await handler.handleStream(response.data)
+        ;(transformedStream as any)._handler = handler
 
         if (shouldDeleteSession()) {
           const originalEnd = transformedStream.end.bind(transformedStream)

@@ -3,20 +3,50 @@ import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { useTheme } from '@/hooks/useTheme'
 import { useSettingsStore, Theme, Language } from '@/stores/settingsStore'
-import { Sun, Moon, PanelLeft, Languages } from 'lucide-react'
+import { Sun, Moon, PanelLeft, Languages, Save } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { useState, useEffect } from 'react'
+import { useToast } from '@/hooks/use-toast'
 
 export function AppearanceSettings() {
   const { t } = useTranslation()
-  const { theme, setTheme } = useTheme()
-  const { 
-    sidebarCollapsed, 
-    setSidebarCollapsed, 
-    language, 
-    setLanguage 
+  const {
+    theme: savedTheme,
+    setTheme: saveTheme,
+    sidebarCollapsed: savedCollapsed,
+    setSidebarCollapsed: saveCollapsed,
+    language: savedLanguage,
+    setLanguage: saveLanguage,
+    saveSettings,
   } = useSettingsStore()
+  const { toast } = useToast()
+
+  const [theme, setThemeDraft] = useState<Theme>(savedTheme)
+  const [language, setLanguageDraft] = useState<Language>(savedLanguage)
+  const [sidebarCollapsed, setSidebarCollapsedDraft] = useState(savedCollapsed)
+  const [isSaving, setIsSaving] = useState(false)
+
+  useEffect(() => {
+    setThemeDraft(savedTheme)
+    setLanguageDraft(savedLanguage)
+    setSidebarCollapsedDraft(savedCollapsed)
+  }, [savedTheme, savedLanguage, savedCollapsed])
+
+  const handleSave = async () => {
+    setIsSaving(true)
+    try {
+      saveTheme(theme)
+      saveLanguage(language)
+      saveCollapsed(sidebarCollapsed)
+      await saveSettings()
+      toast({ title: t('common.success'), description: t('settings.saveSuccess') })
+    } catch {
+      toast({ title: t('common.error'), description: t('settings.saveFailed'), variant: 'destructive' })
+    } finally {
+      setIsSaving(false)
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -40,7 +70,7 @@ export function AppearanceSettings() {
                 <Button
                   key={value}
                   variant={theme === value ? 'default' : 'outline'}
-                  onClick={() => setTheme(value as Theme)}
+                  onClick={() => setThemeDraft(value as Theme)}
                   className="flex items-center gap-2"
                 >
                   <Icon className="h-4 w-4" />
@@ -69,7 +99,7 @@ export function AppearanceSettings() {
             </div>
             <Select
               value={language}
-              onValueChange={(value) => setLanguage(value as Language)}
+              onValueChange={(value) => setLanguageDraft(value as Language)}
             >
               <SelectTrigger className="w-[180px]">
                 <SelectValue placeholder={t('settings.language')} />
@@ -101,11 +131,18 @@ export function AppearanceSettings() {
             <Switch
               id="sidebar-collapsed"
               checked={sidebarCollapsed}
-              onCheckedChange={setSidebarCollapsed}
+              onCheckedChange={setSidebarCollapsedDraft}
             />
           </div>
         </CardContent>
       </Card>
+
+      <div className="flex justify-end">
+        <Button onClick={handleSave} disabled={isSaving} className="flex items-center gap-2">
+          <Save className="h-4 w-4" />
+          {isSaving ? t('settings.saving') : t('settings.save')}
+        </Button>
+      </div>
     </div>
   )
 }

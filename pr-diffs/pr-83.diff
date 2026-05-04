@@ -1,0 +1,64 @@
+diff --git a/src/main/proxy/adapters/qwen-ai.ts b/src/main/proxy/adapters/qwen-ai.ts
+index 631639d..c3e55b8 100644
+--- a/src/main/proxy/adapters/qwen-ai.ts
++++ b/src/main/proxy/adapters/qwen-ai.ts
+@@ -289,15 +289,15 @@ export class QwenAiAdapter {
+     // 1. Model name suffix: -thinking (force thinking), -fast (force fast mode)
+     // 2. enable_thinking parameter for explicit control
+     // 3. If neither is specified, thinking mode is disabled by default (fast mode)
+-    const shouldEnableThinking = forceThinking !== undefined 
+-      ? forceThinking 
+-      : request.enable_thinking === true
++    const shouldEnableThinking = forceThinking !== undefined
++      ? forceThinking
++      : request.enable_thinking !== false
+     
+     const featureConfig: Record<string, any> = {
+       thinking_enabled: shouldEnableThinking,
+       output_schema: 'phase',
+       research_mode: 'normal',
+-      auto_thinking: shouldEnableThinking,
++      auto_thinking: true,
+       thinking_format: 'summary',
+       auto_search: false, // Default to disable auto search
+     }
+@@ -576,13 +576,16 @@ export class QwenAiStreamHandler {
+                 transStream.write(`data: ${JSON.stringify(chunk)}\n\n`)
+                 console.log('[QwenAI] Content chunk written')
+               }
+-            } else if (phase === null && content) {
++            } else if (content) {
++              if (phase && phase !== 'answer') {
++                console.log('[QwenAI] Content from non-standard phase:', phase)
++              }
+               if (!initialChunkSent) {
+                 sendInitialChunk()
+               }
+               // Accumulate content for tool call detection
+               this.content += content
+-              
++
+               const chunk = {
+                 id: this.responseId || this.chatId,
+                 model: this.model,
+@@ -593,7 +596,7 @@ export class QwenAiStreamHandler {
+               transStream.write(`data: ${JSON.stringify(chunk)}\n\n`)
+             }
+ 
+-            if (status === 'finished' && (phase === 'answer' || phase === null)) {
++            if (status === 'finished' && (phase === 'answer' || phase === null || content)) {
+               // Check for tool calls before sending stop
+               if (hasToolUse(this.content)) {
+                 console.log('[QwenAI] Found tool_use in stream, sending tool_calls')
+@@ -721,7 +724,10 @@ export class QwenAiStreamHandler {
+ 
+                   resolveOnce(data)
+                 }
+-              } else if (phase === null && content) {
++              } else if (content) {
++                if (phase && phase !== 'answer') {
++                  console.log('[QwenAI] Non-stream content from non-standard phase:', phase)
++                }
+                 data.choices[0].message.content += content
+               }
+             }

@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Release-v1.2.0-blue?style=flat-square&logo=github" alt="Release">
+  <img src="https://img.shields.io/badge/Release-v1.4.0-blue?style=flat-square&logo=github" alt="Release">
   <img src="https://img.shields.io/badge/License-GPL--3.0-blue?style=flat-square" alt="License">
   <br>
   <a href="https://www.electronjs.org/"><img src="https://img.shields.io/badge/Electron-33+-47848F?style=flat-square&logo=electron&logoColor=white" alt="Electron"></a>
@@ -31,27 +31,31 @@
 ## ✨ Features
 
 - OpenAI Compatible API: Provides standard OpenAI-compatible API endpoints for seamless integration
-- Multi-Provider Support: Connect DeepSeek, GLM, Kimi, MiniMax, Perplexity 🆕, Qwen, Z.ai and more
+- Multi-Provider Support: Connect DeepSeek (V4 Pro/Flash), GLM, Kimi (K2.6), MiniMax, Perplexity 🆕, Qwen, Z.ai and more
 - 🆕 Context Management: Intelligent conversation context management with sliding window, token limit, and summary strategies
+- 🆕 Multi-Turn Sessions: Automatic session reuse for multi-turn conversations across all providers
 - 🆕 Function Calling Support: Universal tool calling capability for all models via prompt engineering, compatible with Cherry Studio, Kilo Code, and other clients
 - 🆕 Model Mapping: Flexible model name mapping with wildcard support and preferred provider/account selection
 - 🆕 Custom Parameters: Support for custom HTTP headers to enable web search, thinking mode, and deep research features
+- 🆕 Weighted Load Balancing: Account-level weighted random selection for fine-grained traffic control
+- 🆕 Credential Encryption: Toggle credential encryption in stored configuration
 - Dashboard Monitoring: Real-time request traffic, token usage, and success rates
 - API Key Management: Generate and manage keys for your local proxy
 - Model Management: View and manage available models from all providers
-- Request Logs: Detailed request logging for debugging and analysis
+- Request Logs: Detailed request logging with separate storage for performance
 - Proxy Configuration: Flexible proxy settings and routing strategies
 - System Tray Integration: Quick access to status from menu bar
 - Multilingual: English and Simplified Chinese support
 - Modern UI: Clean, responsive interface with dark/light theme support
+- Settings Draft Mode: Edit settings with preview before saving
 
 ## 🤖 Supported Providers
 
 | Provider         | Auth Type     | OAuth | Models                                                                          |
 | ---------------- | ------------- | ----- | ------------------------------------------------------------------------------- |
-| DeepSeek         | User Token    | Yes   | DeepSeek-V3.2                                                                   |
+| DeepSeek         | User Token    | Yes   | DeepSeek V4 Pro, DeepSeek V4 Flash, DeepSeek-V3.2, DeepSeek-R1                 |
 | GLM              | Refresh Token | Yes   | GLM-5                                                                           |
-| Kimi             | JWT Token     | Yes   | kimi-k2.5                                                                       |
+| Kimi             | Cookie/Auth   | Yes   | Kimi-K2.6, Kimi-K2.5                                                            |
 | MiniMax          | JWT Token     | Yes   | MiniMax-M2.5                                                                    |
 | 🆕 Perplexity    | JWT Token     | Yes   | Sonar, Sonar Pro, Sonar Deep Research                                           |
 | Qwen (CN)        | SSO Ticket    | Yes   | Qwen3.5-Plus, Qwen3-Max, Qwen3-Flash, Qwen3-Coder, qwen-max-latest              |
@@ -62,7 +66,7 @@
 
 ### Download
 
-Download the latest release from [GitHub Releases](https://github.com/xiaoY233/Chat2API/releases):
+Download the latest release from [GitHub Releases](https://github.com/leisvip/Chat2API/releases):
 
 | Platform              | Download                                |
 | --------------------- | --------------------------------------- |
@@ -81,7 +85,7 @@ Download the latest release from [GitHub Releases](https://github.com/xiaoY233/C
 
 ```bash
 # Clone the repository
-git clone https://github.com/xiaoY233/Chat2API.git
+git clone https://github.com/leisvip/Chat2API.git
 cd Chat2API
 
 # Install dependencies
@@ -239,7 +243,7 @@ sudo xattr -rd com.apple.quarantine "/Applications/Chat2API.app"
 
 ### How to update?
 
-Check for updates in the **About** page, or download the latest version from [GitHub Releases](https://github.com/xiaoY233/Chat2API/releases).
+Check for updates in the **About** page, or download the latest version from [GitHub Releases](https://github.com/leisvip/Chat2API/releases).
 
 ## 🤝 Contributing
 

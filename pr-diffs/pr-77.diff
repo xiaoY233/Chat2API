@@ -1,0 +1,511 @@
+diff --git a/src/renderer/src/components/settings/AppearanceSettings.tsx b/src/renderer/src/components/settings/AppearanceSettings.tsx
+index 32349d4..9ccdbab 100644
+--- a/src/renderer/src/components/settings/AppearanceSettings.tsx
++++ b/src/renderer/src/components/settings/AppearanceSettings.tsx
+@@ -3,20 +3,50 @@ import { Button } from '@/components/ui/button'
+ import { Label } from '@/components/ui/label'
+ import { Switch } from '@/components/ui/switch'
+ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+-import { useTheme } from '@/hooks/useTheme'
+ import { useSettingsStore, Theme, Language } from '@/stores/settingsStore'
+-import { Sun, Moon, PanelLeft, Languages } from 'lucide-react'
++import { Sun, Moon, PanelLeft, Languages, Save } from 'lucide-react'
+ import { useTranslation } from 'react-i18next'
++import { useState, useEffect } from 'react'
++import { useToast } from '@/hooks/use-toast'
+ 
+ export function AppearanceSettings() {
+   const { t } = useTranslation()
+-  const { theme, setTheme } = useTheme()
+-  const { 
+-    sidebarCollapsed, 
+-    setSidebarCollapsed, 
+-    language, 
+-    setLanguage 
++  const {
++    theme: savedTheme,
++    setTheme: saveTheme,
++    sidebarCollapsed: savedCollapsed,
++    setSidebarCollapsed: saveCollapsed,
++    language: savedLanguage,
++    setLanguage: saveLanguage,
++    saveSettings,
+   } = useSettingsStore()
++  const { toast } = useToast()
++
++  const [theme, setThemeDraft] = useState<Theme>(savedTheme)
++  const [language, setLanguageDraft] = useState<Language>(savedLanguage)
++  const [sidebarCollapsed, setSidebarCollapsedDraft] = useState(savedCollapsed)
++  const [isSaving, setIsSaving] = useState(false)
++
++  useEffect(() => {
++    setThemeDraft(savedTheme)
++    setLanguageDraft(savedLanguage)
++    setSidebarCollapsedDraft(savedCollapsed)
++  }, [savedTheme, savedLanguage, savedCollapsed])
++
++  const handleSave = async () => {
++    setIsSaving(true)
++    try {
++      saveTheme(theme)
++      saveLanguage(language)
++      saveCollapsed(sidebarCollapsed)
++      await saveSettings()
++      toast({ title: t('common.success'), description: t('settings.saveSuccess') })
++    } catch {
++      toast({ title: t('common.error'), description: t('settings.saveFailed'), variant: 'destructive' })
++    } finally {
++      setIsSaving(false)
++    }
++  }
+ 
+   return (
+     <div className="space-y-6">
+@@ -40,7 +70,7 @@ export function AppearanceSettings() {
+                 <Button
+                   key={value}
+                   variant={theme === value ? 'default' : 'outline'}
+-                  onClick={() => setTheme(value as Theme)}
++                  onClick={() => setThemeDraft(value as Theme)}
+                   className="flex items-center gap-2"
+                 >
+                   <Icon className="h-4 w-4" />
+@@ -69,7 +99,7 @@ export function AppearanceSettings() {
+             </div>
+             <Select
+               value={language}
+-              onValueChange={(value) => setLanguage(value as Language)}
++              onValueChange={(value) => setLanguageDraft(value as Language)}
+             >
+               <SelectTrigger className="w-[180px]">
+                 <SelectValue placeholder={t('settings.language')} />
+@@ -101,11 +131,18 @@ export function AppearanceSettings() {
+             <Switch
+               id="sidebar-collapsed"
+               checked={sidebarCollapsed}
+-              onCheckedChange={setSidebarCollapsed}
++              onCheckedChange={setSidebarCollapsedDraft}
+             />
+           </div>
+         </CardContent>
+       </Card>
++
++      <div className="flex justify-end">
++        <Button onClick={handleSave} disabled={isSaving} className="flex items-center gap-2">
++          <Save className="h-4 w-4" />
++          {isSaving ? t('settings.saving') : t('settings.save')}
++        </Button>
++      </div>
+     </div>
+   )
+ }
+diff --git a/src/renderer/src/components/settings/DataManagement.tsx b/src/renderer/src/components/settings/DataManagement.tsx
+index eafd55d..0196b80 100644
+--- a/src/renderer/src/components/settings/DataManagement.tsx
++++ b/src/renderer/src/components/settings/DataManagement.tsx
+@@ -1,4 +1,4 @@
+-import { useState } from 'react'
++import { useState, useEffect } from 'react'
+ import { useTranslation } from 'react-i18next'
+ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+ import { Button } from '@/components/ui/button'
+@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input'
+ import { Label } from '@/components/ui/label'
+ import { useSettingsStore, LogLevel } from '@/stores/settingsStore'
+ import { useToast } from '@/hooks/use-toast'
+-import { Database, Download, Upload, Trash2, RotateCcw, AlertTriangle } from 'lucide-react'
++import { Database, Download, Upload, Trash2, RotateCcw, AlertTriangle, Save } from 'lucide-react'
+ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+ import { Switch } from '@/components/ui/switch'
+ import {
+@@ -22,21 +22,33 @@ import {
+ export function DataManagement() {
+   const { t } = useTranslation()
+   const {
+-    logLevel,
+-    setLogLevel,
+-    logRetentionDays,
+-    setLogRetentionDays,
+-    maxLogs,
+-    setMaxLogs,
++    logLevel: savedLogLevel,
++    setLogLevel: saveLogLevel,
++    logRetentionDays: savedLogRetentionDays,
++    setLogRetentionDays: saveLogRetentionDays,
++    maxLogs: savedMaxLogs,
++    setMaxLogs: saveMaxLogs,
+     config,
+     updateConfig,
++    saveSettings,
+   } = useSettingsStore()
+   const { toast } = useToast()
++
++  const [logLevel, setLogLevelDraft] = useState<LogLevel>(savedLogLevel)
++  const [logRetentionDays, setLogRetentionDaysDraft] = useState(savedLogRetentionDays)
++  const [maxLogs, setMaxLogsDraft] = useState(savedMaxLogs)
++  const [isSaving, setIsSaving] = useState(false)
+   const [isExporting, setIsExporting] = useState(false)
+   const [isImporting, setIsImporting] = useState(false)
+   const [isClearing, setIsClearing] = useState(false)
+   const [isResetting, setIsResetting] = useState(false)
+ 
++  useEffect(() => {
++    setLogLevelDraft(savedLogLevel)
++    setLogRetentionDaysDraft(savedLogRetentionDays)
++    setMaxLogsDraft(savedMaxLogs)
++  }, [savedLogLevel, savedLogRetentionDays, savedMaxLogs])
++
+   const requestLogConfig = config?.requestLogConfig ?? {
+     enabled: true,
+     maxEntries: 200,
+@@ -142,11 +154,11 @@ export function DataManagement() {
+     try {
+       localStorage.clear()
+       sessionStorage.clear()
+-      
++
+       if (window.electronAPI?.store?.clearAll) {
+         await window.electronAPI.store.clearAll()
+       }
+-      
++
+       toast({
+         title: t('common.success'),
+         description: t('settings.resetSuccess'),
+@@ -165,6 +177,21 @@ export function DataManagement() {
+     }
+   }
+ 
++  const handleSave = async () => {
++    setIsSaving(true)
++    try {
++      saveLogLevel(logLevel)
++      saveLogRetentionDays(logRetentionDays)
++      saveMaxLogs(maxLogs)
++      await saveSettings()
++      toast({ title: t('common.success'), description: t('settings.saveSuccess') })
++    } catch {
++      toast({ title: t('common.error'), description: t('settings.saveFailed'), variant: 'destructive' })
++    } finally {
++      setIsSaving(false)
++    }
++  }
++
+   return (
+     <div className="space-y-6">
+       <Card>
+@@ -181,7 +208,7 @@ export function DataManagement() {
+           <div className="grid gap-4 md:grid-cols-3">
+             <div className="space-y-2 p-3 rounded-xl bg-[var(--glass-bg)] border border-[var(--glass-border)]">
+               <Label htmlFor="log-level">{t('settings.logLevel')}</Label>
+-              <Select value={logLevel} onValueChange={(value) => setLogLevel(value as LogLevel)}>
++              <Select value={logLevel} onValueChange={(value) => setLogLevelDraft(value as LogLevel)}>
+                 <SelectTrigger id="log-level">
+                   <SelectValue placeholder={t('settings.selectLogLevel')} />
+                 </SelectTrigger>
+@@ -202,7 +229,7 @@ export function DataManagement() {
+                 min={1}
+                 max={365}
+                 value={logRetentionDays}
+-                onChange={(e) => setLogRetentionDays(parseInt(e.target.value) || 30)}
++                onChange={(e) => setLogRetentionDaysDraft(parseInt(e.target.value) || 30)}
+               />
+               <p className="text-xs text-muted-foreground">{t('settings.logRetentionHelp')}</p>
+             </div>
+@@ -214,7 +241,7 @@ export function DataManagement() {
+                 min={100}
+                 max={100000}
+                 value={maxLogs}
+-                onChange={(e) => setMaxLogs(parseInt(e.target.value) || 10000)}
++                onChange={(e) => setMaxLogsDraft(parseInt(e.target.value) || 10000)}
+               />
+               <p className="text-xs text-muted-foreground">{t('settings.maxLogsHelp')}</p>
+             </div>
+@@ -397,6 +424,13 @@ export function DataManagement() {
+           </div>
+         </CardContent>
+       </Card>
++
++      <div className="flex justify-end">
++        <Button onClick={handleSave} disabled={isSaving} className="flex items-center gap-2">
++          <Save className="h-4 w-4" />
++          {isSaving ? t('settings.saving') : t('settings.save')}
++        </Button>
++      </div>
+     </div>
+   )
+ }
+diff --git a/src/renderer/src/components/settings/GeneralSettings.tsx b/src/renderer/src/components/settings/GeneralSettings.tsx
+index d1d0412..d1415d2 100644
+--- a/src/renderer/src/components/settings/GeneralSettings.tsx
++++ b/src/renderer/src/components/settings/GeneralSettings.tsx
+@@ -5,24 +5,64 @@ import { Switch } from '@/components/ui/switch'
+ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+ import { Separator } from '@/components/ui/separator'
+ import { useSettingsStore, CloseBehavior, OAuthProxyMode } from '@/stores/settingsStore'
+-import { Bell, Minimize2, Power, Globe } from 'lucide-react'
++import { Bell, Minimize2, Power, Globe, Save } from 'lucide-react'
++import { Button } from '@/components/ui/button'
++import { useState, useEffect } from 'react'
++import { useToast } from '@/hooks/use-toast'
+ 
+ export function GeneralSettings() {
+   const { t } = useTranslation()
+   const {
+-    autoStart,
+-    setAutoStart,
+-    autoStartProxy,
+-    setAutoStartProxy,
+-    minimizeToTray,
+-    setMinimizeToTray,
+-    closeBehavior,
+-    setCloseBehavior,
+-    enableNotifications,
+-    setEnableNotifications,
+-    oauthProxyMode,
+-    setOauthProxyMode,
++    autoStart: savedAutoStart,
++    setAutoStart: saveAutoStart,
++    autoStartProxy: savedAutoStartProxy,
++    setAutoStartProxy: saveAutoStartProxy,
++    minimizeToTray: savedMinimizeToTray,
++    setMinimizeToTray: saveMinimizeToTray,
++    closeBehavior: savedCloseBehavior,
++    setCloseBehavior: saveCloseBehavior,
++    enableNotifications: savedEnableNotifications,
++    setEnableNotifications: saveEnableNotifications,
++    oauthProxyMode: savedOauthProxyMode,
++    setOauthProxyMode: saveOauthProxyMode,
++    saveSettings,
+   } = useSettingsStore()
++  const { toast } = useToast()
++
++  const [autoStart, setAutoStartDraft] = useState(savedAutoStart)
++  const [autoStartProxy, setAutoStartProxyDraft] = useState(savedAutoStartProxy)
++  const [minimizeToTray, setMinimizeToTrayDraft] = useState(savedMinimizeToTray)
++  const [closeBehavior, setCloseBehaviorDraft] = useState<CloseBehavior>(savedCloseBehavior)
++  const [enableNotifications, setEnableNotificationsDraft] = useState(savedEnableNotifications)
++  const [oauthProxyMode, setOauthProxyModeDraft] = useState<OAuthProxyMode>(savedOauthProxyMode)
++  const [isSaving, setIsSaving] = useState(false)
++
++  useEffect(() => {
++    setAutoStartDraft(savedAutoStart)
++    setAutoStartProxyDraft(savedAutoStartProxy)
++    setMinimizeToTrayDraft(savedMinimizeToTray)
++    setCloseBehaviorDraft(savedCloseBehavior)
++    setEnableNotificationsDraft(savedEnableNotifications)
++    setOauthProxyModeDraft(savedOauthProxyMode)
++  }, [savedAutoStart, savedAutoStartProxy, savedMinimizeToTray, savedCloseBehavior, savedEnableNotifications, savedOauthProxyMode])
++
++  const handleSave = async () => {
++    setIsSaving(true)
++    try {
++      saveAutoStart(autoStart)
++      saveAutoStartProxy(autoStartProxy)
++      saveMinimizeToTray(minimizeToTray)
++      saveCloseBehavior(closeBehavior)
++      saveEnableNotifications(enableNotifications)
++      saveOauthProxyMode(oauthProxyMode)
++      await saveSettings()
++      toast({ title: t('common.success'), description: t('settings.saveSuccess') })
++    } catch {
++      toast({ title: t('common.error'), description: t('settings.saveFailed'), variant: 'destructive' })
++    } finally {
++      setIsSaving(false)
++    }
++  }
+ 
+   return (
+     <div className="space-y-6">
+@@ -42,7 +82,7 @@ export function GeneralSettings() {
+             <Switch
+               id="auto-start"
+               checked={autoStart}
+-              onCheckedChange={setAutoStart}
++              onCheckedChange={setAutoStartDraft}
+             />
+           </div>
+           <Separator />
+@@ -54,7 +94,7 @@ export function GeneralSettings() {
+             <Switch
+               id="auto-start-proxy"
+               checked={autoStartProxy}
+-              onCheckedChange={setAutoStartProxy}
++              onCheckedChange={setAutoStartProxyDraft}
+             />
+           </div>
+         </CardContent>
+@@ -76,7 +116,7 @@ export function GeneralSettings() {
+             <Switch
+               id="minimize-tray"
+               checked={minimizeToTray}
+-              onCheckedChange={setMinimizeToTray}
++              onCheckedChange={setMinimizeToTrayDraft}
+             />
+           </div>
+           <Separator />
+@@ -87,7 +127,7 @@ export function GeneralSettings() {
+             </div>
+             <Select
+               value={closeBehavior}
+-              onValueChange={(value) => setCloseBehavior(value as CloseBehavior)}
++              onValueChange={(value) => setCloseBehaviorDraft(value as CloseBehavior)}
+             >
+               <SelectTrigger className="w-[180px]">
+                 <SelectValue placeholder={t('settings.closeBehavior')} />
+@@ -118,7 +158,7 @@ export function GeneralSettings() {
+             <Switch
+               id="notifications"
+               checked={enableNotifications}
+-              onCheckedChange={setEnableNotifications}
++              onCheckedChange={setEnableNotificationsDraft}
+             />
+           </div>
+         </CardContent>
+@@ -139,7 +179,7 @@ export function GeneralSettings() {
+             </div>
+             <Select
+               value={oauthProxyMode}
+-              onValueChange={(value) => setOauthProxyMode(value as OAuthProxyMode)}
++              onValueChange={(value) => setOauthProxyModeDraft(value as OAuthProxyMode)}
+             >
+               <SelectTrigger className="w-[180px]">
+                 <SelectValue placeholder={t('settings.oauthProxyMode')} />
+@@ -152,6 +192,13 @@ export function GeneralSettings() {
+           </div>
+         </CardContent>
+       </Card>
++
++      <div className="flex justify-end">
++        <Button onClick={handleSave} disabled={isSaving} className="flex items-center gap-2">
++          <Save className="h-4 w-4" />
++          {isSaving ? t('settings.saving') : t('settings.save')}
++        </Button>
++      </div>
+     </div>
+   )
+ }
+diff --git a/src/renderer/src/i18n/locales/en-US.json b/src/renderer/src/i18n/locales/en-US.json
+index 8dd3ffa..fcc8a7e 100644
+--- a/src/renderer/src/i18n/locales/en-US.json
++++ b/src/renderer/src/i18n/locales/en-US.json
+@@ -629,6 +629,10 @@
+   "settings": {
+     "title": "Settings",
+     "description": "Manage application settings and preferences",
++    "save": "Save Settings",
++    "saving": "Saving...",
++    "saveSuccess": "Settings saved successfully",
++    "saveFailed": "Failed to save settings",
+     "appearance": "Appearance",
+     "theme": "Theme",
+     "themeSettings": "Theme Settings",
+diff --git a/src/renderer/src/i18n/locales/zh-CN.json b/src/renderer/src/i18n/locales/zh-CN.json
+index 07e1248..be5c465 100644
+--- a/src/renderer/src/i18n/locales/zh-CN.json
++++ b/src/renderer/src/i18n/locales/zh-CN.json
+@@ -629,6 +629,10 @@
+   "settings": {
+     "title": "设置",
+     "description": "管理应用程序设置和偏好",
++    "save": "保存设置",
++    "saving": "保存中...",
++    "saveSuccess": "设置保存成功",
++    "saveFailed": "设置保存失败",
+     "appearance": "外观",
+     "theme": "主题",
+     "themeSettings": "主题设置",
+diff --git a/src/renderer/src/stores/settingsStore.ts b/src/renderer/src/stores/settingsStore.ts
+index 3f77c59..c4d9850 100644
+--- a/src/renderer/src/stores/settingsStore.ts
++++ b/src/renderer/src/stores/settingsStore.ts
+@@ -45,6 +45,7 @@ interface SettingsState {
+   setConfig: (config: AppConfig) => void
+   updateConfig: (updates: Partial<AppConfig>) => Promise<void>
+   fetchConfig: () => Promise<void>
++  saveSettings: () => Promise<void>
+ }
+ 
+ export const useSettingsStore = create<SettingsState>()(
+@@ -58,42 +59,16 @@ export const useSettingsStore = create<SettingsState>()(
+       proxyEnabled: false,
+       setProxyEnabled: (enabled) => set({ proxyEnabled: enabled }),
+       oauthProxyMode: 'system',
+-      setOauthProxyMode: async (mode) => {
+-        set({ oauthProxyMode: mode })
+-        try {
+-          await window.electronAPI.config.update({ oauthProxyMode: mode })
+-        } catch (error) {
+-          console.error('Failed to update oauthProxyMode:', error)
+-        }
+-      },
++      setOauthProxyMode: (mode) => set({ oauthProxyMode: mode }),
+       language: 'en-US',
+-      setLanguage: async (language) => {
++      setLanguage: (language) => {
+         set({ language })
+-        await i18n.changeLanguage(language)
+-        try {
+-          await window.electronAPI.config.update({ language: language })
+-        } catch (error) {
+-          console.error('Failed to update language:', error)
+-        }
++        i18n.changeLanguage(language)
+       },
+       autoStart: false,
+-      setAutoStart: async (enabled) => {
+-        set({ autoStart: enabled })
+-        try {
+-          await window.electronAPI.config.update({ autoStart: enabled })
+-        } catch (error) {
+-          console.error('Failed to update autoStart:', error)
+-        }
+-      },
++      setAutoStart: (enabled) => set({ autoStart: enabled }),
+       autoStartProxy: false,
+-      setAutoStartProxy: async (enabled) => {
+-        set({ autoStartProxy: enabled })
+-        try {
+-          await window.electronAPI.config.update({ autoStartProxy: enabled })
+-        } catch (error) {
+-          console.error('Failed to update autoStartProxy:', error)
+-        }
+-      },
++      setAutoStartProxy: (enabled) => set({ autoStartProxy: enabled }),
+       minimizeToTray: true,
+       setMinimizeToTray: (enabled) => set({ minimizeToTray: enabled }),
+       closeBehavior: 'minimize',
+@@ -138,7 +113,7 @@ export const useSettingsStore = create<SettingsState>()(
+       fetchConfig: async () => {
+         try {
+           const config = await window.electronAPI.config.get()
+-          set({ 
++          set({
+             config,
+             autoStart: config.autoStart,
+             autoStartProxy: config.autoStartProxy,
+@@ -149,6 +124,24 @@ export const useSettingsStore = create<SettingsState>()(
+           console.error('Failed to fetch config:', error)
+         }
+       },
++      saveSettings: async () => {
++        const state = get()
++        try {
++          await window.electronAPI.config.update({
++            theme: state.theme,
++            language: state.language,
++            autoStart: state.autoStart,
++            autoStartProxy: state.autoStartProxy,
++            minimizeToTray: state.minimizeToTray,
++            oauthProxyMode: state.oauthProxyMode,
++            logLevel: state.logLevel,
++            logRetentionDays: state.logRetentionDays,
++          })
++        } catch (error) {
++          console.error('Failed to save settings:', error)
++          throw error
++        }
++      },
+     }),
+     {
+       name: 'chat2api-settings',

@@ -167,9 +167,17 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
       set({ isLoading: true })
       const config = await window.electronAPI.store.get<AppConfig>('config')
       if (config) {
+        // Restore account weights from backend
+        const weights = config.accountWeights || {}
+        const accountWeights = Object.entries(weights).map(([accountId, weight]) => ({
+          accountId,
+          weight,
+        }))
+
         set({
           appConfig: config,
           loadBalanceStrategy: config.loadBalanceStrategy,
+          accountWeights,
           modelMappings: Object.values(config.modelMappings || {}),
           proxyConfig: {
             ...DEFAULT_PROXY_CONFIG,

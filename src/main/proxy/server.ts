@@ -13,7 +13,7 @@ import { proxyStatusManager } from './status'
 import { storeManager } from '../store/store'
 import { sessionManager } from './sessionManager'
 
-const SLOW_REQUEST_THRESHOLD_MS = 1500
+const SLOW_REQUEST_THRESHOLD_MS = 1000
 
 /**
  * Proxy Server Class
@@ -131,12 +131,14 @@ export class ProxyServer {
       await next()
 
       const latency = Date.now() - startTime
-      const shouldRecordAccessLog =
-        !ctx.path.startsWith('/v1/models') &&
-        (ctx.status >= 400 || latency >= SLOW_REQUEST_THRESHOLD_MS)
 
-      if (shouldRecordAccessLog) {
-        storeManager.addLog('warn', `${ctx.method} ${ctx.path} ${ctx.status} ${latency}ms`, {
+      if (!ctx.path.startsWith('/v1/models')) {
+        const level =
+          ctx.status >= 400 ? 'error' :
+          latency >= SLOW_REQUEST_THRESHOLD_MS ? 'warn' :
+          'info'
+
+        storeManager.addLog(level, `${ctx.method} ${ctx.path} ${ctx.status} ${latency}ms`, {
           data: {
             method: ctx.method,
             path: ctx.path,
