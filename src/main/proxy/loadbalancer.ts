@@ -233,17 +233,62 @@ export class LoadBalancer {
 
   /**
    * Round Robin strategy
+   * Uses two-level round-robin: provider level + account level.
+   * At account level, uses weighted random when weights are configured.
    */
   private selectRoundRobin(candidates: AccountSelection[]): AccountSelection {
-    const providerIds = [...new Set(candidates.map(c => c.provider.id))]
-    const key = providerIds.join(',')
+    // Group candidates by provider (preserve insertion order)
+    const byProvider = new Map<string, AccountSelection[]>()
+    const providerIds: string[] = []
+    for (const c of candidates) {
+      if (!byProvider.has(c.provider.id)) {
+        byProvider.set(c.provider.id, [])
+        providerIds.push(c.provider.id)
+      }
+      byProvider.get(c.provider.id)!.push(c)
+    }
 
-    const currentIndex = this.roundRobinIndex.get(key) || 0
-    const selected = candidates[currentIndex % candidates.length]
+    // Provider-level round-robin
+    const providerKey = providerIds.join(',')
+    const providerIdx = this.roundRobinIndex.get(providerKey) || 0
+    const chosenProviderId = providerIds[providerIdx % providerIds.length]
+    this.roundRobinIndex.set(providerKey, providerIdx + 1)
 
-    this.roundRobinIndex.set(key, (currentIndex + 1) % candidates.length)
+    // Account-level: weighted random
+    const providerAccounts = byProvider.get(chosenProviderId)!
+    return this.selectWeightedAccount(providerAccounts, chosenProviderId)
+  }
 
-    return selected
+  /**
+   * Weighted random account selection.
+   * Each account is selected with probability proportional to its configured weight.
+   * Stateless — immune to dynamic pool changes (accounts entering/leaving).
+   */
+  private selectWeightedAccount(
+    accounts: AccountSelection[],
+    providerId: string
+  ): AccountSelection {
+    if (accounts.length === 1) {
+      return accounts[0]
+    }
+
+    const config = storeManager.getConfig()
+    const weights = config.accountWeights || {}
+
+    let totalWeight = 0
+    for (const a of accounts) {
+      totalWeight += Math.max(weights[a.account.id] ?? 100, 5)
+    }
+
+    let random = Math.random() * totalWeight
+    for (const a of accounts) {
+      random -= Math.max(weights[a.account.id] ?? 100, 5)
+      if (random <= 0) {
+        return a
+      }
+    }
+
+    return accounts[accounts.length - 1]
   }
 
   /**

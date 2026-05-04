@@ -13,7 +13,9 @@ import { streamHandler } from '../stream'
 import { proxyStatusManager } from '../status'
 import { modelMapper } from '../modelMapper'
 import { storeManager } from '../../store/store'
-import { 
+import { sessionManager } from '../sessionManager'
+import type { ChatMessage as StoreChatMessage } from '../../store/types'
+import {
   isAnthropicToolFormat,
   transformResponseToAnthropic,
   transformChunkToAnthropic
@@ -164,6 +166,21 @@ router.post('/completions', async (ctx: Context) => {
   }
 
   const { account, provider, actualModel } = selection
+
+  // Get or create session for multi-turn conversation continuation
+  const storeMessages: StoreChatMessage[] = request.messages.map(m => ({
+    role: m.role,
+    content: m.content === null ? '' : m.content,
+    timestamp: startTime,
+  }))
+  const sessionContext = sessionManager.getOrCreateSession({
+    providerId: provider.id,
+    accountId: account.id,
+    model: request.model,
+    messages: storeMessages,
+  })
+  request.providerSessionId = sessionContext.providerSessionId
+  request.parentMessageId = sessionContext.parentMessageId
 
   const context: ProxyContext = {
     requestId,
@@ -331,6 +348,14 @@ router.post('/completions', async (ctx: Context) => {
 
     storeManager.recordRequestInStats(true, latency, request.model, provider.id, account.id)
 
+    // Update session with provider-side IDs for multi-turn continuation
+    sessionManager.updateProviderSession(
+      sessionContext.sessionId,
+      result.providerSessionId,
+      result.parentMessageId,
+      storeMessages,
+    )
+
     if (request.stream === true && result.stream) {
       ctx.set('Content-Type', 'text/event-stream')
       ctx.set('Cache-Control', 'no-cache')
@@ -390,6 +415,18 @@ router.post('/completions', async (ctx: Context) => {
             storeManager.updateRequestLog(logEntryId, {
               responseBody: collectedContent || undefined,
             })
+          }
+          // Update session with final provider IDs from stream handler
+          const handler = (result.stream as any)._handler
+          if (handler) {
+            const finalSessionId = handler.getConversationId?.() || handler.getChatId?.()
+            const finalParentId = handler.getLastMessageId?.() || handler.getResponseId?.()
+            sessionManager.updateProviderSession(
+              sessionContext.sessionId,
+              finalSessionId ?? result.providerSessionId,
+              finalParentId ?? result.parentMessageId,
+              storeMessages,
+            )
           }
           wrapperStream.end()
         })

@@ -193,16 +193,30 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow | null): Pro
   })
 
   ipcMain.handle(IpcChannels.STORE_GET, async (_, key: string): Promise<unknown> => {
+    if (key === 'logs' || key === 'requestLogs') {
+      const logsStore = storeManager.getLogsStore()
+      return logsStore?.get(key)
+    }
     const store = storeManager.getStore()
     return store?.get(key)
   })
 
   ipcMain.handle(IpcChannels.STORE_SET, async (_, key: string, value: unknown): Promise<void> => {
+    if (key === 'logs' || key === 'requestLogs') {
+      const logsStore = storeManager.getLogsStore()
+      logsStore?.set(key as 'logs', value as never)
+      return
+    }
     const store = storeManager.getStore()
     store?.set(key as 'providers' | 'accounts' | 'config' | 'logs', value as never)
   })
 
   ipcMain.handle(IpcChannels.STORE_DELETE, async (_, key: string): Promise<void> => {
+    if (key === 'logs' || key === 'requestLogs') {
+      const logsStore = storeManager.getLogsStore()
+      logsStore?.delete(key as 'logs')
+      return
+    }
     const store = storeManager.getStore()
     store?.delete(key as 'providers' | 'accounts' | 'config' | 'logs')
   })

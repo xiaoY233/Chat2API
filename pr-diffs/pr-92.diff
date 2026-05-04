@@ -1,0 +1,76 @@
+diff --git a/src/main/store/store.ts b/src/main/store/store.ts
+index 10202f8..e016b37 100644
+--- a/src/main/store/store.ts
++++ b/src/main/store/store.ts
+@@ -375,6 +375,10 @@ class StoreManager {
+     try {
+       console.log('[Store] encryptData input length:', data.length, 'content:', data.substring(0, 20) + '...')
+       if (safeStorage.isEncryptionAvailable()) {
++        if (!this.getConfig().credentialEncryption) {
++          console.log('[Store] Credential encryption disabled, returning plaintext')
++          return data
++        }
+         // Create new Buffer to store encryption result
+         const encrypted = Buffer.from(safeStorage.encryptString(data))
+         const result = encrypted.toString('base64')
+diff --git a/src/main/store/types.ts b/src/main/store/types.ts
+index 4d69ea6..a5802c8 100644
+--- a/src/main/store/types.ts
++++ b/src/main/store/types.ts
+@@ -213,6 +213,8 @@ export interface AppConfig {
+   managementApi: ManagementApiConfig
+   /** Context management configuration */
+   contextManagement: ContextManagementConfig
++  /** Whether to encrypt credentials in data.json */
++  credentialEncryption: boolean
+ }
+ 
+ /**
+@@ -748,6 +750,7 @@ export const DEFAULT_CONFIG: AppConfig = {
+   toolPromptConfig: DEFAULT_TOOL_PROMPT_CONFIG,
+   managementApi: DEFAULT_MANAGEMENT_API_CONFIG,
+   contextManagement: DEFAULT_CONTEXT_MANAGEMENT_CONFIG,
++  credentialEncryption: true,
+ }
+ 
+ /**
+diff --git a/src/renderer/src/stores/settingsStore.ts b/src/renderer/src/stores/settingsStore.ts
+index 3f77c59..dd0230a 100644
+--- a/src/renderer/src/stores/settingsStore.ts
++++ b/src/renderer/src/stores/settingsStore.ts
+@@ -107,7 +107,14 @@ export const useSettingsStore = create<SettingsState>()(
+       maxLogs: 10000,
+       setMaxLogs: (count) => set({ maxLogs: count }),
+       credentialEncryption: true,
+-      setCredentialEncryption: (enabled) => set({ credentialEncryption: enabled }),
++      setCredentialEncryption: async (enabled) => {
++        set({ credentialEncryption: enabled })
++        try {
++          await window.electronAPI.config.update({ credentialEncryption: enabled })
++        } catch (error) {
++          console.error('Failed to update credentialEncryption:', error)
++        }
++      },
+       logDesensitization: true,
+       setLogDesensitization: (enabled) => set({ logDesensitization: enabled }),
+       config: null,
+@@ -144,6 +151,7 @@ export const useSettingsStore = create<SettingsState>()(
+             autoStartProxy: config.autoStartProxy,
+             oauthProxyMode: config.oauthProxyMode || 'system',
+             language: config.language || 'en-US',
++            credentialEncryption: config.credentialEncryption ?? true,
+           })
+         } catch (error) {
+           console.error('Failed to fetch config:', error)
+diff --git a/src/shared/types.ts b/src/shared/types.ts
+index e6a649f..073862d 100644
+--- a/src/shared/types.ts
++++ b/src/shared/types.ts
+@@ -103,6 +103,7 @@ export interface AppConfig {
+   sessionConfig: SessionConfig
+   toolPromptConfig: ToolPromptConfig
+   language: 'zh-CN' | 'en-US'
++  credentialEncryption: boolean
+ }
+ 
+ export type LogLevel = 'debug' | 'info' | 'warn' | 'error'

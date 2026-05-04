@@ -64,6 +64,8 @@ interface ChatCompletionRequest {
   reasoning_effort?: 'low' | 'medium' | 'high'
   tools?: any[]
   tool_choice?: any
+  providerSessionId?: string
+  parentMessageId?: string
 }
 
 const tokenCache = new Map<string, TokenInfo>()
@@ -372,10 +374,13 @@ ${message.content || ''}
 
   async chatCompletion(request: ChatCompletionRequest): Promise<{ response: AxiosResponse; sessionId: string }> {
     const token = await this.acquireToken()
-    
-    const sessionId = await this.createSession()
-    console.log('[DeepSeek] Created new session:', sessionId)
-    
+
+    // Reuse existing session or create a new one
+    const sessionId = request.providerSessionId || await this.createSession()
+    console.log('[DeepSeek] Using session:', sessionId, request.providerSessionId ? '(reused)' : '(new)')
+
+    const parentMessageId = request.parentMessageId || null
+
     const challenge = await this.getChallenge('/api/v0/chat/completion')
     const challengeAnswer = await this.calculateChallengeAnswer(challenge)
 
@@ -383,7 +388,7 @@ ${message.content || ''}
     // Note: Tool prompt injection is already handled by Forwarder.transformRequestForPromptToolUse()
     const messages = [...request.messages]
 
-    let prompt = this.messagesToPrompt(messages, false)
+    let prompt = this.messagesToPrompt(messages, !!request.providerSessionId)
 
     // Use request parameters for mode control (OpenAI compatible)
     let searchEnabled = false
@@ -403,7 +408,7 @@ ${message.content || ''}
     // Fallback: check model name for backward compatibility
     const modelLower = request.model.toLowerCase()
 
-    if (modelLower.includes('expert')) {
+    if (modelLower.includes('pro') || modelLower.includes('expert')) {
       modelType = 'expert'
     }
     if (!searchEnabled && modelLower.includes('search')) {
@@ -424,11 +429,13 @@ ${message.content || ''}
       `${DEEPSEEK_API_BASE}/v0/chat/completion`,
       {
         chat_session_id: sessionId,
+        parent_message_id: parentMessageId,
         prompt,
+        model_type: modelType,
         ref_file_ids: [],
         search_enabled: searchEnabled,
         thinking_enabled: thinkingEnabled,
-        model_type: modelType,
+        preempt: false,
       },
       {
         headers: {
