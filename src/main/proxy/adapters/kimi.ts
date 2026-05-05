@@ -60,6 +60,8 @@ interface ChatCompletionRequest {
   tool_choice?: any
   conversationId?: string
   parentId?: string
+  providerSessionId?: string
+  parentMessageId?: string
 }
 
 const accessTokenMap = new Map<string, TokenInfo>()
@@ -272,6 +274,10 @@ export class KimiAdapter {
   async chatCompletion(request: ChatCompletionRequest): Promise<{ response: AxiosResponse; conversationId: string }> {
     const { accessToken } = await this.acquireToken()
 
+    const conversationId = request.conversationId || request.providerSessionId || ''
+    const parentId = request.parentId || request.parentMessageId || ''
+    const isMultiTurn = !!conversationId
+
     const messages = [...request.messages]
 
     // Check if tool prompt has already been injected by client
@@ -297,17 +303,17 @@ export class KimiAdapter {
       }
     }
 
-    const content = this.messagesPrepare(messages, toolsPrompt, false)
+    const content = this.messagesPrepare(messages, toolsPrompt, isMultiTurn)
 
     // Determine if thinking and web search should be enabled
     // Priority: explicit parameters > model name detection
     // Use originalModel for feature detection (preserves user's intent before mapping)
     const modelForDetection = request.originalModel || request.model
     const modelLower = modelForDetection.toLowerCase()
-    
+
     let enableThinking = request.enableThinking ?? false
     let enableWebSearch = request.enableWebSearch ?? false
-    
+
     // Auto-enable based on model name (if not explicitly set)
     if (!enableThinking && (modelLower.includes('think') || modelLower.includes('r1'))) {
       enableThinking = true
@@ -320,10 +326,10 @@ export class KimiAdapter {
 
     const jsonBody = JSON.stringify({
       scenario: 'SCENARIO_K2D5',
-      chat_id: '',
+      chat_id: conversationId,
       tools: enableWebSearch ? [{ type: 'TOOL_TYPE_SEARCH', search: {} }] : [],
       message: {
-        parent_id: '',
+        parent_id: parentId,
         role: 'user',
         blocks: [{
           message_id: '',
@@ -371,7 +377,7 @@ export class KimiAdapter {
       throw new Error(`Completion request failed: HTTP ${response.status}`)
     }
 
-    return { response, conversationId: '' }
+    return { response, conversationId }
   }
 
   async deleteConversation(conversationId: string): Promise<boolean> {
