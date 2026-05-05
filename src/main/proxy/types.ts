@@ -102,6 +102,10 @@ export interface ChatCompletionRequest {
   tool_choice?: ChatCompletionToolChoice
   /** Tool format - determines response format for tool calls */
   tool_format?: 'native' | 'json' | 'auto'
+  /** Provider-side session ID (for multi-turn conversation continuation) */
+  providerSessionId?: string
+  /** Provider-side last message ID (for parent_message_id injection) */
+  parentMessageId?: string
 }
 
 /**

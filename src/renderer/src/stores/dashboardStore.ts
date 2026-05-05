@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { ProxyStatus, ProxyStatistics, Provider, Account, ProviderCheckResult, LogEntry } from '@/types/electron'
+import type { ProxyStatus, ProxyStatistics, Provider, Account, LogEntry } from '@/types/electron'
 import type { ProviderStats, ActivityItem, ChartDataPoint } from '@/components/dashboard'
 
 interface DashboardStats {
@@ -150,22 +150,20 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
       const persistentStatsPromise = window.electronAPI?.statistics?.get?.() ?? Promise.resolve(null)
       const providersPromise = window.electronAPI?.providers?.getAll?.() ?? Promise.resolve([])
       const accountsPromise = window.electronAPI?.accounts?.getAll?.() ?? Promise.resolve([])
-      const providerStatusPromise = window.electronAPI?.providers?.checkAllStatus?.() ?? Promise.resolve({})
       const logsPromise = window.electronAPI?.logs?.get?.({ limit: 10 }) ?? Promise.resolve([])
       const trendPromise = window.electronAPI?.logs?.getTrend?.(7) ?? Promise.resolve([])
       const requestLogTrendPromise = window.electronAPI?.requestLogs?.getTrend?.(7) ?? Promise.resolve([])
 
-      const [proxyStatus, statistics, persistentStats, providers, accounts, providerStatuses, logs, trends, requestLogTrends] = await Promise.all([
+      const [proxyStatus, statistics, persistentStats, providers, accounts, logs, trends, requestLogTrends] = await Promise.all([
         proxyStatusPromise,
         statisticsPromise,
         persistentStatsPromise,
         providersPromise,
         accountsPromise,
-        providerStatusPromise,
         logsPromise,
         trendPromise,
         requestLogTrendPromise,
-      ]) as [ProxyStatus | null, ProxyStatistics | null, any, Provider[], Account[], Record<string, ProviderCheckResult>, LogEntry[], LogTrend[], any[]]
+      ]) as [ProxyStatus | null, ProxyStatistics | null, any, Provider[], Account[], LogEntry[], LogTrend[], any[]]
 
       setProxyStatus(proxyStatus)
       setStatistics(statistics)
@@ -242,18 +240,17 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
       }
       
       const providerStats: ProviderStats[] = (providers ?? []).map((provider: Provider) => {
-        const status = providerStatuses?.[provider.id]
         const usage = providerUsage[provider.id] ?? 0
         const successCount = providerSuccessCount[provider.id] ?? usage
         const totalCount = providerTotalCount[provider.id] ?? usage
-        
+
         return {
           id: provider.id,
           name: provider.name,
-          status: status?.status ?? 'unknown',
+          status: provider.status ?? 'unknown',
           requestCount: totalCount,
           successCount: successCount,
-          latency: status?.latency,
+          latency: undefined,
         }
       })
       setProviders(providerStats)

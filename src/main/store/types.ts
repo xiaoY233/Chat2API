@@ -179,6 +179,8 @@ export interface AppConfig {
   proxyHost: string
   /** Load balance strategy */
   loadBalanceStrategy: LoadBalanceStrategy
+  /** Account weights for weighted random selection (accountId → weight, 0-100) */
+  accountWeights: Record<string, number>
   /** Model mapping configuration */
   modelMappings: Record<string, ModelMapping>
   /** UI theme */
@@ -213,6 +215,8 @@ export interface AppConfig {
   managementApi: ManagementApiConfig
   /** Context management configuration */
   contextManagement: ContextManagementConfig
+  /** Whether to encrypt credentials in data.json */
+  credentialEncryption: boolean
 }
 
 /**
@@ -322,6 +326,12 @@ export interface SessionRecord {
     title?: string
     tokenCount?: number
   }
+  /** Provider-side session/conversation ID */
+  providerSessionId?: string
+  /** Provider-side last message ID (for parent_message_id) */
+  parentMessageId?: string
+  /** History fingerprint for session lookup */
+  historyHash?: string
 }
 
 /**
@@ -731,6 +741,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   proxyPort: 8080,
   proxyHost: '127.0.0.1',
   loadBalanceStrategy: 'round-robin',
+  accountWeights: {},
   modelMappings: {},
   theme: 'system',
   autoStart: false,
@@ -748,6 +759,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   toolPromptConfig: DEFAULT_TOOL_PROMPT_CONFIG,
   managementApi: DEFAULT_MANAGEMENT_API_CONFIG,
   contextManagement: DEFAULT_CONTEXT_MANAGEMENT_CONFIG,
+  credentialEncryption: true,
 }
 
 /**

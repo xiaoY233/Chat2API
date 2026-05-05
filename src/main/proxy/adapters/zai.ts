@@ -107,6 +107,8 @@ function uuid(separator: boolean = true): string {
 }
 
 export class ZaiAdapter {
+  private static chatIdCache: Map<string, string> = new Map()
+  
   private provider: Provider
   private account: Account
   private token: string | null = null
@@ -391,12 +393,41 @@ export class ZaiAdapter {
     
     const signaturePrompt = this.extractLastUserMessage(processedMessages)
     
-    // Always create a new chat (single-turn mode only)
-    const chatResult = await this.createChat(mappedModel, signaturePrompt)
-    const chatId = chatResult.chatId
-    const messageId = chatResult.messageId
-    const parentMessageId = null
-    console.log('[Z.ai] Created new chat:', chatId)
+    // Reuse chat ID across requests for the same account when possible
+    let chatId: string
+    let messageId: string
+    let parentMessageId: string | null = null
+    
+    // If client provides an existing chat ID, use it (multi-turn support)
+    if (request.chatId) {
+      chatId = request.chatId
+      // For existing chat, we still need to generate a new message ID.
+      // The API expects a new message ID for each turn, and optionally a parent message ID.
+      messageId = uuid()
+      // We don't know the parent message ID for existing chat, but we can set it to null.
+      parentMessageId = null
+      console.log('[Z.ai] Using existing chat ID from request:', chatId)
+    } else {
+      // Check cache for this account
+      const cachedChatId = ZaiAdapter.chatIdCache.get(this.account.id)
+      if (cachedChatId) {
+        chatId = cachedChatId
+        messageId = uuid()
+        parentMessageId = null
+        console.log('[Z.ai] Reusing cached chat ID for account:', chatId)
+      } else {
+        // Create a new chat
+        const chatResult = await this.createChat(mappedModel, signaturePrompt)
+        chatId = chatResult.chatId
+        messageId = chatResult.messageId
+        // Cache it for future requests from this account
+        ZaiAdapter.chatIdCache.set(this.account.id, chatId)
+        console.log('[Z.ai] Created new chat and cached:', chatId)
+      }
+    }
+    
+    // Note: The processedMessages array already contains the full conversation history,
+    // so multi-turn context is preserved even when reusing the same chat_id.
     
     const requestId = uuid()
     const timestamp = Date.now()

@@ -1,0 +1,131 @@
+diff --git a/src/main/providers/builtin/deepseek.ts b/src/main/providers/builtin/deepseek.ts
+index 46245bf..4a23eb3 100644
+--- a/src/main/providers/builtin/deepseek.ts
++++ b/src/main/providers/builtin/deepseek.ts
+@@ -29,12 +29,32 @@ export const deepseekConfig: BuiltinProviderConfig = {
+   enabled: true,
+   description: 'DeepSeek AI assistant, supports deep thinking and web search',
+   supportedModels: [
++    'deepseek-v4-pro',
++    'deepseek-v4-pro-think',
++    'deepseek-v4-pro-search',
++    'deepseek-v4-pro-think-search',
++    'deepseek-v4-flash',
++    'deepseek-v4-flash-think',
++    'deepseek-v4-flash-search',
++    'deepseek-v4-flash-think-search',
++    'deepseek-chat',
++    'deepseek-reasoner',
+     'DeepSeek-V3.2',
+     'DeepSeek-Search',
+     'DeepSeek-R1',
+     'DeepSeek-R1-Search',
+   ],
+   modelMappings: {
++    'deepseek-v4-pro': 'deepseek-chat',
++    'deepseek-v4-pro-think': 'deepseek-chat',
++    'deepseek-v4-pro-search': 'deepseek-chat',
++    'deepseek-v4-pro-think-search': 'deepseek-chat',
++    'deepseek-v4-flash': 'deepseek-chat',
++    'deepseek-v4-flash-think': 'deepseek-chat',
++    'deepseek-v4-flash-search': 'deepseek-chat',
++    'deepseek-v4-flash-think-search': 'deepseek-chat',
++    'deepseek-chat': 'deepseek-chat',
++    'deepseek-reasoner': 'deepseek-chat',
+     'DeepSeek-V3.2': 'deepseek-chat',
+     'DeepSeek-Search': 'deepseek-chat',
+     'DeepSeek-R1': 'deepseek-chat',
+diff --git a/src/main/proxy/adapters/deepseek.ts b/src/main/proxy/adapters/deepseek.ts
+index 29349fc..7f5a45c 100644
+--- a/src/main/proxy/adapters/deepseek.ts
++++ b/src/main/proxy/adapters/deepseek.ts
+@@ -403,7 +403,7 @@ ${message.content || ''}
+     // Fallback: check model name for backward compatibility
+     const modelLower = request.model.toLowerCase()
+ 
+-    if (modelLower.includes('expert')) {
++    if (modelLower.includes('pro') || modelLower.includes('expert')) {
+       modelType = 'expert'
+     }
+     if (!searchEnabled && modelLower.includes('search')) {
+@@ -424,11 +424,13 @@ ${message.content || ''}
+       `${DEEPSEEK_API_BASE}/v0/chat/completion`,
+       {
+         chat_session_id: sessionId,
++        parent_message_id: null,
+         prompt,
++        model_type: modelType,
+         ref_file_ids: [],
+         search_enabled: searchEnabled,
+         thinking_enabled: thinkingEnabled,
+-        model_type: modelType,
++        preempt: false,
+       },
+       {
+         headers: {
+diff --git a/src/renderer/src/components/providers/AddProviderDialog.tsx b/src/renderer/src/components/providers/AddProviderDialog.tsx
+index a3ad157..7bbc9b6 100644
+--- a/src/renderer/src/components/providers/AddProviderDialog.tsx
++++ b/src/renderer/src/components/providers/AddProviderDialog.tsx
+@@ -208,8 +208,18 @@ export function AddProviderDialog({
+       apiEndpoint: 'https://chat.deepseek.com/api',
+       enabled: true,
+       description: t('deepseek.description'),
+-      supportedModels: ['DeepSeek-V3.2', 'DeepSeek-R1', 'DeepSeek-Search', 'DeepSeek-R1-Search'],
++      supportedModels: ['deepseek-v4-pro', 'deepseek-v4-pro-think', 'deepseek-v4-pro-search', 'deepseek-v4-pro-think-search', 'deepseek-v4-flash', 'deepseek-v4-flash-think', 'deepseek-v4-flash-search', 'deepseek-v4-flash-think-search', 'deepseek-chat', 'deepseek-reasoner', 'DeepSeek-V3.2', 'DeepSeek-R1', 'DeepSeek-Search', 'DeepSeek-R1-Search'],
+       modelMappings: {
++        'deepseek-v4-pro': 'deepseek-chat',
++        'deepseek-v4-pro-think': 'deepseek-chat',
++        'deepseek-v4-pro-search': 'deepseek-chat',
++        'deepseek-v4-pro-think-search': 'deepseek-chat',
++        'deepseek-v4-flash': 'deepseek-chat',
++        'deepseek-v4-flash-think': 'deepseek-chat',
++        'deepseek-v4-flash-search': 'deepseek-chat',
++        'deepseek-v4-flash-think-search': 'deepseek-chat',
++        'deepseek-chat': 'deepseek-chat',
++        'deepseek-reasoner': 'deepseek-chat',
+         'DeepSeek-V3.2': 'deepseek-chat',
+         'DeepSeek-R1': 'deepseek-chat',
+         'DeepSeek-Search': 'deepseek-chat',
+diff --git a/src/renderer/src/i18n/locales/en-US.json b/src/renderer/src/i18n/locales/en-US.json
+index 8dd3ffa..8b640fe 100644
+--- a/src/renderer/src/i18n/locales/en-US.json
++++ b/src/renderer/src/i18n/locales/en-US.json
+@@ -243,6 +243,16 @@
+     "userTokenPlaceholder": "Enter DeepSeek User Token",
+     "userTokenHelp": "Authentication Token from DeepSeek web version, found in browser DevTools Application -> Local Storage -> userToken",
+     "models": {
++      "deepseek-v4-pro": "DeepSeek V4 Pro",
++      "deepseek-v4-pro-think": "DeepSeek V4 Pro - Think",
++      "deepseek-v4-pro-search": "DeepSeek V4 Pro - Search",
++      "deepseek-v4-pro-think-search": "DeepSeek V4 Pro - Think+Search",
++      "deepseek-v4-flash": "DeepSeek V4 Flash",
++      "deepseek-v4-flash-think": "DeepSeek V4 Flash - Think",
++      "deepseek-v4-flash-search": "DeepSeek V4 Flash - Search",
++      "deepseek-v4-flash-think-search": "DeepSeek V4 Flash - Think+Search",
++      "deepseek-chat": "DeepSeek Chat (legacy)",
++      "deepseek-reasoner": "DeepSeek Reasoner (legacy)",
+       "DeepSeek-V3.2": "DeepSeek V3.2 - Standard Chat",
+       "DeepSeek-Search": "DeepSeek Search - Web Search",
+       "DeepSeek-R1": "DeepSeek R1 - Deep Thinking",
+diff --git a/src/renderer/src/i18n/locales/zh-CN.json b/src/renderer/src/i18n/locales/zh-CN.json
+index 07e1248..8b12185 100644
+--- a/src/renderer/src/i18n/locales/zh-CN.json
++++ b/src/renderer/src/i18n/locales/zh-CN.json
+@@ -243,6 +243,16 @@
+     "userTokenPlaceholder": "请输入 DeepSeek 用户 Token",
+     "userTokenHelp": "从 DeepSeek 网页版获取的认证 Token，可在浏览器开发者工具 Application -> Local Storage -> userToken 中找到",
+     "models": {
++      "deepseek-v4-pro": "DeepSeek V4 Pro",
++      "deepseek-v4-pro-think": "DeepSeek V4 Pro - 思考",
++      "deepseek-v4-pro-search": "DeepSeek V4 Pro - 搜索",
++      "deepseek-v4-pro-think-search": "DeepSeek V4 Pro - 思考+搜索",
++      "deepseek-v4-flash": "DeepSeek V4 Flash",
++      "deepseek-v4-flash-think": "DeepSeek V4 Flash - 思考",
++      "deepseek-v4-flash-search": "DeepSeek V4 Flash - 搜索",
++      "deepseek-v4-flash-think-search": "DeepSeek V4 Flash - 思考+搜索",
++      "deepseek-chat": "DeepSeek Chat (兼容旧名)",
++      "deepseek-reasoner": "DeepSeek Reasoner (兼容旧名)",
+       "DeepSeek-V3.2": "DeepSeek V3.2 - 标准对话",
+       "DeepSeek-Search": "DeepSeek Search - 联网搜索",
+       "DeepSeek-R1": "DeepSeek R1 - 深度思考",
