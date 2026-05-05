@@ -20,6 +20,7 @@ import {
   createBaseChunk,
   ToolCallState 
 } from '../utils/streamToolHandler'
+import { messagesToPrompt, extractTextContent as extractTextContentUtil } from '../utils/messageToPrompt'
 
 /**
  * Check if content contains tool calls (both bracket and XML formats)
@@ -70,7 +71,8 @@ interface ChatCompletionRequest {
   web_search?: boolean
   reasoning_effort?: 'low' | 'medium' | 'high'
   enableThinking?: boolean
-  enableWebSearch?: boolean
+  enableWeb?: boolean
+  originalModel?: string
 }
 
 function uuid(separator: boolean = true): string {
@@ -152,15 +154,16 @@ export class QwenAdapter {
     const modelLower = modelForDetection.toLowerCase()
     
     let enableThinking = request.enableThinking ?? false
-    let enableWebSearch = request.enableWebSearch ?? false
+    // Use web_search from request (OpenAI standard) and fallback to model name detection
+    let enableWeb = request.web_search ?? false
     
     // Auto-enable based on model name (if not explicitly set)
     if (!enableThinking && (modelLower.includes('think') || modelLower.includes('r1'))) {
       enableThinking = true
       console.log('[Qwen] Thinking mode enabled (from model name)')
     }
-    if (!enableWebSearch && modelLower.includes('search')) {
-      enableWebSearch = true
+    if (!enableWeb && modelLower.includes('')) {
+      enableWeb = true
       console.log('[Qwen] Web search enabled (from model name)')
     }
 
@@ -179,38 +182,21 @@ export class QwenAdapter {
     })
     console.log('[Qwen] Using model:', actualModel)
 
-    // Find system message and user message
-    let systemPrompt = ''
-    let userContent = ''
-    
-    for (const msg of request.messages) {
-      if (msg.role === 'system') {
-        systemPrompt = extractTextContent(msg.content)
-      } else if (msg.role === 'user') {
-        userContent = extractTextContent(msg.content)
-      }
-    }
+    // Convert entire conversation history to a single prompt string
+    // This ensures multi-turn context is preserved across requests
+    let finalContent = messagesToPrompt(request.messages as any)
 
     // Inject tools prompt if tools are provided and not already injected by client
     if (request.tools && request.tools.length > 0 && !hasToolPromptInjected(request.messages)) {
       const toolsPrompt = toolsToSystemPrompt(request.tools)
-      systemPrompt = systemPrompt 
-        ? systemPrompt + '\n\n' + toolsPrompt 
-        : toolsPrompt
-      // Add tool wrap hint to user content
-      userContent = userContent + TOOL_WRAP_HINT
+      finalContent = toolsPrompt + '\n\n' + finalContent + TOOL_WRAP_HINT
     }
-
-    // If system prompt exists, prepend it to user content
-    const finalContent = systemPrompt 
-      ? `${systemPrompt}\n\nUser: ${userContent}`
-      : userContent
 
     const timestamp = Date.now()
     const nonce = generateNonce()
 
     const requestBody = {
-      deep_search: (enableWebSearch || enableThinking) ? '1' : '0',
+      deep_search: (enableWeb || enableThinking) ? '1' : '0',
       req_id: reqId,
       model: actualModel,
       scene: 'chat',
@@ -228,7 +214,7 @@ export class QwenAdapter {
       ],
       from: 'default',
       parent_req_id: '0',
-      enable_search: enableWebSearch,
+      enable_search: enableWeb,
       biz_data: '{"entryPoint":"tongyigw"}',
       scene_param: 'first_turn',
       chat_client: 'h5',
@@ -398,7 +384,9 @@ export class QwenStreamHandler {
 
     console.log('[Qwen] Starting stream handler...')
     
-    const contentEncoding = response?.headers?.['content-encoding']
+      const contentEncoding = typeof response?.headers?.['content-encoding'] === 'string'
+        ? response.headers['content-encoding'] as string
+        : undefined
     console.log('[Qwen] Content-Encoding:', contentEncoding)
 
     let buffer = ''
@@ -899,7 +887,8 @@ export class QwenStreamHandler {
 
       let decompressStream: any = stream
       
-      const contentEncoding = response?.headers?.['content-encoding']?.toLowerCase()
+      const rawEncoding = response?.headers?.['content-encoding']
+      const contentEncoding = typeof rawEncoding === 'string' ? rawEncoding.toLowerCase() : undefined
       if (contentEncoding === 'gzip') {
         console.log('[Qwen] Decompressing gzip stream...')
         decompressStream = stream.pipe(createGunzip())

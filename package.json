@@ -1,6 +1,6 @@
 {
   "name": "chat2api",
-  "version": "1.2.0",
+  "version": "1.4.0",
   "description": "Chat2API 管理器 - 统一管理多个 AI 服务提供商，提供 OpenAI 兼容 API 接口",
   "main": "./out/main/index.js",
   "author": {
@@ -42,8 +42,10 @@
     "@radix-ui/react-tabs": "^1.1.13",
     "@radix-ui/react-toast": "^1.2.15",
     "@radix-ui/react-tooltip": "^1.2.8",
+    "@types/better-sqlite3": "^7.6.13",
     "ali-oss": "^6.23.0",
     "axios": "^1.7.7",
+    "better-sqlite3": "^12.9.0",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.1",
     "electron-store": "^10.0.0",
@@ -239,7 +241,7 @@
     },
     "publish": {
       "provider": "github",
-      "owner": "xiaoY233",
+      "owner": "leisvip",
       "repo": "Chat2API"
     }
   }

@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Release-v1.2.0-blue?style=flat-square&logo=github" alt="Release">
+  <img src="https://img.shields.io/badge/Release-v1.4.0-blue?style=flat-square&logo=github" alt="Release">
   <img src="https://img.shields.io/badge/License-GPL--3.0-blue?style=flat-square" alt="License">
   <br>
   <a href="https://www.electronjs.org/"><img src="https://img.shields.io/badge/Electron-33+-47848F?style=flat-square&logo=electron&logoColor=white" alt="Electron"></a>
@@ -31,27 +31,31 @@
 ## ✨ 功能特性
 
 - OpenAI 兼容 API：提供标准 OpenAI 兼容接口，无缝对接现有工具
-- 多服务商支持：支持 DeepSeek、GLM、Kimi、MiniMax、Perplexity 🆕、Qwen、Z.ai 等
+- 多服务商支持：支持 DeepSeek (V4 Pro/Flash)、GLM、Kimi (K2.6)、MiniMax、Perplexity 🆕、Qwen、Z.ai 等
 - 🆕 上下文管理：智能对话上下文管理，支持滑动窗口、Token 限制和总结压缩策略
+- 🆕 多轮会话：自动会话复用，支持所有服务商的多轮对话
 - 🆕 工具调用支持：通过提示词工程为所有模型提供通用工具调用能力，兼容 Cherry Studio、Kilo Code 等客户端
 - 🆕 模型映射：灵活的模型名称映射，支持通配符和首选服务商/账户选择
 - 🆕 自定义参数：支持自定义 HTTP Header 开启联网搜索、深度思考、深度研究等功能
+- 🆕 权重负载均衡：账户级别加权随机选择，精细化流量控制
+- 🆕 凭证加密：可切换凭证加密存储
 - 仪表盘监控：实时请求流量、Token 使用量和成功率统计
 - API Key 管理：为本地代理生成和管理密钥
 - 模型管理：查看和管理所有服务商的可用模型
-- 请求日志：详细的请求日志记录，便于调试和分析
+- 请求日志：独立存储的详细请求日志，性能更优
 - 代理配置：灵活的代理设置和路由策略
 - 系统托盘集成：从菜单栏快速访问状态
 - 多语言支持：支持英文和简体中文
 - 现代界面：简洁响应式界面，支持深色/浅色主题
+- 设置草稿模式：预览设置变更后再保存
 
 ## 🤖 支持的服务商
 
 | 服务商           | 认证类型          | OAuth | 模型                                                                              |
 | ------------- | ------------- | ----- | ------------------------------------------------------------------------------- |
-| DeepSeek      | User Token    | 是     | DeepSeek-V3.2                                                                   |
+| DeepSeek      | User Token    | 是     | DeepSeek V4 Pro, DeepSeek V4 Flash, DeepSeek-V3.2, DeepSeek-R1                 |
 | GLM           | Refresh Token | 是     | GLM-5                                                                           |
-| Kimi          | JWT Token     | 是     | kimi-k2.5                                                                       |
+| Kimi          | Cookie/Auth   | 是     | Kimi-K2.6, Kimi-K2.5                                                            |
 | MiniMax       | JWT Token     | 是     | MiniMax-M2.5                                                                    |
 | 🆕 Perplexity | JWT Token     | 是     | Sonar, Sonar Pro, Sonar Deep Research                                           |
 | Qwen (国内版)    | SSO Ticket    | 是     | Qwen3.5-Plus, Qwen3-Max, Qwen3-Flash, Qwen3-Coder, qwen-max-latest              |
@@ -62,7 +66,7 @@
 
 ### 下载安装
 
-从 [GitHub Releases](https://github.com/xiaoY233/Chat2API/releases) 下载最新版本：
+从 [GitHub Releases](https://github.com/leisvip/Chat2API/releases) 下载最新版本：
 
 | 平台                    | 下载文件                                   |
 | --------------------- | -------------------------------------- |
@@ -81,7 +85,7 @@
 
 ```bash
 # 克隆仓库
-git clone https://github.com/xiaoY233/Chat2API.git
+git clone https://github.com/leisvip/Chat2API.git
 cd Chat2API
 
 # 安装依赖
@@ -239,7 +243,7 @@ sudo xattr -rd com.apple.quarantine "/Applications/Chat2API.app"
 
 ### 如何更新？
 
-在 **关于** 页面检查更新，或从 [GitHub Releases](https://github.com/xiaoY233/Chat2API/releases) 下载最新版本。
+在 **关于** 页面检查更新，或从 [GitHub Releases](https://github.com/leisvip/Chat2API/releases) 下载最新版本。
 
 ## 🤝 贡献
 

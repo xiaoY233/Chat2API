@@ -31,20 +31,23 @@ interface LogTrend {
 
 class LogManager {
   private logs: LogEntry[] = []
+  private pendingLogs: LogEntry[] = []
   private logFile: string
   private maxLogs: number = 10000
   private retentionDays: number = 7
   private initialized: boolean = false
   private mainWindow: BrowserWindow | null = null
+  private saveTimer: NodeJS.Timeout | null = null
+  private readonly saveDelayMs = 2000
 
   constructor() {
     const userDataPath = app.getPath('userData')
     const logDir = path.join(userDataPath, 'logs')
-    
+
     if (!fs.existsSync(logDir)) {
       fs.mkdirSync(logDir, { recursive: true })
     }
-    
+
     this.logFile = path.join(logDir, 'app.log')
   }
 
@@ -116,16 +119,46 @@ class LogManager {
     }
 
     this.logs.push(entry)
+    this.pendingLogs.push(entry)
 
     if (this.logs.length > this.maxLogs) {
       this.logs = this.logs.slice(-this.maxLogs)
     }
 
-    this.saveLogs().catch(console.error)
+    this.scheduleSave()
 
     this.mainWindow?.webContents.send(IpcChannels.LOGS_NEW_LOG, entry)
 
     return entry
+  }
+
+  private scheduleSave(): void {
+    if (this.saveTimer) {
+      clearTimeout(this.saveTimer)
+    }
+
+    this.saveTimer = setTimeout(() => {
+      this.saveTimer = null
+      this.flushLogs()
+    }, this.saveDelayMs)
+  }
+
+  private flushLogs(): void {
+    if (this.pendingLogs.length === 0) return
+
+    const toWrite = this.pendingLogs
+    this.pendingLogs = []
+
+    const content = toWrite.map(log => JSON.stringify(log)).join('\n') + '\n'
+    fs.appendFileSync(this.logFile, content, 'utf-8')
+  }
+
+  async flush(): Promise<void> {
+    if (this.saveTimer) {
+      clearTimeout(this.saveTimer)
+      this.saveTimer = null
+    }
+    this.flushLogs()
   }
 
   info(message: string, data?: Parameters<LogManager['log']>[2]): LogEntry {
@@ -223,14 +256,20 @@ class LogManager {
 
   async clearLogs(): Promise<void> {
     this.logs = []
+    this.pendingLogs = []
+    if (this.saveTimer) {
+      clearTimeout(this.saveTimer)
+      this.saveTimer = null
+    }
     await this.saveLogs()
   }
 
   async cleanOldLogs(): Promise<void> {
     const now = Date.now()
     const retentionMs = this.retentionDays * 24 * 60 * 60 * 1000
-    
+
     this.logs = this.logs.filter(log => now - log.timestamp < retentionMs)
+    this.pendingLogs = this.pendingLogs.filter(log => now - log.timestamp < retentionMs)
     await this.saveLogs()
   }
 

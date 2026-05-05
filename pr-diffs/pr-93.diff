@@ -1,0 +1,65 @@
+diff --git a/src/main/providers/builtin/kimi.ts b/src/main/providers/builtin/kimi.ts
+index 7213d0f..8c5b0e2 100644
+--- a/src/main/providers/builtin/kimi.ts
++++ b/src/main/providers/builtin/kimi.ts
+@@ -25,11 +25,13 @@ export const kimiConfig: BuiltinProviderConfig = {
+     'Priority': 'u=1, i',
+   },
+   enabled: true,
+-  description: 'Kimi K2.5 AI assistant by Moonshot, supports thinking mode and web search',
++  description: 'Kimi K2.6 AI assistant by Moonshot, supports thinking mode and web search',
+   supportedModels: [
++    'Kimi-K2.6',
+     'Kimi-K2.5',
+   ],
+   modelMappings: {
++    'Kimi-K2.6': 'kimi-k2.6',
+     'Kimi-K2.5': 'kimi-k2.5',
+   },
+   credentialFields: [
+@@ -39,7 +41,7 @@ export const kimiConfig: BuiltinProviderConfig = {
+       type: 'password',
+       required: true,
+       placeholder: '请输入 Kimi 访问令牌或刷新令牌',
+-      helpText: '支持 JWT Token（以 eyJ 开头）或 refresh_token',
++      helpText: '浏览器 Cookie 中的 kimi-auth 字段值（推荐），或 JWT Token / refresh_token',
+     },
+   ],
+   tokenCheckEndpoint: '/api/auth/token/refresh',
+diff --git a/src/main/proxy/adapters/kimi.ts b/src/main/proxy/adapters/kimi.ts
+index 5dc2484..0cf2129 100644
+--- a/src/main/proxy/adapters/kimi.ts
++++ b/src/main/proxy/adapters/kimi.ts
+@@ -1,5 +1,5 @@
+ /**
+- * Kimi K2.5 Adapter
++ * Kimi K2.6 Adapter
+  * Implements Kimi web API protocol with thinking mode and web search support
+  */
+ 
+diff --git a/src/renderer/src/i18n/locales/en-US.json b/src/renderer/src/i18n/locales/en-US.json
+index 8dd3ffa..8227cbf 100644
+--- a/src/renderer/src/i18n/locales/en-US.json
++++ b/src/renderer/src/i18n/locales/en-US.json
+@@ -261,7 +261,7 @@
+     "description": "Kimi AI assistant, supports long text processing and web search",
+     "accessToken": "Access Token",
+     "accessTokenPlaceholder": "Enter Kimi Access Token or Refresh Token",
+-    "accessTokenHelp": "Supports JWT Token (starts with eyJ) or refresh_token"
++    "accessTokenHelp": "The kimi-auth value from browser cookies (recommended), or JWT Token / refresh_token"
+   },
+   "minimax": {
+     "name": "MiniMax",
+diff --git a/src/renderer/src/i18n/locales/zh-CN.json b/src/renderer/src/i18n/locales/zh-CN.json
+index 07e1248..62c28cc 100644
+--- a/src/renderer/src/i18n/locales/zh-CN.json
++++ b/src/renderer/src/i18n/locales/zh-CN.json
+@@ -261,7 +261,7 @@
+     "description": "Kimi AI 助手，支持长文本处理和联网搜索",
+     "accessToken": "访问令牌",
+     "accessTokenPlaceholder": "请输入 Kimi 访问令牌或刷新令牌",
+-    "accessTokenHelp": "支持 JWT Token（以 eyJ 开头）或 refresh_token"
++    "accessTokenHelp": "浏览器 Cookie 中的 kimi-auth 字段值（推荐），也可使用 JWT Token 或 refresh_token"
+   },
+   "minimax": {
+     "name": "MiniMax",

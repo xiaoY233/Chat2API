@@ -9,6 +9,7 @@ import { PassThrough } from 'stream'
 import { createParser } from 'eventsource-parser'
 import { Account, Provider } from '../../store/types'
 import { hasToolUse, parseToolUse, ToolCall } from '../promptToolUse'
+import { messagesToPrompt } from '../utils/messageToPrompt'
 
 const QWEN_AI_BASE = 'https://chat.qwen.ai'
 
@@ -57,6 +58,8 @@ interface ChatCompletionRequest {
   enable_thinking?: boolean
   thinking_budget?: number
   chatId?: string
+  providerSessionId?: string
+  parentMessageId?: string
 }
 
 function uuid(): string {
@@ -256,29 +259,17 @@ export class QwenAiAdapter {
       forceThinking = (this as any)._forceThinking
     }
 
-    // Always create a new chat (single-turn mode only)
-    const chatId = await this.createChat(modelId, 'OpenAI_API_Chat')
-    console.log('[QwenAI] Created new chat:', chatId)
+    // Reuse existing chat or create a new one
+    const existingChatId = request.providerSessionId || request.chatId
+    const chatId = existingChatId || await this.createChat(modelId, 'OpenAI_API_Chat')
+    console.log('[QwenAI] Using chat:', chatId, existingChatId ? '(reused)' : '(new)')
 
-    const messages = request.messages
-    
-    // Extract system message and user message
-    let systemContent = ''
-    let userContent = ''
-    
-    // Single-turn mode: extract all messages
-    for (const msg of messages) {
-      if (msg.role === 'system') {
-        systemContent += (systemContent ? '\n\n' : '') + msg.content
-      } else if (msg.role === 'user') {
-        userContent = msg.content
-      }
-    }
-    
-    // If system prompt exists, prepend it to user content
-    if (systemContent) {
-      userContent = `${systemContent}\n\nUser: ${userContent}`
-    }
+    const parentId = request.parentMessageId || null
+
+    // Convert entire conversation history to a single prompt string
+    // This ensures multi-turn context is preserved across requests
+    const userContent = messagesToPrompt(request.messages as any)
+    console.log('[QwenAI] Converted conversation history to prompt, length:', userContent.length)
 
     const fid = uuid()
     const childId = uuid()
@@ -289,15 +280,15 @@ export class QwenAiAdapter {
     // 1. Model name suffix: -thinking (force thinking), -fast (force fast mode)
     // 2. enable_thinking parameter for explicit control
     // 3. If neither is specified, thinking mode is disabled by default (fast mode)
-    const shouldEnableThinking = forceThinking !== undefined 
-      ? forceThinking 
-      : request.enable_thinking === true
+    const shouldEnableThinking = forceThinking !== undefined
+      ? forceThinking
+      : request.enable_thinking !== false
     
     const featureConfig: Record<string, any> = {
       thinking_enabled: shouldEnableThinking,
       output_schema: 'phase',
       research_mode: 'normal',
-      auto_thinking: shouldEnableThinking,
+      auto_thinking: true,
       thinking_format: 'summary',
       auto_search: false, // Default to disable auto search
     }
@@ -313,11 +304,11 @@ export class QwenAiAdapter {
       chat_id: chatId,
       chat_mode: 'normal',
       model: modelId,
-      parent_id: null,
+      parent_id: parentId,
       messages: [
         {
           fid,
-          parentId: null,
+          parentId: parentId,
           childrenIds: [childId],
           role: 'user',
           content: userContent,
@@ -329,7 +320,7 @@ export class QwenAiAdapter {
           feature_config: featureConfig,
           extra: { meta: { subChatType: 't2t' } },
           sub_chat_type: 't2t',
-          parent_id: null,
+          parent_id: parentId,
         },
       ],
       timestamp: ts + 1,
@@ -576,13 +567,16 @@ export class QwenAiStreamHandler {
                 transStream.write(`data: ${JSON.stringify(chunk)}\n\n`)
                 console.log('[QwenAI] Content chunk written')
               }
-            } else if (phase === null && content) {
+            } else if (content) {
+              if (phase && phase !== 'answer') {
+                console.log('[QwenAI] Content from non-standard phase:', phase)
+              }
               if (!initialChunkSent) {
                 sendInitialChunk()
               }
               // Accumulate content for tool call detection
               this.content += content
-              
+
               const chunk = {
                 id: this.responseId || this.chatId,
                 model: this.model,
@@ -593,7 +587,7 @@ export class QwenAiStreamHandler {
               transStream.write(`data: ${JSON.stringify(chunk)}\n\n`)
             }
 
-            if (status === 'finished' && (phase === 'answer' || phase === null)) {
+            if (status === 'finished' && (phase === 'answer' || phase === null || content)) {
               // Check for tool calls before sending stop
               if (hasToolUse(this.content)) {
                 console.log('[QwenAI] Found tool_use in stream, sending tool_calls')
@@ -721,7 +715,10 @@ export class QwenAiStreamHandler {
 
                   resolveOnce(data)
                 }
-              } else if (phase === null && content) {
+              } else if (content) {
+                if (phase && phase !== 'answer') {
+                  console.log('[QwenAI] Non-stream content from non-standard phase:', phase)
+                }
                 data.choices[0].message.content += content
               }
             }

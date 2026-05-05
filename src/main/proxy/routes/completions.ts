@@ -5,6 +5,7 @@
 
 import Router from '@koa/router'
 import type { Context } from 'koa'
+import { PassThrough } from 'stream'
 import { loadBalancer } from '../loadbalancer'
 import { requestForwarder } from '../forwarder'
 import { streamHandler } from '../stream'
@@ -31,6 +32,16 @@ interface CompletionRequest {
  */
 function generateRequestId(): string {
   return `cmpl-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+}
+
+/**
+ * Extract user input from prompt
+ */
+function extractUserInput(prompt: string | string[]): string | undefined {
+  if (Array.isArray(prompt)) {
+    return prompt.filter(p => p).join(' ')
+  }
+  return prompt || undefined
 }
 
 /**
@@ -159,6 +170,37 @@ router.post('/completions', async (ctx: Context) => {
           type: 'api_error',
         },
       }
+
+      storeManager.addLog('error', `Request failed: ${result.error}`, {
+        requestId,
+        providerId: provider.id,
+        accountId: account.id,
+        model: request.model,
+        latency,
+      })
+
+      storeManager.addRequestLog({
+        timestamp: startTime,
+        status: 'error',
+        statusCode: result.status || 500,
+        method: 'POST',
+        url: '/v1/completions',
+        model: request.model,
+        actualModel,
+        providerId: provider.id,
+        providerName: provider.name,
+        accountId: account.id,
+        accountName: account.name,
+        requestBody: JSON.stringify(request),
+        userInput: extractUserInput(request.prompt),
+        responseStatus: result.status || 500,
+        latency,
+        isStream: request.stream || false,
+        errorMessage: result.error,
+      })
+
+      storeManager.recordRequestInStats(false, latency, request.model, provider.id, account.id)
+
       return
     }
 
@@ -180,6 +222,58 @@ router.post('/completions', async (ctx: Context) => {
       isStream: request.stream,
     })
 
+    const userInput = extractUserInput(request.prompt)
+    const responseBodyForLog = !request.stream && result.body
+      ? JSON.stringify(result.body)
+      : undefined
+
+    let logEntryId: string | undefined
+
+    if (!request.stream) {
+      const logEntry = storeManager.addRequestLog({
+        timestamp: startTime,
+        status: 'success',
+        statusCode: 200,
+        method: 'POST',
+        url: '/v1/completions',
+        model: request.model,
+        actualModel,
+        providerId: provider.id,
+        providerName: provider.name,
+        accountId: account.id,
+        accountName: account.name,
+        requestBody: JSON.stringify(request),
+        userInput,
+        responseStatus: 200,
+        responseBody: responseBodyForLog,
+        latency,
+        isStream: false,
+      })
+      logEntryId = logEntry.id
+    } else {
+      const logEntry = storeManager.addRequestLog({
+        timestamp: startTime,
+        status: 'success',
+        statusCode: 200,
+        method: 'POST',
+        url: '/v1/completions',
+        model: request.model,
+        actualModel,
+        providerId: provider.id,
+        providerName: provider.name,
+        accountId: account.id,
+        accountName: account.name,
+        requestBody: JSON.stringify(request),
+        userInput,
+        responseStatus: 200,
+        latency,
+        isStream: true,
+      })
+      logEntryId = logEntry.id
+    }
+
+    storeManager.recordRequestInStats(true, latency, request.model, provider.id, account.id)
+
     if (request.stream && result.stream) {
       ctx.set('Content-Type', 'text/event-stream')
       ctx.set('Cache-Control', 'no-cache')
@@ -187,7 +281,23 @@ router.post('/completions', async (ctx: Context) => {
       ctx.set('X-Accel-Buffering', 'no')
 
       const transformStream = streamHandler.createTransformStream(actualModel, requestId)
+
+      // Collect stream content for log update
+      let collectedContent = ''
+      transformStream.on('data', (chunk: Buffer) => {
+        collectedContent += chunk.toString()
+      })
+
       result.stream.pipe(transformStream)
+
+      transformStream.once('end', () => {
+        if (logEntryId) {
+          storeManager.updateRequestLog(logEntryId, {
+            responseBody: collectedContent || undefined,
+          })
+        }
+      })
+
       ctx.body = transformStream
     } else {
       ctx.set('Content-Type', 'application/json')
@@ -197,13 +307,46 @@ router.post('/completions', async (ctx: Context) => {
     const latency = Date.now() - startTime
     proxyStatusManager.recordRequestFailure(latency)
 
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+
     ctx.status = 500
     ctx.body = {
       error: {
-        message: error instanceof Error ? error.message : 'Unknown error',
+        message: errorMessage,
         type: 'internal_error',
       },
     }
+
+    storeManager.addLog('error', `Request exception: ${errorMessage}`, {
+      requestId,
+      providerId: provider.id,
+      accountId: account.id,
+      model: request.model,
+      latency,
+      error: errorMessage,
+    })
+
+    storeManager.addRequestLog({
+      timestamp: startTime,
+      status: 'error',
+      statusCode: 500,
+      method: 'POST',
+      url: '/v1/completions',
+      model: request.model,
+      actualModel,
+      providerId: provider.id,
+      providerName: provider.name,
+      accountId: account.id,
+      accountName: account.name,
+      requestBody: JSON.stringify(request),
+      userInput: extractUserInput(request.prompt),
+      responseStatus: 500,
+      latency,
+      isStream: request.stream || false,
+      errorMessage,
+    })
+
+    storeManager.recordRequestInStats(false, latency, request.model, provider.id, account.id)
   }
 })
 
