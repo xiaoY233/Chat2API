@@ -240,7 +240,10 @@ export class DeepSeekStreamHandler {
   ): void {
     const cleanedValue = content.replace(/FINISHED/g, '')
     // Always filter SEARCH keywords for thinking content
-    const filteredForSearch = cleanedValue.replace(/^(SEARCH|WEB_SEARCH|SEARCHING)\s*/i, '')
+    const shouldFilterSearch = this.webSearchEnabled || this.model.includes('search')
+    const filteredForSearch = shouldFilterSearch
+      ? cleanedValue.replace(/^(SEARCH|WEB_SEARCH|SEARCHING)\s*/i, '')
+      : cleanedValue
     const processedContent = isSearchSilentModel
       ? filteredForSearch.replace(/\[citation:(\d+)\]/g, '')
       : filteredForSearch.replace(/\[citation:(\d+)\]/g, '[$1]')
@@ -352,6 +355,7 @@ export class DeepSeekStreamHandler {
     const isThinkingModel = this.model.includes('think') || this.model.includes('r1') || !!this.reasoningEffort
     const isFoldModel = (this.model.includes('fold') || this.model.includes('search') || this.webSearchEnabled) && !isThinkingModel
     const isSearchSilentModel = this.model.includes('search-silent')
+    const isSearchModel = this.model.includes('search') || this.webSearchEnabled
 
     return new Promise((resolve, reject) => {
       let buffer = ''
@@ -386,7 +390,9 @@ export class DeepSeekStreamHandler {
                 for (const fragment of fragments) {
                   if (fragment.content) {
                     let cleanedFragment = fragment.content.replace(/FINISHED/g, '')
-                    cleanedFragment = cleanedFragment.replace(/^(SEARCH|WEB_SEARCH|SEARCHING)\s*/i, '')
+                    if (isSearchModel) {
+                      cleanedFragment = cleanedFragment.replace(/^(SEARCH|WEB_SEARCH|SEARCHING)\s*/i, '')
+                    }
                     if (fragment.type === 'THINK') {
                       accumulatedThinkingContent += cleanedFragment
                     } else if (fragment.type === 'ANSWER' || fragment.type === 'RESPONSE') {
@@ -400,7 +406,9 @@ export class DeepSeekStreamHandler {
                 for (const fragment of parsed.v) {
                   if (fragment.content) {
                     let cleanedFragment = fragment.content.replace(/FINISHED/g, '')
-                    cleanedFragment = cleanedFragment.replace(/^(SEARCH|WEB_SEARCH|SEARCHING)\s*/i, '')
+                    if (isSearchModel) {
+                      cleanedFragment = cleanedFragment.replace(/^(SEARCH|WEB_SEARCH|SEARCHING)\s*/i, '')
+                    }
                     if (fragment.type === 'THINK') {
                       currentPath = 'thinking'
                       accumulatedThinkingContent += cleanedFragment
@@ -437,7 +445,9 @@ export class DeepSeekStreamHandler {
                 }
                 if (Array.isArray(e.v)) {
                   let cleanedValue = e.v.map((v: any) => v.content).join('').replace(/FINISHED/g, '')
-                  cleanedValue = cleanedValue.replace(/^(SEARCH|WEB_SEARCH|SEARCHING)\s*/i, '')
+                  if (isSearchModel) {
+                    cleanedValue = cleanedValue.replace(/^(SEARCH|WEB_SEARCH|SEARCHING)\s*/i, '')
+                  }
                   if (currentPath === 'thinking') {
                     accumulatedThinkingContent += cleanedValue
                   } else if (currentPath === 'content') {
@@ -449,7 +459,9 @@ export class DeepSeekStreamHandler {
 
             if (typeof parsed.v === 'string') {
               let cleanedValue = parsed.v.replace(/FINISHED/g, '')
-              cleanedValue = cleanedValue.replace(/^(SEARCH|WEB_SEARCH|SEARCHING)\s*/i, '')
+              if (isSearchModel) {
+                cleanedValue = cleanedValue.replace(/^(SEARCH|WEB_SEARCH|SEARCHING)\s*/i, '')
+              }
               if (currentPath === 'thinking') {
                 accumulatedThinkingContent += cleanedValue
               } else if (currentPath === 'content') {
