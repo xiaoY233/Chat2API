@@ -66,9 +66,13 @@ Tool results will be provided as Chat2API XML result blocks:
       toolCalls,
     })
 
+    const cleanContent = rawMatches.length > 0
+      ? rawMatches.reduce((acc, raw) => acc.replace(raw, ''), parseable).trim()
+      : content
+
     if (toolCalls.length === 0) {
       return createParseResult({
-        content,
+        content: cleanContent,
         toolCalls,
         protocol: rawMatches.length > 0 ? 'managed_xml' : 'unknown',
         rawMatches,
@@ -76,7 +80,6 @@ Tool results will be provided as Chat2API XML result blocks:
       })
     }
 
-    const cleanContent = rawMatches.reduce((acc, raw) => acc.replace(raw, ''), parseable).trim()
     return createParseResult({
       content: cleanContent,
       toolCalls,

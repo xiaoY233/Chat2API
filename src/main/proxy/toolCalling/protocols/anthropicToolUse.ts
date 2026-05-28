@@ -57,9 +57,13 @@ Use Anthropic-style tool invocation only when this protocol is enabled.`
       }
     }
 
+    const cleanContent = rawMatches.length > 0
+      ? rawMatches.reduce((acc, raw) => acc.replace(raw, ''), parseable).trim()
+      : content
+
     if (toolCalls.length === 0) {
       return createParseResult({
-        content,
+        content: cleanContent,
         toolCalls,
         protocol: rawMatches.length > 0 ? 'anthropic_tool_use' : 'unknown',
         rawMatches,
@@ -68,7 +72,7 @@ Use Anthropic-style tool invocation only when this protocol is enabled.`
     }
 
     return createParseResult({
-      content: rawMatches.reduce((acc, raw) => acc.replace(raw, ''), parseable).trim(),
+      content: cleanContent,
       toolCalls,
       protocol: 'anthropic_tool_use',
       rawMatches,

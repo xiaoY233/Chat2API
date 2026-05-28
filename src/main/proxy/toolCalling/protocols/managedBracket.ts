@@ -58,9 +58,13 @@ When calling tools, respond with only this block:
       }
     }
 
+    const cleanContent = rawMatches.length > 0
+      ? rawMatches.reduce((acc, raw) => acc.replace(raw, ''), parseable).trim()
+      : content
+
     if (toolCalls.length === 0) {
       return createParseResult({
-        content,
+        content: cleanContent,
         toolCalls,
         protocol: rawMatches.length > 0 ? 'managed_bracket' : 'unknown',
         rawMatches,
@@ -68,7 +72,6 @@ When calling tools, respond with only this block:
       })
     }
 
-    const cleanContent = rawMatches.reduce((acc, raw) => acc.replace(raw, ''), parseable).trim()
     return createParseResult({
       content: cleanContent,
       toolCalls,

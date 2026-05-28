@@ -86,7 +86,7 @@ export class ToolStreamParser {
     }
 
     const shouldReleaseText = !this.emittedToolCall
-    const text = this.buffer
+    const text = parsed.content || this.buffer
     this.buffer = ''
     this.isBufferingToolCall = false
     return shouldReleaseText ? [createContentChunk(baseChunk, text, false)] : []
