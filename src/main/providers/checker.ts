@@ -144,7 +144,7 @@ export class ProviderChecker {
       case 'qwen':
         return this.checkQwenToken(account.credentials.ticket)
       case 'qwen-ai':
-        return this.checkQwenAiToken(account.credentials.token)
+        return this.checkQwenAiToken(account.credentials)
       case 'perplexity':
         return this.checkPerplexityToken(account.credentials.sessionToken || account.credentials.token)
       case 'mimo':
@@ -537,34 +537,63 @@ export class ProviderChecker {
     }
   }
 
-  private static async checkQwenAiToken(token: string): Promise<TokenCheckResult> {
+  private static async checkQwenAiToken(credentials: Record<string, string>): Promise<TokenCheckResult> {
     try {
-      const response = await axios.get(
-        'https://chat.qwen.ai/api/v2/user',
+      const cookies = (credentials.cookies || credentials.cookie || '') as unknown
+      const cookieHeader = typeof cookies === 'string'
+        ? cookies
+        : cookies && typeof cookies === 'object'
+          ? Object.entries(cookies)
+              .filter(([, value]) => value)
+              .map(([key, value]) => `${key}=${value}`)
+              .join('; ')
+          : credentials.token
+            ? `token=${credentials.token}`
+            : ''
+
+      if (!cookieHeader) {
+        return { valid: false, error: 'Cookies are required' }
+      }
+
+      const response = await axios.post(
+        'https://chat.qwen.ai/api/v2/users/status',
+        {
+          typarms: {
+            typarm1: 'web',
+            typarm3: 'prod',
+            typarm4: 'qwen_chat',
+            typarm5: 'product',
+            orgid: 'tongyi',
+            cdn_version: '0.2.45',
+            domain: 'chat.qwen.ai',
+          },
+        },
         {
           headers: {
-            Authorization: `Bearer ${token}`,
+            Cookie: cookieHeader,
             'Content-Type': 'application/json',
-            Accept: 'application/json',
+            Accept: 'application/json, text/plain, */*',
+            Origin: 'https://chat.qwen.ai',
+            Referer: 'https://chat.qwen.ai/c/new-chat',
             source: 'web',
+            Version: '0.2.45',
           },
           timeout: CHECK_TIMEOUT,
           validateStatus: () => true,
         }
       )
 
-      if (response.status === 200 && response.data?.data) {
+      if (response.status === 200 && response.data?.success && response.data?.data === true) {
         return {
           valid: true,
           userInfo: {
-            name: response.data.data.name || response.data.data.email,
-            email: response.data.data.email,
+            name: 'Qwen AI User',
           },
         }
       }
 
       if (response.status === 401) {
-        return { valid: false, error: 'Token expired or invalid' }
+        return { valid: false, error: 'Cookies expired or invalid' }
       }
 
       return { valid: false, error: `Validation failed: HTTP ${response.status}` }

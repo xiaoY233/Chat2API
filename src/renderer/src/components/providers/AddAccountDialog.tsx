@@ -39,11 +39,32 @@ import type { Provider, CredentialField, Account, BuiltinProviderConfig, Provide
 function mapOAuthCredentials(providerId: string | undefined, credentials: Record<string, string>): Record<string, string> {
   if (!providerId) return credentials
 
+  const stringifyCookies = (cookies: unknown): string => {
+    if (typeof cookies === 'string') {
+      return cookies
+    }
+    if (cookies && typeof cookies === 'object') {
+      return Object.entries(cookies as Record<string, string>)
+        .filter(([, value]) => value)
+        .map(([key, value]) => `${key}=${value}`)
+        .join('; ')
+    }
+    return ''
+  }
+
+  if (providerId === 'qwen-ai') {
+    const cookies = stringifyCookies((credentials as Record<string, unknown>).cookies || (credentials as Record<string, unknown>).cookie)
+    const token = credentials.token || credentials['token']
+    return {
+      ...(token ? { token } : {}),
+      ...(cookies ? { cookies } : {}),
+    }
+  }
+
   const credentialKeyMap: Record<string, string> = {
     'glm': 'chatglm_refresh_token',
     'deepseek': 'userToken',
     'qwen': 'tongyi_sso_ticket',
-    'qwen-ai': 'tongyi_sso_ticket',
     'zai': 'tongyi_sso_ticket',
     'perplexity': '__Secure-next-auth.session-token',
     'mimo': 'serviceToken',
@@ -53,7 +74,6 @@ function mapOAuthCredentials(providerId: string | undefined, credentials: Record
     'glm': 'refresh_token',
     'deepseek': 'token',
     'qwen': 'ticket',
-    'qwen-ai': 'ticket',
     'zai': 'ticket',
     'perplexity': 'sessionToken',
     'mimo': 'service_token',

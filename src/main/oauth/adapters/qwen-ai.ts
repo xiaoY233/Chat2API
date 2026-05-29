@@ -44,12 +44,33 @@ export class QwenAiAdapter extends BaseOAuthAdapter {
     })
   }
 
+  private getCookieHeader(credentials: Record<string, string>): string {
+    const cookies = (credentials.cookies || credentials.cookie || '') as unknown
+    if (typeof cookies === 'string') {
+      return cookies
+    }
+    if (cookies && typeof cookies === 'object') {
+      return Object.entries(cookies)
+        .filter(([, value]) => value)
+        .map(([key, value]) => `${key}=${value}`)
+        .join('; ')
+    }
+    const token = credentials.token
+    return token ? `token=${token}` : ''
+  }
+
   async loginWithToken(providerId: string, token: string): Promise<OAuthResult> {
-    this.emitProgress('pending', 'Validating Token...')
-    
+    this.emitProgress('pending', 'Validating credentials...')
+
+    // 区分凭据类型：JWT token 以 "eyJ" 开头且有三段，否则视为完整 Cookie Header 字符串
+    // （注意：当前 UI 的 LoginDialog 中没有 qwen-ai 入口，此路径暂不可达，
+    //   此处修复是为防止未来接入时出现 Cookie 被误存为 token 的问题）
+    const isJwt = token.startsWith('eyJ') && token.split('.').length === 3
+    const credentials: Record<string, string> = isJwt ? { token } : { cookies: token }
+
     try {
-      const validation = await this.validateToken({ token })
-      
+      const validation = await this.validateToken(credentials)
+
       if (!validation.valid) {
         return {
           success: false,
@@ -58,14 +79,14 @@ export class QwenAiAdapter extends BaseOAuthAdapter {
           error: validation.error || 'Token validation failed',
         }
       }
-      
-      this.emitProgress('success', 'Token validation successful')
-      
+
+      this.emitProgress('success', 'Validation successful')
+
       return {
         success: true,
         providerId,
         providerType: 'qwen-ai',
-        credentials: { token },
+        credentials,
         accountInfo: validation.accountInfo,
       }
     } catch (error) {
@@ -85,11 +106,65 @@ export class QwenAiAdapter extends BaseOAuthAdapter {
 
   async validateToken(credentials: Record<string, string>): Promise<TokenValidationResult> {
     const token = credentials.token
+    const rawCookies = credentials.cookies || credentials.cookie
+    const cookieHeader = this.getCookieHeader(credentials)
     
+    if (cookieHeader) {
+      try {
+        const response = await axios.post(
+          `${QWEN_AI_API_BASE}/api/v2/users/status`,
+          {
+            typarms: {
+              typarm1: 'web',
+              typarm3: 'prod',
+              typarm4: 'qwen_chat',
+              typarm5: 'product',
+              orgid: 'tongyi',
+              cdn_version: '0.2.45',
+              domain: 'chat.qwen.ai',
+            },
+          },
+          {
+            headers: {
+              Cookie: cookieHeader,
+              ...FAKE_HEADERS,
+              Accept: 'application/json, text/plain, */*',
+              Referer: 'https://chat.qwen.ai/c/new-chat',
+              Version: '0.2.45',
+            },
+            timeout: 15000,
+            validateStatus: () => true,
+          }
+        )
+
+        if (response.status === 200 && response.data?.success && response.data?.data === true) {
+          return {
+            valid: true,
+            tokenType: 'cookie',
+            accountInfo: {
+              name: 'Qwen AI User',
+            },
+          }
+        }
+
+        if (rawCookies) {
+          return {
+            valid: false,
+            error: response.data?.errorMsg || `Validation failed: HTTP ${response.status}`,
+          }
+        }
+      } catch (error) {
+        return {
+          valid: false,
+          error: error instanceof Error ? error.message : 'Validation request failed',
+        }
+      }
+    }
+
     if (!token) {
       return {
         valid: false,
-        error: 'Token cannot be empty',
+        error: 'Cookies cannot be empty',
       }
     }
     

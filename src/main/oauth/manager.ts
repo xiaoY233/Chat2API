@@ -52,7 +52,7 @@ export class OAuthManager extends EventEmitter {
    */
   private getAdapter(providerId: string, providerType: ProviderType): BaseOAuthAdapter {
     const key = `${providerId}_${providerType}`
-    
+
     if (!this.adapters.has(key)) {
       const adapter = createAdapter(providerType, {
         providerId,
@@ -60,19 +60,19 @@ export class OAuthManager extends EventEmitter {
         authMethods: [],
         callbackPort: DEFAULT_CALLBACK_PORT,
       })
-      
+
       if (this.mainWindow) {
         adapter.setMainWindow(this.mainWindow)
       }
-      
+
       adapter.setProgressCallback((event) => {
         this.emit('progress', event)
         this.sendProgressToRenderer(event)
       })
-      
+
       this.adapters.set(key, adapter)
     }
-    
+
     return this.adapters.get(key)!
   }
 
@@ -100,7 +100,7 @@ export class OAuthManager extends EventEmitter {
 
     return new Promise((resolve, reject) => {
       const adapter = this.getAdapter(options.providerId, options.providerType)
-      
+
       const timeout = setTimeout(() => {
         this.cancelLogin()
         const result: OAuthResult = {
@@ -146,11 +146,11 @@ export class OAuthManager extends EventEmitter {
     mimoPhToken?: string
   ): Promise<OAuthResult> {
     const adapter = this.getAdapter(providerId, providerType)
-    
+
     if ('loginWithToken' in adapter && typeof (adapter as any).loginWithToken === 'function') {
       return await (adapter as any).loginWithToken(providerId, token, realUserID, mimoUserId, mimoPhToken)
     }
-    
+
     // For Mimo, validate with all three tokens
     if (providerType === 'mimo') {
       if (!mimoUserId || !mimoPhToken) {
@@ -166,7 +166,7 @@ export class OAuthManager extends EventEmitter {
         user_id: mimoUserId,
         ph_token: mimoPhToken,
       })
-      
+
       if (!validation.valid) {
         return {
           success: false,
@@ -175,7 +175,7 @@ export class OAuthManager extends EventEmitter {
           error: validation.error || 'Token validation failed',
         }
       }
-      
+
       return {
         success: true,
         providerId,
@@ -188,9 +188,9 @@ export class OAuthManager extends EventEmitter {
         accountInfo: validation.accountInfo,
       }
     }
-    
+
     const validation = await adapter.validateToken({ token })
-    
+
     if (!validation.valid) {
       return {
         success: false,
@@ -199,7 +199,7 @@ export class OAuthManager extends EventEmitter {
         error: validation.error || 'Token validation failed',
       }
     }
-    
+
     return {
       success: true,
       providerId,
@@ -327,18 +327,31 @@ export class OAuthManager extends EventEmitter {
 
       let validationTimeout: NodeJS.Timeout | null = null
 
+      const stringifyCookies = (cookies: unknown): string => {
+        if (typeof cookies === 'string') {
+          return cookies
+        }
+        if (cookies && typeof cookies === 'object') {
+          return Object.entries(cookies as Record<string, string>)
+            .filter(([, value]) => value)
+            .map(([key, value]) => `${key}=${value}`)
+            .join('; ')
+        }
+        return ''
+      }
+
       const tokenFoundHandler = async (event: { key: string; value: string; allCookies?: Record<string, string> }) => {
         console.log('[OAuthManager] tokenFoundHandler called, isValidating:', isValidating, 'event:', event.key, event.value.substring(0, 50) + '...')
 
         // Store the token
         collectedTokens[event.key] = event.value
-        
+
         // Store all cookies if provided (needed for Cloudflare-protected requests)
         if (event.allCookies) {
           collectedTokens['cookies'] = event.allCookies as any
           console.log('[OAuthManager] Stored all cookies:', Object.keys(event.allCookies).length, 'cookies')
         }
-        
+
         console.log('[OAuthManager] Collected tokens:', Object.keys(collectedTokens))
 
         // For MiniMax, we need both token and realUserID before validating
@@ -388,7 +401,7 @@ export class OAuthManager extends EventEmitter {
               hasUserId: !!hasUserId,
               hasPhToken: !!hasPhToken,
             })
-            
+
             // Clear any existing timeout
             if (validationTimeout) {
               clearTimeout(validationTimeout)
@@ -413,8 +426,35 @@ export class OAuthManager extends EventEmitter {
           }
         }
 
+        if (providerType === 'qwen-ai') {
+          if (!collectedTokens.cookies) {
+            console.log('[OAuthManager] Qwen AI: got token, waiting for full cookies...')
+            if (validationTimeout) {
+              clearTimeout(validationTimeout)
+            }
+            validationTimeout = setTimeout(() => {
+              if (!collectedTokens.cookies) {
+                console.log('[OAuthManager] Qwen AI: full cookies not collected yet')
+              } else {
+                console.log('[OAuthManager] Qwen AI: full cookies collected, validating...')
+                validateAndComplete()
+              }
+            }, 1000)
+            return
+          }
+
+          if (!isValidating) {
+            console.log('[OAuthManager] Qwen AI: validating with full cookies...')
+            if (validationTimeout) {
+              clearTimeout(validationTimeout)
+            }
+            validateAndComplete()
+            return
+          }
+        }
+
         // For non-MiniMax/Mimo providers, validate immediately when we have a token
-        if (providerType !== 'minimax' && providerType !== 'mimo') {
+        if (providerType !== 'minimax' && providerType !== 'mimo' && providerType !== 'qwen-ai') {
           if (isValidating) {
             console.log('[OAuthManager] Already validating, skipping')
             return
@@ -482,6 +522,29 @@ export class OAuthManager extends EventEmitter {
               ph_token: phToken,
             }
             console.log('[OAuthManager] Mimo: Final credentials prepared:', Object.keys(finalCredentials))
+          } else if (providerType === 'qwen-ai') {
+            const cookies = stringifyCookies(collectedTokens.cookies)
+            const token = collectedTokens.token
+
+            if (!cookies) {
+              console.log('[OAuthManager] Qwen AI: Missing full cookies, aborting validation')
+              this.sendProgressToRenderer({
+                status: 'pending',
+                message: 'Waiting for full cookies...',
+              })
+              isValidating = false
+              return
+            }
+
+            validationCredentials = {
+              ...(token ? { token } : {}),
+              cookies,
+            }
+            finalCredentials = {
+              ...(token ? { token } : {}),
+              cookies,
+            }
+            console.log('[OAuthManager] Qwen AI: Final credentials prepared:', Object.keys(finalCredentials))
           } else {
             validationCredentials = { ...collectedTokens }
             finalCredentials = { ...collectedTokens }
@@ -492,7 +555,7 @@ export class OAuthManager extends EventEmitter {
           console.log('[OAuthManager] Validation result:', validation)
 
           if (validation.valid) {
-            console.log('[OAuthManager] Token is valid, completing login with credentials:', JSON.stringify(finalCredentials, null, 2))
+            console.log('[OAuthManager] Token is valid, completing login with credentials keys:', Object.keys(finalCredentials).join(', '))
             inAppLoginManager.completeWithSuccess(finalCredentials)
           } else {
             console.log('[OAuthManager] Token validation failed:', validation.error)

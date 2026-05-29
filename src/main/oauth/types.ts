@@ -22,7 +22,7 @@ export type OAuthStatus = 'idle' | 'pending' | 'success' | 'error' | 'cancelled'
 /**
  * Token type
  */
-export type TokenType = 'jwt' | 'refresh' | 'access' | 'cookie'
+export type TokenType = 'jwt' | 'refresh' | 'access' | 'cookie' | 'token'
 
 /**
  * OAuth login result
@@ -129,7 +129,7 @@ export interface ManualTokenConfig {
 /**
  * Manual input config for each provider
  */
-export const MANUAL_TOKEN_CONFIGS: Record<ProviderType, ManualTokenConfig[]> = {
+export const MANUAL_TOKEN_CONFIGS: Partial<Record<ProviderType, ManualTokenConfig[]>> = {
   deepseek: [
     {
       providerType: 'deepseek',
@@ -191,10 +191,10 @@ export const MANUAL_TOKEN_CONFIGS: Record<ProviderType, ManualTokenConfig[]> = {
   'qwen-ai': [
     {
       providerType: 'qwen-ai',
-      tokenType: 'jwt',
-      label: 'Auth Token',
-      placeholder: 'Enter JWT token from chat.qwen.ai',
-      description: 'JWT token obtained from chat.qwen.ai Local Storage (key: "token")',
+      tokenType: 'cookie',
+      label: 'Cookies',
+      placeholder: 'Paste full Cookie header from chat.qwen.ai browser request',
+      description: 'Full Cookie header from browser DevTools Network request to chat.qwen.ai',
       helpUrl: 'https://chat.qwen.ai',
     },
   ],

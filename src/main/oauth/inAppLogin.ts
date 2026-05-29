@@ -17,6 +17,7 @@ export interface InAppLoginResult {
 export interface TokenFoundEvent {
   key: string
   value: string
+  allCookies?: Record<string, string>
 }
 
 export interface InAppLoginOptions {
@@ -211,6 +212,20 @@ export class InAppLoginManager extends EventEmitter {
         }
       }
 
+      const cookieHeader = details.requestHeaders['Cookie'] || details.requestHeaders['cookie']
+      if (cookieHeader && typeof cookieHeader === 'string') {
+        const allCookiesObj = this.parseCookieHeader(cookieHeader)
+        for (const source of this.config!.tokenSources) {
+          if (source.type === 'cookie' && allCookiesObj[source.key] && this.isValidToken(allCookiesObj[source.key])) {
+            this.emit('tokenFound', {
+              key: source.key,
+              value: allCookiesObj[source.key],
+              allCookies: allCookiesObj,
+            })
+          }
+        }
+      }
+
       callback({ requestHeaders: details.requestHeaders })
     })
 
@@ -253,6 +268,22 @@ export class InAppLoginManager extends EventEmitter {
 
   private hasMinTimePassed(): boolean {
     return Date.now() - this.loginStartTime >= MIN_LOGIN_TIME
+  }
+
+  private parseCookieHeader(cookieHeader: string): Record<string, string> {
+    const cookies: Record<string, string> = {}
+    for (const part of cookieHeader.split(';')) {
+      const trimmed = part.trim()
+      const equalIndex = trimmed.indexOf('=')
+      if (equalIndex > 0) {
+        const name = trimmed.substring(0, equalIndex)
+        const value = trimmed.substring(equalIndex + 1)
+        if (name && value) {
+          cookies[name] = value
+        }
+      }
+    }
+    return cookies
   }
 
   private delayedTokenCheck(): void {
