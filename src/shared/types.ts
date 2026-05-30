@@ -111,6 +111,7 @@ export interface AppConfig {
   managementApi: ManagementApiConfig
   contextManagement?: unknown
   language: 'zh-CN' | 'en-US'
+  credentialEncryption: boolean
 }
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error'

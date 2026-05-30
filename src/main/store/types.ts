@@ -219,6 +219,8 @@ export interface AppConfig {
   managementApi: ManagementApiConfig
   /** Context management configuration */
   contextManagement: ContextManagementConfig
+  /** Whether to encrypt credentials in data.json */
+  credentialEncryption: boolean
 }
 
 /**
@@ -815,6 +817,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   toolPromptConfig: undefined,
   managementApi: DEFAULT_MANAGEMENT_API_CONFIG,
   contextManagement: DEFAULT_CONTEXT_MANAGEMENT_CONFIG,
+  credentialEncryption: true,
 }
 
 /**

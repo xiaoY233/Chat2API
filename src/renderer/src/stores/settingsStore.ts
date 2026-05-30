@@ -107,7 +107,14 @@ export const useSettingsStore = create<SettingsState>()(
       maxLogs: 10000,
       setMaxLogs: (count) => set({ maxLogs: count }),
       credentialEncryption: true,
-      setCredentialEncryption: (enabled) => set({ credentialEncryption: enabled }),
+      setCredentialEncryption: async (enabled) => {
+        set({ credentialEncryption: enabled })
+        try {
+          await window.electronAPI.config.update({ credentialEncryption: enabled })
+        } catch (error) {
+          console.error('Failed to update credentialEncryption:', error)
+        }
+      },
       logDesensitization: true,
       setLogDesensitization: (enabled) => set({ logDesensitization: enabled }),
       config: null,
@@ -144,6 +151,7 @@ export const useSettingsStore = create<SettingsState>()(
             autoStartProxy: config.autoStartProxy,
             oauthProxyMode: config.oauthProxyMode || 'system',
             language: config.language || 'en-US',
+            credentialEncryption: config.credentialEncryption ?? true,
           })
         } catch (error) {
           console.error('Failed to fetch config:', error)
