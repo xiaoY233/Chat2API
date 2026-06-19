@@ -1,5 +1,14 @@
 import type { BuiltinProviderConfig } from '../../store/types'
 
+import { getFileConfig } from './util'
+const configs = getFileConfig('mimo.json', {
+  modelMappings: {
+    'MiMo-V2.5-Pro': 'mimo-v2.5-pro',
+    'MiMo-V2.5': 'mimo-v2.5',
+    'MiMo-V2-Flash': 'mimo-v2-flash',
+  }
+})
+
 export const mimoConfig: BuiltinProviderConfig = {
   id: 'mimo',
   name: 'Mimo',
@@ -26,16 +35,8 @@ export const mimoConfig: BuiltinProviderConfig = {
   },
   enabled: true,
   description: 'XiaomiMIMO - Xiaomi General Intelligence Foundation Model',
-  supportedModels: [
-    'MiMo-V2.5-Pro',
-    'MiMo-V2.5',
-    'MiMo-V2-Flash',
-  ],
-  modelMappings: {
-    'MiMo-V2.5-Pro': 'mimo-v2.5-pro',
-    'MiMo-V2.5': 'mimo-v2.5',
-    'MiMo-V2-Flash': 'mimo-v2-flash',
-  },
+  supportedModels: configs.supportedModels || Object.keys(configs.modelMappings) || [],
+  modelMappings: configs.modelMappings,
   credentialFields: [
     {
       name: 'service_token',

@@ -1,5 +1,17 @@
 import type { BuiltinProviderConfig } from '../../store/types'
 
+import { getFileConfig } from './util'
+const configs = getFileConfig('qwen.json', {
+  modelMappings: {
+    'Qwen3.6': 'Qwen',
+    'Qwen3.7-Max': 'Qwen3.7-Max',
+    'Qwen3.5-Flash': 'Qwen3.5-Flash',
+    'Qwen3-Max': 'Qwen3-Max',
+    'Qwen3-Max-Thinking-Preview': 'Qwen3-Max-Thinking-Preview',
+    'Qwen3-Coder': 'Qwen3-Coder',
+  }
+})
+
 export const qwenConfig: BuiltinProviderConfig = {
   id: 'qwen',
   name: 'Qwen',
@@ -15,22 +27,8 @@ export const qwenConfig: BuiltinProviderConfig = {
   },
   enabled: true,
   description: 'Qwen AI assistant by Alibaba Cloud (www.qianwen.com)',
-  supportedModels: [
-    'Qwen3.6',
-    'Qwen3.7-Max',
-    'Qwen3.5-Flash',
-    'Qwen3-Max',
-    'Qwen3-Max-Thinking-Preview',
-    'Qwen3-Coder',
-  ],
-  modelMappings: {
-    'Qwen3.6': 'Qwen',
-    'Qwen3.7-Max': 'Qwen3.7-Max',
-    'Qwen3.5-Flash': 'Qwen3.5-Flash',
-    'Qwen3-Max': 'Qwen3-Max',
-    'Qwen3-Max-Thinking-Preview': 'Qwen3-Max-Thinking-Preview',
-    'Qwen3-Coder': 'Qwen3-Coder',
-  },
+  supportedModels: configs.supportedModels || Object.keys(configs.modelMappings) || [],
+  modelMappings: configs.modelMappings,
   credentialFields: [
     {
       name: 'ticket',

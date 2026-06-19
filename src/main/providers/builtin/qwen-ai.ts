@@ -1,5 +1,16 @@
 import type { BuiltinProviderConfig } from '../../store/types'
 
+import { getFileConfig } from './util'
+const configs = getFileConfig('qwen-ai.json', {
+  modelMappings: {
+    'Qwen3.7-Max': 'qwen3.7-max',
+    'Qwen3.6-Plus': 'qwen3.6-plus',
+    'Qwen3.6-35B-A3B': 'qwen3.6-35b-a3b',
+    'Qwen3.6-27B': 'qwen3.6-27b',
+    'Qwen3-Coder': 'qwen3-coder-plus',
+  }
+})
+
 export const qwenAiConfig: BuiltinProviderConfig = {
   id: 'qwen-ai',
   name: 'Qwen AI (International)',
@@ -21,20 +32,8 @@ export const qwenAiConfig: BuiltinProviderConfig = {
     source: 'web',
     Version: '0.2.35',
   },
-  supportedModels: [
-    'Qwen3.7-Max',
-    'Qwen3.6-Plus',
-    'Qwen3.6-35B-A3B',
-    'Qwen3.6-27B',
-    'Qwen3-Coder',
-  ],
-  modelMappings: {
-    'Qwen3.7-Max': 'qwen3.7-max',
-    'Qwen3.6-Plus': 'qwen3.6-plus',
-    'Qwen3.6-35B-A3B': 'qwen3.6-35b-a3b',
-    'Qwen3.6-27B': 'qwen3.6-27b',
-    'Qwen3-Coder': 'qwen3-coder-plus',
-  },
+  supportedModels: configs.supportedModels || Object.keys(configs.modelMappings) || [],
+  modelMappings: configs.modelMappings,
   credentialFields: [
     {
       name: 'token',

@@ -1,5 +1,12 @@
 import type { BuiltinProviderConfig } from '../../store/types'
 
+import { getFileConfig } from './util'
+const configs = getFileConfig('minimax.json', {
+  modelMappings: {
+    'MiniMax-M2.7': 'MiniMax-M2.7',
+  }
+})
+
 export const minimaxConfig: BuiltinProviderConfig = {
   id: 'minimax',
   name: 'MiniMax',
@@ -25,12 +32,8 @@ export const minimaxConfig: BuiltinProviderConfig = {
   },
   enabled: true,
   description: 'MiniMax Agent - AI assistant with MCP multi-agent collaboration',
-  supportedModels: [
-    'MiniMax-M2.7',
-  ],
-  modelMappings: {
-    'MiniMax-M2.7': 'MiniMax-M2.7',
-  },
+  supportedModels: configs.supportedModels || Object.keys(configs.modelMappings) || [],
+  modelMappings: configs.modelMappings,
   credentialFields: [
     {
       name: 'token',
