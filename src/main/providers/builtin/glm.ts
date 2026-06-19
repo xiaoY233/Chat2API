@@ -1,5 +1,12 @@
 import type { BuiltinProviderConfig } from '../../store/types'
 
+import { getFileConfig } from './util'
+const configs = getFileConfig('glm.json', {
+  modelMappings: {
+    'GLM-5.1': 'glm-5.1',
+  }
+})
+
 export const glmConfig: BuiltinProviderConfig = {
   id: 'glm',
   name: 'GLM',
@@ -32,12 +39,8 @@ export const glmConfig: BuiltinProviderConfig = {
   },
   enabled: true,
   description: 'Zhipu Qingyan AI assistant, supports GLM-5.1 flagship model, deep thinking and video generation',
-  supportedModels: [
-    'GLM-5.1',
-  ],
-  modelMappings: {
-    'GLM-5.1': 'glm-5.1',
-  },
+  supportedModels: configs.supportedModels || Object.keys(configs.modelMappings) || [],
+  modelMappings: configs.modelMappings,
   credentialFields: [
     {
       name: 'refresh_token',

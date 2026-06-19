@@ -1,5 +1,12 @@
 import type { BuiltinProviderConfig } from '../../store/types'
 
+import { getFileConfig } from './util'
+const configs = getFileConfig('perplexity.json', {
+  modelMappings: {
+    'Auto': 'auto',
+  }
+})
+
 export const perplexityConfig: BuiltinProviderConfig = {
   id: 'perplexity',
   name: 'Perplexity',
@@ -16,12 +23,8 @@ export const perplexityConfig: BuiltinProviderConfig = {
   },
   enabled: true,
   description: 'Perplexity AI search assistant with Free Auto mode and web search enhancement',
-  supportedModels: [
-    'Auto',
-  ],
-  modelMappings: {
-    'Auto': 'auto',
-  },
+  supportedModels: configs.supportedModels || Object.keys(configs.modelMappings) || [],
+  modelMappings: configs.modelMappings,
   credentialFields: [
     {
       name: 'sessionToken',

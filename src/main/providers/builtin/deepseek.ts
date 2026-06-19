@@ -1,5 +1,13 @@
 import type { BuiltinProviderConfig } from '../../store/types'
 
+import { getFileConfig } from './util'
+const configs = getFileConfig('deepseek.json', {
+  modelMappings: {
+    'deepseek-v4-flash': 'deepseek-v4-flash',
+    'deepseek-v4-pro': 'deepseek-v4-pro',
+  }
+})
+
 export const deepseekConfig: BuiltinProviderConfig = {
   id: 'deepseek',
   name: 'DeepSeek',
@@ -28,11 +36,8 @@ export const deepseekConfig: BuiltinProviderConfig = {
   },
   enabled: true,
   description: 'DeepSeek AI assistant, supports deep thinking and web search',
-  supportedModels: ['deepseek-v4-flash', 'deepseek-v4-pro'],
-  modelMappings: {
-    'deepseek-v4-flash': 'deepseek-v4-flash',
-    'deepseek-v4-pro': 'deepseek-v4-pro',
-  },
+  supportedModels: configs.supportedModels || Object.keys(configs.modelMappings) || [],
+  modelMappings: configs.modelMappings,
   credentialFields: [
     {
       name: 'token',

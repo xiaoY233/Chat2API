@@ -1,5 +1,12 @@
 import type { BuiltinProviderConfig } from '../../store/types'
 
+import { getFileConfig } from './util'
+const configs = getFileConfig('kimi.json', {
+  modelMappings: {
+    'Kimi-K2.6': 'kimi-k2.6',
+  }
+})
+
 export const kimiConfig: BuiltinProviderConfig = {
   id: 'kimi',
   name: 'Kimi',
@@ -26,12 +33,8 @@ export const kimiConfig: BuiltinProviderConfig = {
   },
   enabled: true,
   description: 'Kimi K2.6 AI assistant by Moonshot, supports thinking mode and web search',
-  supportedModels: [
-    'Kimi-K2.6',
-  ],
-  modelMappings: {
-    'Kimi-K2.6': 'kimi-k2.6',
-  },
+  supportedModels: configs.supportedModels || Object.keys(configs.modelMappings) || [],
+  modelMappings: configs.modelMappings,
   credentialFields: [
     {
       name: 'token',

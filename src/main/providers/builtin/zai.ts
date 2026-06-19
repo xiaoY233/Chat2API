@@ -1,5 +1,16 @@
 import type { BuiltinProviderConfig } from '../../store/types'
 
+import { getFileConfig } from './util'
+const configs = getFileConfig('zai.json', {
+  modelMappings: {
+    'GLM-5.1': 'GLM-5.1',
+    'GLM-5-Turbo': 'GLM-5-Turbo',
+    'GLM-5V-Turbo': 'GLM-5v-Turbo',
+    'GLM-5': 'glm-5',
+    'GLM-4.7': 'glm-4.7',
+  }
+})
+
 export const zaiConfig: BuiltinProviderConfig = {
   id: 'zai',
   name: 'Z.ai',
@@ -26,20 +37,8 @@ export const zaiConfig: BuiltinProviderConfig = {
   },
   enabled: true,
   description: 'Z.ai - Free AI Chatbot powered by GLM-5.1, GLM-5, and GLM-4.7',
-  supportedModels: [
-    'GLM-5.1',
-    'GLM-5-Turbo',
-    'GLM-5V-Turbo',
-    'GLM-5',
-    'GLM-4.7',
-  ],
-  modelMappings: {
-    'GLM-5.1': 'GLM-5.1',
-    'GLM-5-Turbo': 'GLM-5-Turbo',
-    'GLM-5V-Turbo': 'GLM-5v-Turbo',
-    'GLM-5': 'glm-5',
-    'GLM-4.7': 'glm-4.7',
-  },
+  supportedModels: configs.supportedModels || Object.keys(configs.modelMappings) || [],
+  modelMappings: configs.modelMappings,
   credentialFields: [
     {
       name: 'token',
