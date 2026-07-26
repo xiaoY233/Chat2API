@@ -1,0 +1,171 @@
+name: Headless Image
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*.*.*'
+      - 'v*.*.*-*'
+    paths:
+      - 'headless/**'
+      - 'src/main/**'
+      - 'src/shared/**'
+      - 'sha3_wasm_bg.7b9ca65ddd.wasm'
+      - 'package.json'
+      - '.github/workflows/headless-image.yml'
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-test-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: headless/package-lock.json
+
+      - name: Install headless dependencies
+        run: npm ci --prefix headless --no-audit --no-fund
+
+      - name: Audit production dependencies
+        run: npm audit --prefix headless --omit=dev
+
+      - name: Test and build headless runtime
+        run: npm run check --prefix headless
+
+      - name: Read application version
+        id: version
+        run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Validate release tag version
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          EXPECTED_VERSION: ${{ steps.version.outputs.version }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: test "${TAG_NAME#v}" = "$EXPECTED_VERSION"
+
+      - name: Set image names
+        id: image
+        env:
+          OWNER: ${{ github.repository_owner }}
+          VERSION: ${{ steps.version.outputs.version }}
+          SHA: ${{ github.sha }}
+        run: |
+          owner="$(printf '%s' "$OWNER" | tr '[:upper:]' '[:lower:]')"
+          echo "base=ghcr.io/${owner}/chat2api-headless" >> "$GITHUB_OUTPUT"
+          echo "version_tag=ghcr.io/${owner}/chat2api-headless:${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "sha_tag=ghcr.io/${owner}/chat2api-headless:sha-${SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build amd64 image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: headless/Dockerfile
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: |
+            ${{ steps.image.outputs.version_tag }}
+            ${{ steps.image.outputs.sha_tag }}
+          build-args: |
+            APP_VERSION=${{ steps.version.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test image
+        env:
+          IMAGE: ${{ steps.image.outputs.version_tag }}
+        run: |
+          docker volume create chat2api-headless-ci
+          docker run -d --name chat2api-headless-ci \
+            --read-only \
+            --tmpfs /tmp:rw,noexec,nosuid,nodev,size=32m \
+            --cap-drop ALL \
+            --security-opt no-new-privileges:true \
+            -v chat2api-headless-ci:/var/lib/chat2api/.chat2api \
+            "$IMAGE"
+          for attempt in $(seq 1 30); do
+            if docker exec chat2api-headless-ci node -e \
+              "fetch('http://127.0.0.1:8080/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"; then
+              break
+            fi
+            if [ "$attempt" -eq 30 ]; then
+              docker logs chat2api-headless-ci
+              exit 1
+            fi
+            sleep 1
+          done
+          docker exec chat2api-headless-ci chat2api-ctl status
+          printf '%s' '{"providerId":"deepseek","name":"ci-account","credentials":{"token":"ci-secret-token"}}' | \
+            docker exec -i chat2api-headless-ci chat2api-ctl account add --stdin --no-validate
+          docker stop -t 30 chat2api-headless-ci
+          docker start chat2api-headless-ci
+          for attempt in $(seq 1 30); do
+            if docker exec chat2api-headless-ci node -e \
+              "fetch('http://127.0.0.1:8080/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"; then
+              break
+            fi
+            if [ "$attempt" -eq 30 ]; then
+              docker logs chat2api-headless-ci
+              exit 1
+            fi
+            sleep 1
+          done
+          docker exec chat2api-headless-ci chat2api-ctl accounts | grep -q ci-account
+          if docker logs chat2api-headless-ci 2>&1 | grep -q ci-secret-token; then
+            echo 'Credential leaked to container logs' >&2
+            exit 1
+          fi
+          test "$(docker inspect -f '{{.Config.User}}' chat2api-headless-ci)" = "chat2api"
+          docker stop -t 30 chat2api-headless-ci
+          before_hash="$(docker run --rm -v chat2api-headless-ci:/data:ro alpine:3.21 sha256sum /data/data.json | cut -d' ' -f1)"
+          docker run --rm -v chat2api-headless-ci:/data alpine:3.21 rm /data/master.key
+          docker start chat2api-headless-ci
+          sleep 3
+          test "$(docker inspect -f '{{.State.Running}}' chat2api-headless-ci)" = "false"
+          after_hash="$(docker run --rm -v chat2api-headless-ci:/data:ro alpine:3.21 sha256sum /data/data.json | cut -d' ' -f1)"
+          test "$before_hash" = "$after_hash"
+          test "$(docker run --rm -v chat2api-headless-ci:/data:ro alpine:3.21 sh -c 'find /data -name "data.corrupted.*" | wc -l')" = "0"
+          docker rm chat2api-headless-ci
+          docker volume rm chat2api-headless-ci
+
+      - name: Push immutable SHA tag
+        env:
+          SHA_TAG: ${{ steps.image.outputs.sha_tag }}
+        run: |
+          docker push "$SHA_TAG"
+
+      - name: Push release version tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          VERSION_TAG: ${{ steps.image.outputs.version_tag }}
+        run: docker push "$VERSION_TAG"
+
+      - name: Push latest tag
+        if: github.ref == 'refs/heads/main'
+        env:
+          VERSION_TAG: ${{ steps.image.outputs.version_tag }}
+          BASE: ${{ steps.image.outputs.base }}
+        run: |
+          docker tag "$VERSION_TAG" "$BASE:latest"
+          docker push "$BASE:latest"
