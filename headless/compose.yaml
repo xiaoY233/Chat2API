@@ -1,0 +1,44 @@
+services:
+  chat2api:
+    image: ${CHAT2API_IMAGE:?Set CHAT2API_IMAGE in .env}
+    container_name: chat2api-headless
+    restart: unless-stopped
+    init: true
+    ports:
+      - "127.0.0.1:${CHAT2API_HOST_PORT:-8080}:8080"
+    volumes:
+      - chat2api-data:/var/lib/chat2api/.chat2api
+    environment:
+      CHAT2API_PORT: "8080"
+      CHAT2API_HOST: "0.0.0.0"
+      CHAT2API_SHUTDOWN_TIMEOUT: "20000"
+      NODE_OPTIONS: "--max-old-space-size=768"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=32m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 1200m
+    pids_limit: 128
+    stop_grace_period: 30s
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:8080/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    logging:
+      driver: local
+      options:
+        max-size: 10m
+        max-file: "3"
+
+volumes:
+  chat2api-data:
+    name: chat2api-headless-data

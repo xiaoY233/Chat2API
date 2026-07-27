@@ -1,0 +1,12 @@
+.git
+.github
+node_modules
+headless/node_modules
+headless/.build
+headless/dist
+dist
+out
+coverage
+*.log
+.env
+.env.*
