@@ -185,8 +185,9 @@ test('GLM, Kimi, and MiniMax built-in default models match current web providers
   assert.equal(kimiConfig.modelMappings?.['Kimi-K2.6'], 'kimi-k2.6')
   assert.equal(kimiConfig.modelMappings?.['Kimi-K2.5'], undefined)
 
-  assert.deepEqual(minimaxConfig.supportedModels, ['MiniMax-M2.7'])
+  assert.deepEqual(minimaxConfig.supportedModels, ['MiniMax-M3', 'MiniMax-M2.7'])
   assert.deepEqual(minimaxConfig.modelMappings, {
+    'MiniMax-M3': 'MiniMax-M3',
     'MiniMax-M2.7': 'MiniMax-M2.7',
   })
 
