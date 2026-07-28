@@ -12,6 +12,7 @@
 
 | 显示名称 | 实际模型 ID |
 | --- | --- |
+| MiniMax-M3 | MiniMax-M3 |
 | MiniMax-M2.7 | MiniMax-M2.7 |
 
 ## 适配状态
@@ -25,4 +26,4 @@
 1. 登录 `agent.minimaxi.com`。
 2. 从浏览器请求或本地存储中复制 JWT token；如有 `realUserID`，可单独填入。
 3. 在供应商管理中添加 MiniMax 账号。
-4. 默认模型仅保留 `MiniMax-M2.7`；旧的 `MiniMax-M2.5` 不再作为内置默认模型。
+4. 内置默认模型包含 `MiniMax-M3` 与 `MiniMax-M2.7`；旧的 `MiniMax-M2.5` 不再作为内置默认模型。
