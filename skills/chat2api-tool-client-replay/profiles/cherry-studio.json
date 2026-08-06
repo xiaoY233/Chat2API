@@ -1,0 +1,16 @@
+{
+  "id": "cherry-studio",
+  "headers": {
+    "x-title": "Cherry Studio",
+    "User-Agent": "Mozilla/5.0 CherryStudio/1.9.6"
+  },
+  "toolsProtocol": {
+    "requiresExactToolName": true,
+    "finishReason": "tool_calls",
+    "rawWrapperPattern": "<\\\\|CHAT2API\\\\|tool_calls>|<tool_calls>|\\\\[function_calls\\\\]"
+  },
+  "promptProtocol": {
+    "visibleToolUseRequired": true,
+    "toolUseTag": "<tool_use>"
+  }
+}

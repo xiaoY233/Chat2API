@@ -1,0 +1,13 @@
+{
+  "id": "custom-har",
+  "headers": {},
+  "toolsProtocol": {
+    "requiresExactToolName": true,
+    "finishReason": "tool_calls",
+    "rawWrapperPattern": "<\\\\|CHAT2API\\\\|tool_calls>|<tool_calls>|\\\\[function_calls\\\\]"
+  },
+  "promptProtocol": {
+    "visibleToolUseRequired": true,
+    "toolUseTag": "<tool_use>"
+  }
+}

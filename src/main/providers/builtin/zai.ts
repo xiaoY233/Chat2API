@@ -1,0 +1,65 @@
+import type { BuiltinProviderConfig } from '../../store/types'
+
+export const zaiConfig: BuiltinProviderConfig = {
+  id: 'zai',
+  name: 'Z.ai',
+  type: 'builtin',
+  authType: 'jwt',
+  apiEndpoint: 'https://chat.z.ai/api',
+  chatPath: '/v2/chat/completions',
+  headers: {
+    'Content-Type': 'application/json',
+    'Accept': '*/*',
+    'Accept-Encoding': 'gzip, deflate, br, zstd',
+    'Accept-Language': 'zh-CN',
+    'Cache-Control': 'no-cache',
+    'Origin': 'https://chat.z.ai',
+    'Pragma': 'no-cache',
+    'Sec-Ch-Ua': '"Not/A)Brand";v="99", "Chromium";v="148"',
+    'Sec-Ch-Ua-Mobile': '?0',
+    'Sec-Ch-Ua-Platform': '"macOS"',
+    'Sec-Fetch-Dest': 'empty',
+    'Sec-Fetch-Mode': 'cors',
+    'Sec-Fetch-Site': 'same-origin',
+    'X-FE-Version': 'prod-fe-1.1.37',
+    'X-Region': 'domestic',
+  },
+  enabled: true,
+  description: 'Z.ai - Free AI Chatbot powered by GLM-5.1, GLM-5, and GLM-4.7',
+  supportedModels: [
+    'GLM-5.1',
+    'GLM-5-Turbo',
+    'GLM-5V-Turbo',
+    'GLM-5',
+    'GLM-4.7',
+  ],
+  modelMappings: {
+    'GLM-5.1': 'GLM-5.1',
+    'GLM-5-Turbo': 'GLM-5-Turbo',
+    'GLM-5V-Turbo': 'GLM-5v-Turbo',
+    'GLM-5': 'glm-5',
+    'GLM-4.7': 'glm-4.7',
+  },
+  credentialFields: [
+    {
+      name: 'token',
+      label: 'Access Token',
+      type: 'password',
+      required: true,
+      placeholder: 'Enter Z.ai JWT Token',
+      helpText: 'Get token from Z.ai web version, found in browser DevTools Application -> Cookie, starts with "eyJ..."',
+    },
+    {
+      name: 'captcha_verify_param',
+      label: 'Captcha Verify Param',
+      type: 'password',
+      required: false,
+      placeholder: 'Optional captcha_verify_param from chat.z.ai HAR',
+      helpText: 'Optional. If Z.ai requires verification, copy captcha_verify_param from the latest /api/v2/chat/completions request body.',
+    },
+  ],
+  tokenCheckEndpoint: '/api/v1/users/user/settings',
+  tokenCheckMethod: 'GET',
+}
+
+export default zaiConfig

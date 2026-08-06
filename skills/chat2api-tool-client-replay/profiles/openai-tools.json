@@ -1,0 +1,15 @@
+{
+  "id": "openai-tools",
+  "headers": {
+    "User-Agent": "OpenAI-Compatible-Test/1.0"
+  },
+  "toolsProtocol": {
+    "requiresExactToolName": true,
+    "finishReason": "tool_calls",
+    "rawWrapperPattern": "<\\\\|CHAT2API\\\\|tool_calls>|<tool_calls>|\\\\[function_calls\\\\]"
+  },
+  "promptProtocol": {
+    "visibleToolUseRequired": false,
+    "toolUseTag": "<tool_use>"
+  }
+}

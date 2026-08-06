@@ -1,0 +1,722 @@
+import { contextBridge, ipcRenderer } from 'electron'
+import { IpcChannels } from '../main/ipc/channels'
+import type { 
+  Provider, 
+  Account, 
+  ProxyStatus, 
+  ProviderCheckResult, 
+  OAuthResult,
+  AuthType,
+  CredentialField,
+  LogLevel,
+  LogEntry,
+  ProviderVendor,
+  AppConfig,
+  SystemPrompt,
+  PromptType,
+  EffectiveModel,
+} from '../shared/types'
+
+const proxyAPI = {
+  start: (port?: number): Promise<boolean> => 
+    ipcRenderer.invoke(IpcChannels.PROXY_START, port),
+  
+  stop: (): Promise<boolean> => 
+    ipcRenderer.invoke(IpcChannels.PROXY_STOP),
+  
+  getStatus: (): Promise<ProxyStatus> => 
+    ipcRenderer.invoke(IpcChannels.PROXY_GET_STATUS),
+  
+  onStatusChanged: (callback: (status: ProxyStatus) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, status: ProxyStatus) => callback(status)
+    ipcRenderer.on(IpcChannels.PROXY_STATUS_CHANGED, handler)
+    return () => ipcRenderer.removeListener(IpcChannels.PROXY_STATUS_CHANGED, handler)
+  },
+}
+
+const storeAPI = {
+  get: <T>(key: string): Promise<T | undefined> => 
+    ipcRenderer.invoke(IpcChannels.STORE_GET, key),
+  
+  set: <T>(key: string, value: T): Promise<void> => 
+    ipcRenderer.invoke(IpcChannels.STORE_SET, key, value),
+  
+  delete: (key: string): Promise<void> => 
+    ipcRenderer.invoke(IpcChannels.STORE_DELETE, key),
+  
+  clearAll: (): Promise<void> => 
+    ipcRenderer.invoke(IpcChannels.STORE_CLEAR_ALL),
+  
+  onInitError: (callback: (error: { message: string | null }) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, error: { message: string | null }) => callback(error)
+    ipcRenderer.on(IpcChannels.STORE_INIT_ERROR, handler)
+    return () => ipcRenderer.removeListener(IpcChannels.STORE_INIT_ERROR, handler)
+  },
+  
+  retryInit: (): Promise<{ success: boolean; error?: string }> => 
+    ipcRenderer.invoke(IpcChannels.STORE_RETRY_INIT),
+}
+
+const providersAPI = {
+  getAll: (): Promise<Provider[]> => 
+    ipcRenderer.invoke(IpcChannels.PROVIDERS_GET_ALL),
+  
+  getBuiltin: (): Promise<any[]> => 
+    ipcRenderer.invoke(IpcChannels.PROVIDERS_GET_BUILTIN),
+  
+  add: (data: {
+    name: string
+    authType: AuthType
+    apiEndpoint: string
+    headers?: Record<string, string>
+    description?: string
+    supportedModels?: string[]
+    credentialFields?: CredentialField[]
+  }): Promise<Provider> => 
+    ipcRenderer.invoke(IpcChannels.PROVIDERS_ADD, data),
+  
+  update: (id: string, updates: Partial<Provider>): Promise<Provider | null> => 
+    ipcRenderer.invoke(IpcChannels.PROVIDERS_UPDATE, id, updates),
+  
+  delete: (id: string): Promise<boolean> => 
+    ipcRenderer.invoke(IpcChannels.PROVIDERS_DELETE, id),
+  
+  checkStatus: (providerId: string): Promise<ProviderCheckResult> => 
+    ipcRenderer.invoke(IpcChannels.PROVIDERS_CHECK_STATUS, providerId),
+  
+  checkAllStatus: (): Promise<Record<string, ProviderCheckResult>> => 
+    ipcRenderer.invoke(IpcChannels.PROVIDERS_CHECK_ALL_STATUS),
+  
+  duplicate: (id: string): Promise<Provider> => 
+    ipcRenderer.invoke(IpcChannels.PROVIDERS_DUPLICATE, id),
+  
+  export: (id: string): Promise<string> => 
+    ipcRenderer.invoke(IpcChannels.PROVIDERS_EXPORT, id),
+  
+  import: (jsonData: string): Promise<Provider> => 
+    ipcRenderer.invoke(IpcChannels.PROVIDERS_IMPORT, jsonData),
+  
+  updateModels: (providerId: string): Promise<{
+    success: boolean
+    modelsCount?: number
+    error?: string
+  }> => 
+    ipcRenderer.invoke(IpcChannels.PROVIDERS_UPDATE_MODELS, providerId),
+  
+  getEffectiveModels: (providerId: string): Promise<EffectiveModel[]> => 
+    ipcRenderer.invoke(IpcChannels.PROVIDERS_GET_EFFECTIVE_MODELS, providerId),
+  
+  addCustomModel: (providerId: string, model: { displayName: string; actualModelId: string }): Promise<{
+    success: boolean
+    models: EffectiveModel[]
+    error?: string
+  }> => 
+    ipcRenderer.invoke(IpcChannels.PROVIDERS_ADD_CUSTOM_MODEL, providerId, model),
+  
+  removeModel: (providerId: string, modelName: string): Promise<{
+    success: boolean
+    models: EffectiveModel[]
+    error?: string
+  }> => 
+    ipcRenderer.invoke(IpcChannels.PROVIDERS_REMOVE_MODEL, providerId, modelName),
+  
+  resetModels: (providerId: string): Promise<{
+    success: boolean
+    models: EffectiveModel[]
+    error?: string
+  }> => 
+    ipcRenderer.invoke(IpcChannels.PROVIDERS_RESET_MODELS, providerId),
+}
+
+const accountsAPI = {
+  getAll: (includeCredentials?: boolean): Promise<Account[]> => 
+    ipcRenderer.invoke(IpcChannels.ACCOUNTS_GET_ALL, includeCredentials),
+  
+  getById: (id: string, includeCredentials?: boolean): Promise<Account | null> => 
+    ipcRenderer.invoke(IpcChannels.ACCOUNTS_GET_BY_ID, id, includeCredentials),
+  
+  getByProvider: (providerId: string): Promise<Account[]> => 
+    ipcRenderer.invoke(IpcChannels.ACCOUNTS_GET_BY_PROVIDER, providerId),
+  
+  add: (data: {
+    providerId: string
+    name: string
+    email?: string
+    credentials: Record<string, string>
+    dailyLimit?: number
+  }): Promise<Account> => 
+    ipcRenderer.invoke(IpcChannels.ACCOUNTS_ADD, data),
+  
+  update: (id: string, updates: Partial<Account>): Promise<Account | null> => 
+    ipcRenderer.invoke(IpcChannels.ACCOUNTS_UPDATE, id, updates),
+  
+  delete: (id: string): Promise<boolean> => 
+    ipcRenderer.invoke(IpcChannels.ACCOUNTS_DELETE, id),
+  
+  validate: (accountId: string): Promise<boolean> => 
+    ipcRenderer.invoke(IpcChannels.ACCOUNTS_VALIDATE, accountId),
+  
+  validateToken: (providerId: string, credentials: Record<string, string>): Promise<{
+    valid: boolean
+    error?: string
+    userInfo?: {
+      name?: string
+      email?: string
+      quota?: number
+      used?: number
+    }
+  }> => 
+    ipcRenderer.invoke(IpcChannels.ACCOUNTS_VALIDATE_TOKEN, providerId, credentials),
+
+  getCredits: (accountId: string): Promise<{
+    totalCredits: number
+    usedCredits: number
+    remainingCredits: number
+  } | null> =>
+    ipcRenderer.invoke(IpcChannels.ACCOUNTS_GET_CREDITS, accountId),
+
+  clearChats: (accountId: string): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke(IpcChannels.ACCOUNTS_CLEAR_CHATS, accountId),
+}
+
+type ProviderType = ProviderVendor
+
+interface TokenValidationResult {
+  valid: boolean
+  tokenType?: string
+  expiresAt?: number
+  accountInfo?: {
+    userId?: string
+    email?: string
+    name?: string
+  }
+  error?: string
+}
+
+interface CredentialInfo {
+  type: string
+  value: string
+  expiresAt?: number
+  refreshToken?: string
+}
+
+interface OAuthProgressEvent {
+  status: 'idle' | 'pending' | 'success' | 'error' | 'cancelled'
+  message: string
+  progress?: number
+  data?: Record<string, unknown>
+}
+
+const oauthAPI = {
+  startLogin: (providerId: string, providerType: ProviderType): Promise<OAuthResult> => 
+    ipcRenderer.invoke(IpcChannels.OAUTH_START_LOGIN, providerId, providerType),
+  
+  cancelLogin: (): Promise<void> => 
+    ipcRenderer.invoke(IpcChannels.OAUTH_CANCEL_LOGIN),
+  
+  loginWithToken: (providerId: string, providerType: ProviderType, token: string): Promise<OAuthResult> =>
+    ipcRenderer.invoke(IpcChannels.OAUTH_LOGIN_WITH_TOKEN, { providerId, providerType, token }),
+  
+  validateToken: (providerId: string, providerType: ProviderType, credentials: Record<string, string>): Promise<TokenValidationResult> =>
+    ipcRenderer.invoke(IpcChannels.OAUTH_VALIDATE_TOKEN, { providerId, providerType, credentials }),
+  
+  refreshToken: (providerId: string, providerType: ProviderType, credentials: Record<string, string>): Promise<CredentialInfo | null> =>
+    ipcRenderer.invoke(IpcChannels.OAUTH_REFRESH_TOKEN, { providerId, providerType, credentials }),
+  
+  getStatus: (): Promise<string> =>
+    ipcRenderer.invoke(IpcChannels.OAUTH_GET_STATUS),
+  
+  startInAppLogin: (providerId: string, providerType: ProviderType, timeout?: number): Promise<OAuthResult> =>
+    ipcRenderer.invoke(IpcChannels.OAUTH_START_IN_APP_LOGIN, { providerId, providerType, timeout }),
+  
+  cancelInAppLogin: (): Promise<void> =>
+    ipcRenderer.invoke(IpcChannels.OAUTH_CANCEL_IN_APP_LOGIN),
+  
+  isInAppLoginOpen: (): Promise<boolean> =>
+    ipcRenderer.invoke(IpcChannels.OAUTH_IN_APP_LOGIN_STATUS),
+  
+  onCallback: (callback: (result: OAuthResult) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, result: OAuthResult) => callback(result)
+    ipcRenderer.on(IpcChannels.OAUTH_CALLBACK, handler)
+    return () => ipcRenderer.removeListener(IpcChannels.OAUTH_CALLBACK, handler)
+  },
+  
+  onProgress: (callback: (event: OAuthProgressEvent) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, event: OAuthProgressEvent) => callback(event)
+    ipcRenderer.on(IpcChannels.OAUTH_PROGRESS, handler)
+    return () => ipcRenderer.removeListener(IpcChannels.OAUTH_PROGRESS, handler)
+  },
+}
+
+interface LogFilter {
+  level?: LogLevel | 'all'
+  keyword?: string
+  startTime?: number
+  endTime?: number
+  limit?: number
+  offset?: number
+}
+
+interface LogStats {
+  total: number
+  info: number
+  warn: number
+  error: number
+  debug: number
+}
+
+interface LogTrend {
+  date: string
+  total: number
+  info: number
+  warn: number
+  error: number
+}
+
+const logsAPI = {
+  get: (filter?: LogFilter): Promise<LogEntry[]> => 
+    ipcRenderer.invoke(IpcChannels.LOGS_GET, filter),
+  
+  getStats: (): Promise<LogStats> => 
+    ipcRenderer.invoke(IpcChannels.LOGS_GET_STATS),
+  
+  getTrend: (days?: number): Promise<LogTrend[]> => 
+    ipcRenderer.invoke(IpcChannels.LOGS_GET_TREND, days),
+  
+  getAccountTrend: (accountId: string, days?: number): Promise<LogTrend[]> => 
+    ipcRenderer.invoke(IpcChannels.LOGS_GET_ACCOUNT_TREND, accountId, days),
+  
+  clear: (): Promise<void> => 
+    ipcRenderer.invoke(IpcChannels.LOGS_CLEAR),
+  
+  export: (format?: 'json' | 'txt'): Promise<string> => 
+    ipcRenderer.invoke(IpcChannels.LOGS_EXPORT, format),
+  
+  getById: (id: string): Promise<LogEntry | undefined> => 
+    ipcRenderer.invoke(IpcChannels.LOGS_GET_BY_ID, id),
+  
+  onNewLog: (callback: (log: LogEntry) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, log: LogEntry) => callback(log)
+    ipcRenderer.on(IpcChannels.LOGS_NEW_LOG, handler)
+    return () => ipcRenderer.removeListener(IpcChannels.LOGS_NEW_LOG, handler)
+  },
+}
+
+interface RequestLogEntry {
+  id: string
+  timestamp: number
+  status: 'success' | 'error'
+  statusCode: number
+  method: string
+  url: string
+  model: string
+  actualModel?: string
+  providerId?: string
+  providerName?: string
+  accountId?: string
+  accountName?: string
+  requestBody?: string
+  userInput?: string
+  webSearch?: boolean
+  reasoningEffort?: 'low' | 'medium' | 'high'
+  responseStatus: number
+  responsePreview?: string
+  responseBody?: string
+  latency: number
+  isStream: boolean
+  errorMessage?: string
+  errorStack?: string
+}
+
+interface RequestLogFilter {
+  status?: 'success' | 'error'
+  providerId?: string
+  limit?: number
+}
+
+interface RequestLogStats {
+  total: number
+  success: number
+  error: number
+  todayTotal: number
+  todaySuccess: number
+  todayError: number
+}
+
+interface RequestLogTrend {
+  date: string
+  total: number
+  success: number
+  error: number
+  avgLatency: number
+}
+
+const requestLogsAPI = {
+  get: (filter?: RequestLogFilter): Promise<RequestLogEntry[]> => 
+    ipcRenderer.invoke(IpcChannels.REQUEST_LOGS_GET, filter),
+  
+  getById: (id: string): Promise<RequestLogEntry | undefined> => 
+    ipcRenderer.invoke(IpcChannels.REQUEST_LOGS_GET_BY_ID, id),
+  
+  getStats: (): Promise<RequestLogStats> => 
+    ipcRenderer.invoke(IpcChannels.REQUEST_LOGS_GET_STATS),
+  
+  getTrend: (days?: number): Promise<RequestLogTrend[]> => 
+    ipcRenderer.invoke(IpcChannels.REQUEST_LOGS_GET_TREND, days),
+  
+  clear: (): Promise<void> => 
+    ipcRenderer.invoke(IpcChannels.REQUEST_LOGS_CLEAR),
+  
+  onNewLog: (callback: (log: RequestLogEntry) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, log: RequestLogEntry) => callback(log)
+    ipcRenderer.on(IpcChannels.REQUEST_LOGS_NEW, handler)
+    return () => ipcRenderer.removeListener(IpcChannels.REQUEST_LOGS_NEW, handler)
+  },
+}
+
+interface PersistentStatistics {
+  totalRequests: number
+  successRequests: number
+  failedRequests: number
+  totalLatency: number
+  lastUpdated: number
+  modelUsage: Record<string, number>
+  providerUsage: Record<string, number>
+  accountUsage: Record<string, number>
+  dailyStats: Record<string, DailyStatistics>
+}
+
+interface DailyStatistics {
+  date: string
+  totalRequests: number
+  successRequests: number
+  failedRequests: number
+  totalLatency: number
+  modelUsage: Record<string, number>
+  providerUsage: Record<string, number>
+}
+
+const statisticsAPI = {
+  get: (): Promise<PersistentStatistics> => 
+    ipcRenderer.invoke(IpcChannels.STATISTICS_GET),
+  
+  getToday: (): Promise<DailyStatistics> => 
+    ipcRenderer.invoke(IpcChannels.STATISTICS_GET_TODAY),
+}
+
+interface UpdateProgressInfo {
+  percent: number
+  bytesPerSecond: number
+  transferred: number
+  total: number
+}
+
+interface UpdateStatus {
+  checking: boolean
+  available: boolean
+  downloading: boolean
+  downloaded: boolean
+  error: string | null
+  progress: UpdateProgressInfo | null
+  version: string | null
+  releaseDate: string | null
+  releaseNotes: string | null
+}
+
+const appAPI = {
+  getVersion: (): Promise<string> => 
+    ipcRenderer.invoke(IpcChannels.APP_GET_VERSION),
+  
+  minimize: (): Promise<void> => 
+    ipcRenderer.invoke(IpcChannels.APP_MINIMIZE),
+  
+  maximize: (): Promise<void> => 
+    ipcRenderer.invoke(IpcChannels.APP_MAXIMIZE),
+  
+  close: (): Promise<void> =>
+    ipcRenderer.invoke(IpcChannels.APP_CLOSE),
+
+  showWindow: (): Promise<void> =>
+    ipcRenderer.invoke(IpcChannels.APP_SHOW_WINDOW),
+
+  hideWindow: (): Promise<void> =>
+    ipcRenderer.invoke(IpcChannels.APP_HIDE_WINDOW),
+
+  openExternal: (url: string): Promise<void> =>
+    ipcRenderer.invoke(IpcChannels.APP_OPEN_EXTERNAL, url),
+
+  checkUpdate: (): Promise<UpdateStatus> =>
+    ipcRenderer.invoke(IpcChannels.APP_CHECK_UPDATE),
+
+  downloadUpdate: (): Promise<void> =>
+    ipcRenderer.invoke(IpcChannels.APP_DOWNLOAD_UPDATE),
+
+  installUpdate: (): Promise<void> =>
+    ipcRenderer.invoke(IpcChannels.APP_INSTALL_UPDATE),
+
+  getUpdateStatus: (): Promise<UpdateStatus> =>
+    ipcRenderer.invoke(IpcChannels.APP_GET_UPDATE_STATUS),
+
+  onUpdateChecking: (callback: () => void) => {
+    const listener = (_event: Electron.IpcRendererEvent) => callback()
+    ipcRenderer.on(IpcChannels.APP_UPDATE_CHECKING, listener)
+    return () => ipcRenderer.removeListener(IpcChannels.APP_UPDATE_CHECKING, listener)
+  },
+
+  onUpdateAvailable: (callback: (info: any) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, info: any) => callback(info)
+    ipcRenderer.on(IpcChannels.APP_UPDATE_AVAILABLE, listener)
+    return () => ipcRenderer.removeListener(IpcChannels.APP_UPDATE_AVAILABLE, listener)
+  },
+
+  onUpdateNotAvailable: (callback: (info: any) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, info: any) => callback(info)
+    ipcRenderer.on(IpcChannels.APP_UPDATE_NOT_AVAILABLE, listener)
+    return () => ipcRenderer.removeListener(IpcChannels.APP_UPDATE_NOT_AVAILABLE, listener)
+  },
+
+  onUpdateProgress: (callback: (progress: UpdateProgressInfo) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, progress: UpdateProgressInfo) => callback(progress)
+    ipcRenderer.on(IpcChannels.APP_UPDATE_PROGRESS, listener)
+    return () => ipcRenderer.removeListener(IpcChannels.APP_UPDATE_PROGRESS, listener)
+  },
+
+  onUpdateDownloaded: (callback: (info: any) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, info: any) => callback(info)
+    ipcRenderer.on(IpcChannels.APP_UPDATE_DOWNLOADED, listener)
+    return () => ipcRenderer.removeListener(IpcChannels.APP_UPDATE_DOWNLOADED, listener)
+  },
+
+  onUpdateError: (callback: (error: { message?: string } | string) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, error: { message?: string } | string) => callback(error)
+    ipcRenderer.on(IpcChannels.APP_UPDATE_ERROR, listener)
+    return () => ipcRenderer.removeListener(IpcChannels.APP_UPDATE_ERROR, listener)
+  },
+}
+
+const configAPI = {
+  get: (): Promise<AppConfig> => 
+    ipcRenderer.invoke(IpcChannels.CONFIG_GET),
+  
+  update: (updates: Partial<AppConfig>): Promise<boolean> => 
+    ipcRenderer.invoke(IpcChannels.CONFIG_UPDATE, updates),
+  
+  onConfigChanged: (callback: (config: AppConfig) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, config: AppConfig) => callback(config)
+    ipcRenderer.on(IpcChannels.CONFIG_CHANGED, handler)
+    return () => ipcRenderer.removeListener(IpcChannels.CONFIG_CHANGED, handler)
+  },
+}
+
+const promptsAPI = {
+  getAll: (): Promise<SystemPrompt[]> => 
+    ipcRenderer.invoke(IpcChannels.PROMPTS_GET_ALL),
+  
+  getBuiltin: (): Promise<SystemPrompt[]> => 
+    ipcRenderer.invoke(IpcChannels.PROMPTS_GET_BUILTIN),
+  
+  getCustom: (): Promise<SystemPrompt[]> => 
+    ipcRenderer.invoke(IpcChannels.PROMPTS_GET_CUSTOM),
+  
+  getById: (id: string): Promise<SystemPrompt | undefined> => 
+    ipcRenderer.invoke(IpcChannels.PROMPTS_GET_BY_ID, id),
+  
+  add: (prompt: Omit<SystemPrompt, 'id' | 'createdAt' | 'updatedAt'>): Promise<SystemPrompt> => 
+    ipcRenderer.invoke(IpcChannels.PROMPTS_ADD, prompt),
+  
+  update: (id: string, updates: Partial<SystemPrompt>): Promise<SystemPrompt | null> => 
+    ipcRenderer.invoke(IpcChannels.PROMPTS_UPDATE, id, updates),
+  
+  delete: (id: string): Promise<boolean> => 
+    ipcRenderer.invoke(IpcChannels.PROMPTS_DELETE, id),
+  
+  getByType: (type: PromptType): Promise<SystemPrompt[]> => 
+    ipcRenderer.invoke(IpcChannels.PROMPTS_GET_BY_TYPE, type),
+}
+
+interface SessionConfig {
+  mode: 'single'
+  sessionTimeout: number
+  maxMessagesPerSession: number
+  deleteAfterTimeout: boolean
+  maxSessionsPerAccount: number
+}
+
+interface SessionRecord {
+  id: string
+  providerId: string
+  accountId: string
+  providerSessionId: string
+  parentMessageId?: string
+  sessionType: 'chat' | 'agent'
+  messages: any[]
+  createdAt: number
+  lastActiveAt: number
+  status: 'active' | 'expired' | 'deleted'
+  model?: string
+}
+
+const sessionAPI = {
+  getConfig: (): Promise<SessionConfig> => 
+    ipcRenderer.invoke(IpcChannels.SESSION_GET_CONFIG),
+  
+  updateConfig: (config: Partial<SessionConfig>): Promise<void> => 
+    ipcRenderer.invoke(IpcChannels.SESSION_UPDATE_CONFIG, config),
+  
+  getAll: (): Promise<SessionRecord[]> => 
+    ipcRenderer.invoke(IpcChannels.SESSION_GET_ALL),
+  
+  getActive: (): Promise<SessionRecord[]> => 
+    ipcRenderer.invoke(IpcChannels.SESSION_GET_ACTIVE),
+  
+  getById: (id: string): Promise<SessionRecord | undefined> => 
+    ipcRenderer.invoke(IpcChannels.SESSION_GET_BY_ID, id),
+  
+  getByAccount: (accountId: string): Promise<SessionRecord[]> => 
+    ipcRenderer.invoke(IpcChannels.SESSION_GET_BY_ACCOUNT, accountId),
+  
+  getByProvider: (providerId: string): Promise<SessionRecord[]> => 
+    ipcRenderer.invoke(IpcChannels.SESSION_GET_BY_PROVIDER, providerId),
+  
+  delete: (id: string): Promise<boolean> => 
+    ipcRenderer.invoke(IpcChannels.SESSION_DELETE, id),
+  
+  clearAll: (): Promise<void> => 
+    ipcRenderer.invoke(IpcChannels.SESSION_CLEAR_ALL),
+  
+  cleanExpired: (): Promise<number> => 
+    ipcRenderer.invoke(IpcChannels.SESSION_CLEAN_EXPIRED),
+}
+
+interface ManagementApiConfig {
+  enableManagementApi: boolean
+  managementApiSecret: string
+  managementApiPort?: number
+}
+
+interface ContextManagementConfig {
+  enabled: boolean
+  strategies: {
+    slidingWindow: {
+      enabled: boolean
+      maxMessages: number
+    }
+    tokenLimit: {
+      enabled: boolean
+      maxTokens: number
+    }
+    summary: {
+      enabled: boolean
+      keepRecentMessages: number
+      summaryPrompt?: string
+    }
+  }
+  executionOrder: ('slidingWindow' | 'tokenLimit' | 'summary')[]
+}
+
+const managementApiAPI = {
+  getConfig: (): Promise<ManagementApiConfig> => 
+    ipcRenderer.invoke(IpcChannels.MANAGEMENT_API_GET_CONFIG),
+  
+  updateConfig: (updates: Partial<ManagementApiConfig>): Promise<ManagementApiConfig> => 
+    ipcRenderer.invoke(IpcChannels.MANAGEMENT_API_UPDATE_CONFIG, updates),
+  
+  generateSecret: (): Promise<string> => 
+    ipcRenderer.invoke(IpcChannels.MANAGEMENT_API_GENERATE_SECRET),
+}
+
+const contextManagementAPI = {
+  getConfig: (): Promise<ContextManagementConfig> => 
+    ipcRenderer.invoke(IpcChannels.CONTEXT_MANAGEMENT_GET_CONFIG),
+  
+  updateConfig: (updates: Partial<ContextManagementConfig>): Promise<ContextManagementConfig> => 
+    ipcRenderer.invoke(IpcChannels.CONTEXT_MANAGEMENT_UPDATE_CONFIG, updates),
+}
+
+function resolveLocalManagementApiBaseUrl(config: AppConfig): string {
+  const configuredHost = config.proxyHost || '127.0.0.1'
+  const host = configuredHost === '0.0.0.0' || configuredHost === '::' || configuredHost === '[::]'
+    ? '127.0.0.1'
+    : configuredHost
+
+  return `http://${host}:${config.proxyPort}/v0/management`
+}
+
+const toolCallingAPI = {
+  async getStatus() {
+    const config = await configAPI.get()
+    const secret = config.managementApi?.managementApiSecret
+    if (!secret) return null
+
+    const response = await fetch(`${resolveLocalManagementApiBaseUrl(config)}/tool-calling/status`, {
+      headers: { Authorization: `Bearer ${secret}` },
+    })
+    return response.json()
+  },
+
+  async runSmoke(input: { clientAdapterId: string }) {
+    const config = await configAPI.get()
+    const secret = config.managementApi?.managementApiSecret
+    if (!secret) {
+      return { success: false, error: { message: 'Management API secret is not configured.' } }
+    }
+
+    const response = await fetch(`${resolveLocalManagementApiBaseUrl(config)}/tool-calling/smoke`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${secret}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(input),
+    })
+    return response.json()
+  },
+}
+
+const trayAPI = {
+  openDashboard: (): void => 
+    ipcRenderer.send('tray:open-dashboard'),
+  
+  setHeight: (height: number): void => 
+    ipcRenderer.send('tray:set-height', height),
+
+  quitApp: (): void =>
+    ipcRenderer.send('tray:quit-app'),
+}
+
+const electronAPI = {
+  proxy: proxyAPI,
+  store: storeAPI,
+  providers: providersAPI,
+  accounts: accountsAPI,
+  oauth: oauthAPI,
+  logs: logsAPI,
+  requestLogs: requestLogsAPI,
+  statistics: statisticsAPI,
+  app: appAPI,
+  config: configAPI,
+  prompts: promptsAPI,
+  session: sessionAPI,
+  managementApi: managementApiAPI,
+  contextManagement: contextManagementAPI,
+  toolCalling: toolCallingAPI,
+  tray: trayAPI,
+  
+  on: (channel: string, callback: (...args: unknown[]) => void) => {
+    const subscription = (_event: Electron.IpcRendererEvent, ...args: unknown[]) => callback(...args)
+    ipcRenderer.on(channel, subscription)
+    return () => ipcRenderer.removeListener(channel, subscription)
+  },
+  
+  send: (channel: string, ...args: unknown[]) => {
+    ipcRenderer.send(channel, ...args)
+  },
+  
+  invoke: (channel: string, ...args: unknown[]) => {
+    return ipcRenderer.invoke(channel, ...args)
+  },
+}
+
+contextBridge.exposeInMainWorld('electronAPI', electronAPI)
+
+export type ElectronAPI = typeof electronAPI

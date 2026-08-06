@@ -1,0 +1,60 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+out/
+dist/
+build/entitlements.mac.plist
+
+# TypeScript
+*.tsbuildinfo
+src/**/*.js
+src/**/*.d.ts
+electron.vite.config.js
+electron.vite.config.d.ts
+vite.config.js
+vite.config.d.ts
+
+# Vite temp files
+*.mjs.tmp
+electron.vite.config.*.mjs
+
+# Logs
+logs/
+!src/renderer/src/components/logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+.workbuddy/
+.trae/
+*.swp
+*.swo
+.codex/
+CLAUDE.md
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Test
+coverage/
+
+# Misc
+*.pem
+*.p12
+
+# Next.js experimental app (not part of Electron build)
+src/renderer/next-app/
+
+# Backup
+backup/
