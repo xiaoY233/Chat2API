@@ -7,6 +7,7 @@ import Koa, { type Context, type Next } from 'koa'
 import Router from '@koa/router'
 import bodyParser from 'koa-bodyparser'
 import { Server as HttpServer } from 'http'
+import { app } from 'electron'
 import routes from './routes'
 import managementRoutes from './routes/management'
 import { proxyStatusManager } from './status'
@@ -41,7 +42,7 @@ export class ProxyServer {
     this.app.use(async (ctx, next) => {
       ctx.set('Access-Control-Allow-Origin', '*')
       ctx.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
-      ctx.set('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With')
+      ctx.set('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, X-API-Key, X-Management-Secret, X-Web-Search, X-Reasoning-Effort, X-Deep-Research')
       ctx.set('Access-Control-Max-Age', '86400')
 
       if (ctx.method === 'OPTIONS') {
@@ -163,7 +164,7 @@ export class ProxyServer {
     this.router.get('/', async (ctx) => {
       ctx.body = {
         name: 'Chat2API Proxy',
-        version: '1.1.2',
+        version: app.getVersion(),
         description: 'OpenAI API compatible proxy service',
         endpoints: [
           'POST /v1/chat/completions',
