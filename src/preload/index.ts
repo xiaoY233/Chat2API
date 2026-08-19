@@ -638,8 +638,9 @@ function resolveLocalManagementApiBaseUrl(config: AppConfig): string {
   const host = configuredHost === '0.0.0.0' || configuredHost === '::' || configuredHost === '[::]'
     ? '127.0.0.1'
     : configuredHost
+  const managementApiPort = config.managementApi?.managementApiPort || config.proxyPort
 
-  return `http://${host}:${config.proxyPort}/v0/management`
+  return `http://${host}:${managementApiPort}/v0/management`
 }
 
 const toolCallingAPI = {

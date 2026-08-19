@@ -103,7 +103,8 @@ export function ManagementApiSettings() {
     return secret.slice(0, 4) + '****' + secret.slice(-4)
   }
 
-  const apiEndpoint = `http://127.0.0.1:${proxyPort}/v0/management`
+  const managementApiPort = config.managementApiPort || proxyPort
+  const apiEndpoint = `http://127.0.0.1:${managementApiPort}/v0/management`
 
   if (isLoading) {
     return (
