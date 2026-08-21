@@ -15,6 +15,9 @@ import type {
   SystemPrompt,
   PromptType,
   EffectiveModel,
+  QwenAiGovernorConfig,
+  QwenAiGovernorStatus,
+  ProviderModelCapability,
 } from '../shared/types'
 
 const proxyAPI = {
@@ -66,11 +69,18 @@ const providersAPI = {
   
   add: (data: {
     name: string
+    id?: string
+    type?: 'builtin' | 'custom'
     authType: AuthType
     apiEndpoint: string
+    chatPath?: string
     headers?: Record<string, string>
     description?: string
     supportedModels?: string[]
+    modelMappings?: Record<string, string>
+    modelCapabilities?: Record<string, ProviderModelCapability>
+    modelsApiEndpoint?: string
+    modelsApiHeaders?: Record<string, string>
     credentialFields?: CredentialField[]
   }): Promise<Provider> => 
     ipcRenderer.invoke(IpcChannels.PROVIDERS_ADD, data),
@@ -159,6 +169,7 @@ const accountsAPI = {
   validateToken: (providerId: string, credentials: Record<string, string>): Promise<{
     valid: boolean
     error?: string
+    credentials?: Record<string, string>
     userInfo?: {
       name?: string
       email?: string
@@ -185,6 +196,7 @@ interface TokenValidationResult {
   valid: boolean
   tokenType?: string
   expiresAt?: number
+  credentials?: Record<string, string>
   accountInfo?: {
     userId?: string
     email?: string
@@ -673,6 +685,79 @@ const toolCallingAPI = {
   },
 }
 
+const qwenAiGovernorAPI = {
+  async getStatus(): Promise<QwenAiGovernorStatus | null> {
+    const config = await configAPI.get()
+    const secret = config.managementApi?.managementApiSecret
+    if (!secret) return null
+
+    const response = await fetch(`${resolveLocalManagementApiBaseUrl(config)}/qwen-ai-governor/status`, {
+      headers: { Authorization: `Bearer ${secret}` },
+    })
+    const payload = await response.json()
+    return payload.data ?? null
+  },
+
+  async updateConfig(updates: Partial<QwenAiGovernorConfig>): Promise<QwenAiGovernorConfig> {
+    const config = await configAPI.get()
+    const secret = config.managementApi?.managementApiSecret
+    if (!secret) {
+      throw new Error('Management API secret is not configured.')
+    }
+
+    const response = await fetch(`${resolveLocalManagementApiBaseUrl(config)}/qwen-ai-governor/config`, {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${secret}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(updates),
+    })
+    const payload = await response.json()
+    if (!response.ok || !payload.success) {
+      throw new Error(payload.error?.message || `Qwen AI governor update failed: HTTP ${response.status}`)
+    }
+    return payload.data
+  },
+
+  async clearAccountCooldown(accountId: string): Promise<void> {
+    const config = await configAPI.get()
+    const secret = config.managementApi?.managementApiSecret
+    if (!secret) {
+      throw new Error('Management API secret is not configured.')
+    }
+
+    const response = await fetch(
+      `${resolveLocalManagementApiBaseUrl(config)}/qwen-ai-governor/accounts/${encodeURIComponent(accountId)}/cooldown`,
+      {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${secret}` },
+      },
+    )
+    const payload = await response.json()
+    if (!response.ok || !payload.success) {
+      throw new Error(payload.error?.message || `Qwen AI cooldown clear failed: HTTP ${response.status}`)
+    }
+  },
+
+  async clearAllCooldowns(): Promise<void> {
+    const config = await configAPI.get()
+    const secret = config.managementApi?.managementApiSecret
+    if (!secret) {
+      throw new Error('Management API secret is not configured.')
+    }
+
+    const response = await fetch(`${resolveLocalManagementApiBaseUrl(config)}/qwen-ai-governor/cooldowns`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${secret}` },
+    })
+    const payload = await response.json()
+    if (!response.ok || !payload.success) {
+      throw new Error(payload.error?.message || `Qwen AI cooldown clear failed: HTTP ${response.status}`)
+    }
+  },
+}
+
 const trayAPI = {
   openDashboard: (): void => 
     ipcRenderer.send('tray:open-dashboard'),
@@ -700,6 +785,7 @@ const electronAPI = {
   managementApi: managementApiAPI,
   contextManagement: contextManagementAPI,
   toolCalling: toolCallingAPI,
+  qwenAiGovernor: qwenAiGovernorAPI,
   tray: trayAPI,
   
   on: (channel: string, callback: (...args: unknown[]) => void) => {

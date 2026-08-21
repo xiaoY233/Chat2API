@@ -3,6 +3,8 @@ node_modules/
 
 # Build outputs
 out/
+out-server/
+out-admin/
 dist/
 build/entitlements.mac.plist
 
@@ -39,6 +41,7 @@ Thumbs.db
 *.swp
 *.swo
 .codex/
+.playwright-mcp/
 CLAUDE.md
 
 # Environment
@@ -46,8 +49,16 @@ CLAUDE.md
 .env.local
 .env.*.local
 
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
 # Test
 coverage/
+
+# Manual live test scripts (local debugging only)
+tests/manual/*-live.mjs
 
 # Misc
 *.pem
@@ -58,3 +69,10 @@ src/renderer/next-app/
 
 # Backup
 backup/
+
+# Local migration artifacts and development data
+.local/
+.local-artifacts/
+
+# Local live debug logs
+.tmp-live-*.ndjson

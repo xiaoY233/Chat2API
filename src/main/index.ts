@@ -5,6 +5,10 @@ import { createTrayManager, TrayManager } from './tray/TrayManager'
 import { registerIpcHandlers } from './ipc/handlers'
 import { UpdaterManager } from './updater'
 import { storeManager } from './store/store'
+import { setRuntime } from './runtime'
+import { electronRuntime } from './runtime/electronRuntime'
+
+setRuntime(electronRuntime)
 
 // Prevent uncaught exceptions from crashing the app
 process.on('uncaughtException', (error) => {

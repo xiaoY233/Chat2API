@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { Readable } from 'node:stream'
 
 import { DeepSeekStreamHandler } from '../../src/main/proxy/adapters/deepseek-stream.ts'
+import type { ToolCallingPlan } from '../../src/main/proxy/toolCalling/types.ts'
 
 function sse(events: unknown[]): Readable {
   return Readable.from(events.map(event => `data: ${JSON.stringify(event)}\n\n`))
@@ -19,6 +20,56 @@ async function collect(stream: NodeJS.ReadableStream): Promise<string[]> {
 function countMatches(value: string, pattern: RegExp): number {
   return value.match(pattern)?.length ?? 0
 }
+
+function managedToolPlan(): ToolCallingPlan {
+  return {
+    mode: 'managed',
+    protocol: 'managed_xml',
+    clientAdapterId: 'standard-openai-tools',
+    providerId: 'deepseek',
+    tools: [{ name: 'read_file', parameters: { type: 'object' }, source: 'openai' }],
+    shouldInjectPrompt: true,
+    shouldParseResponse: true,
+    toolChoiceMode: 'auto',
+    allowedToolNames: new Set(['read_file']),
+    workflowContinuation: false,
+    failedToolResultPending: false,
+    diagnostics: {
+      clientAdapterId: 'standard-openai-tools',
+      providerId: 'deepseek',
+      toolSource: 'openai',
+      mode: 'managed',
+      protocol: 'managed_xml',
+      toolCount: 1,
+      injected: true,
+      reason: 'test',
+      workflowContinuation: false,
+      failedToolResultPending: false,
+    },
+  }
+}
+
+test('DeepSeek stream reports a managed tool-result wrapper as a protocol error', async () => {
+  const handler = new DeepSeekStreamHandler(
+    'deepseek-chat',
+    'session-wrapper-leak',
+    undefined,
+    false,
+    undefined,
+    managedToolPlan(),
+  )
+  const source = sse([{
+    v: '<|CHAT2API|tool_result tool_call_id="call_fake"><![CDATA[value]]></|CHAT2API|tool_result>',
+  }])
+  const output = await handler.handleStream(source)
+
+  await assert.rejects(
+    collect(output),
+    (error: Error & { status?: number, code?: string }) => (
+      error.status === 502 && error.code === 'managed_tool_result_wrapper_leak'
+    ),
+  )
+})
 
 test('DeepSeek stream appends citations from HAR fragment results', async () => {
   const handler = new DeepSeekStreamHandler('deepseek-v4-flash-search', 'session-1', undefined, true)

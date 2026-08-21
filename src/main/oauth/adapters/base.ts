@@ -3,9 +3,10 @@
  * Defines common interface and base implementation for all provider authentication adapters
  */
 
-import { BrowserWindow, shell } from 'electron'
+import type { BrowserWindow } from 'electron'
 import http from 'http'
 import crypto from 'crypto'
+import { getRuntime } from '../../runtime'
 import {
   ProviderType,
   AuthMethod,
@@ -187,7 +188,7 @@ export abstract class BaseOAuthAdapter {
    * Open URL in system browser
    */
   protected async openBrowser(url: string): Promise<void> {
-    await shell.openExternal(url)
+    await getRuntime().openExternal(url)
   }
 
   /**

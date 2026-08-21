@@ -4,6 +4,7 @@ import {
   createParseResult,
   genericToolResultBlock,
   detectMarkers,
+  getMissingRequiredArguments,
   normalizeArguments,
   renderToolList,
   stripFencedCodeBlocks,
@@ -30,6 +31,7 @@ When Codex Responses compatibility is enabled, emit response items with type "fu
     const rawMatches: string[] = []
     const invalidToolNames: string[] = []
     const toolCalls = []
+    const toolDefinitions = new Map(context.tools.map((tool) => [tool.name, tool]))
 
     let parsed: unknown
     try {
@@ -63,7 +65,21 @@ When Codex Responses compatibility is enabled, emit response items with type "fu
             ? record.id
             : `call_${toolCalls.length}`
 
-      toolCalls.push(buildToolCall(id, toolCalls.length, name, normalizeArguments(record.arguments), parseable))
+      const tool = toolDefinitions.get(name)
+      if (getMissingRequiredArguments(record.arguments, tool).length > 0) {
+        continue
+      }
+
+      toolCalls.push(
+        buildToolCall(
+          id,
+          toolCalls.length,
+          name,
+          record.arguments,
+          parseable,
+          tool,
+        ),
+      )
     }
 
     if (toolCalls.length > 0) rawMatches.push(parseable)

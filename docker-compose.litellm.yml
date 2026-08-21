@@ -1,0 +1,53 @@
+name: chat2api-litellm
+
+services:
+  litellm:
+    build:
+      context: ./deploy/litellm
+      dockerfile: Dockerfile
+      args:
+        LITELLM_BASE_IMAGE: "${LITELLM_BASE_IMAGE:-docker.litellm.ai/berriai/litellm:v1.93.0}"
+    image: "${LITELLM_IMAGE:-chat2api-litellm:v1.93.0-anthropic-stream-guard}"
+    container_name: chat2api-litellm
+    restart: unless-stopped
+    command:
+      - --config
+      - /app/config.yaml
+      - --host
+      - 0.0.0.0
+      - --port
+      - "4000"
+      - --num_workers
+      - "1"
+    ports:
+      - "127.0.0.1:${LITELLM_PORT:-4000}:4000"
+    environment:
+      CHAT2API_BASE_URL: "${CHAT2API_BASE_URL:-http://host.docker.internal:8080/v1}"
+      CHAT2API_API_KEY: "${CHAT2API_API_KEY:-sk-chat2api-local}"
+      LITELLM_MASTER_KEY: "${LITELLM_MASTER_KEY:-sk-litellm-local}"
+      LITELLM_USE_CHAT_COMPLETIONS_URL_FOR_ANTHROPIC_MESSAGES: "${LITELLM_USE_CHAT_COMPLETIONS_URL_FOR_ANTHROPIC_MESSAGES:-false}"
+      # cancel_on_disconnect is enabled in the mounted LiteLLM configuration.
+      # LiteLLM applies this to outer connect/read waits. Streaming activity
+      # refreshes that budget; Chat2API separately enforces meaningful idle
+      # and the cumulative Qwen request deadline.
+      REQUEST_TIMEOUT: "${LITELLM_REQUEST_TIMEOUT:-900}"
+      # Anthropic ping events keep downstream byte-idle watchdogs alive while
+      # the translated upstream stream is temporarily quiet. Zero disables it.
+      LITELLM_ANTHROPIC_SSE_HEARTBEAT_INTERVAL_MS: "${LITELLM_ANTHROPIC_SSE_HEARTBEAT_INTERVAL_MS:-15000}"
+      # Count-token requests stay local by default because the generic Chat2API
+      # target does not expose OpenAI's /responses/input_tokens endpoint.
+      LITELLM_ANTHROPIC_COUNT_TOKENS_LOCAL_ONLY: "${LITELLM_ANTHROPIC_COUNT_TOKENS_LOCAL_ONLY:-true}"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./deploy/litellm/config.yaml:/app/config.yaml:ro
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import os, urllib.parse, urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness', timeout=2); target=urllib.parse.urlsplit(os.environ['CHAT2API_BASE_URL']); health=target._replace(path='/health', query='', fragment='').geturl(); urllib.request.urlopen(health, timeout=2)"
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 20s

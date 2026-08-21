@@ -1,0 +1,135 @@
+services:
+  chat2api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: chat2api:server
+    container_name: chat2api
+    restart: unless-stopped
+    # Match the server's default 14-minute request budget plus a small margin;
+    # override for deployments with a different shutdown drain policy.
+    stop_grace_period: ${CHAT2API_STOP_GRACE_PERIOD:-10m}
+    ports:
+      - "8080:8080"
+    environment:
+      CHAT2API_HOST: 0.0.0.0
+      CHAT2API_PORT: 8080
+      CHAT2API_DATA_DIR: /data
+      CHAT2API_ENABLE_MANAGEMENT_API: "true"
+      CHAT2API_MANAGEMENT_SECRET: ${CHAT2API_MANAGEMENT_SECRET}
+      CHAT2API_STORAGE_ENCRYPTION_KEY: ${CHAT2API_STORAGE_ENCRYPTION_KEY}
+      CHAT2API_LOG_LEVEL: info
+      CHAT2API_LOAD_BALANCE_STRATEGY: round-robin
+      # Detect the protocol-level Claude context-summary turn from its
+      # structural instructions. Set to off when a deployment owns this path.
+      CHAT2API_COMPACTION_DETECTION: ${CHAT2API_COMPACTION_DETECTION:-auto}
+      # Summary turns default to provider answer mode; set true only when the
+      # upstream model explicitly requires a thinking phase for summaries.
+      CHAT2API_QWEN_AI_COMPACTION_THINKING: ${CHAT2API_QWEN_AI_COMPACTION_THINKING:-auto}
+      # Live /models max_context_length minus summary output is preferred.
+      CHAT2API_QWEN_AI_COMPACTION_INPUT_TOKEN_BUDGET: ${CHAT2API_QWEN_AI_COMPACTION_INPUT_TOKEN_BUDGET:-0}
+      # Zero trusts the live catalogue. Set a positive value only when a
+      # deployment intentionally needs a stricter cap than the provider.
+      CHAT2API_QWEN_AI_COMPACTION_METADATA_MAX_INPUT_TOKENS: ${CHAT2API_QWEN_AI_COMPACTION_METADATA_MAX_INPUT_TOKENS:-0}
+      CHAT2API_QWEN_AI_COMPACTION_FALLBACK_INPUT_TOKENS: ${CHAT2API_QWEN_AI_COMPACTION_FALLBACK_INPUT_TOKENS:-12000}
+      CHAT2API_QWEN_AI_COMPACTION_PROMPT_TOKEN_RESERVE: ${CHAT2API_QWEN_AI_COMPACTION_PROMPT_TOKEN_RESERVE:-512}
+      CHAT2API_QWEN_AI_COMPACTION_CHUNK_DELAY_MS: ${CHAT2API_QWEN_AI_COMPACTION_CHUNK_DELAY_MS:-0}
+      CHAT2API_QWEN_AI_COMPACTION_MAX_REDUCTION_ROUNDS: ${CHAT2API_QWEN_AI_COMPACTION_MAX_REDUCTION_ROUNDS:-6}
+      # Zero dynamically traverses every active account eligible for the model.
+      CHAT2API_QWEN_AI_COMPACTION_MAX_ACCOUNT_ATTEMPTS: ${CHAT2API_QWEN_AI_COMPACTION_MAX_ACCOUNT_ATTEMPTS:-0}
+      # Simultaneous recovery candidates; this does not cap total account
+      # rotation for a compaction request.
+      CHAT2API_QWEN_AI_COMPACTION_FAILOVER_WAVE_SIZE: ${CHAT2API_QWEN_AI_COMPACTION_FAILOVER_WAVE_SIZE:-2}
+      # Only pre-output 401/403 and capacity-classified 429 failures traverse
+      # the active Qwen pool. Ordinary 5xx and chat/session errors stay on the
+      # current account. A positive value can impose a deployment-specific cap.
+      CHAT2API_QWEN_AI_MAX_ACCOUNT_FAILOVERS: ${CHAT2API_QWEN_AI_MAX_ACCOUNT_FAILOVERS:-0}
+      # Active accounts need the Qwen Web token cookie before they can enter
+      # the request pool. Repair incomplete sessions serially to limit sign-in load.
+      CHAT2API_QWEN_AI_SESSION_REPAIR_ENABLED: ${CHAT2API_QWEN_AI_SESSION_REPAIR_ENABLED:-true}
+      CHAT2API_QWEN_AI_SESSION_REPAIR_INTERVAL_MS: ${CHAT2API_QWEN_AI_SESSION_REPAIR_INTERVAL_MS:-25000}
+      CHAT2API_QWEN_AI_SESSION_REPAIR_RESCAN_MS: ${CHAT2API_QWEN_AI_SESSION_REPAIR_RESCAN_MS:-60000}
+      CHAT2API_QWEN_AI_SESSION_REPAIR_RISK_COOLDOWN_MS: ${CHAT2API_QWEN_AI_SESSION_REPAIR_RISK_COOLDOWN_MS:-180000}
+      CHAT2API_QWEN_AI_SESSION_REPAIR_FAILURE_RETRY_MS: ${CHAT2API_QWEN_AI_SESSION_REPAIR_FAILURE_RETRY_MS:-300000}
+      CHAT2API_QWEN_AI_SESSION_REPAIR_CREDENTIAL_RETRY_MS: ${CHAT2API_QWEN_AI_SESSION_REPAIR_CREDENTIAL_RETRY_MS:-21600000}
+      # Queue admission has its own limit, but remains inside the cumulative
+      # request deadline. Keep it configurable so deployments can choose how
+      # long clients wait for a governor slot before receiving a retryable 429.
+      CHAT2API_QWEN_AI_QUEUE_TIMEOUT_MS: ${CHAT2API_QWEN_AI_QUEUE_TIMEOUT_MS:-120000}
+      # Reserve this many effective governor slots for ordinary client
+      # requests while context compaction is running. Zero opts into a shared
+      # pool for deployments with a separate upstream capacity plan.
+      CHAT2API_QWEN_AI_COMPACTION_RESERVED_SLOTS: ${CHAT2API_QWEN_AI_COMPACTION_RESERVED_SLOTS:-1}
+      # Hold managed tool frames until their arguments pass terminal
+      # validation. Context compaction strips tools and bypasses this path.
+      CHAT2API_QWEN_AI_BUFFER_MANAGED_STREAMS: ${CHAT2API_QWEN_AI_BUFFER_MANAGED_STREAMS:-true}
+      # This UTF-8 JSON target triggers document offload; it is not a request ceiling.
+      # Set 0 to disable automatic offload.
+      CHAT2API_QWEN_AI_REQUEST_MAX_BYTES: ${CHAT2API_QWEN_AI_REQUEST_MAX_BYTES:-92160}
+      # Complete tool docs remain attached; zero omits only inline routing summaries.
+      CHAT2API_QWEN_AI_HERMES_ROUTING_SUMMARY_MAX_CODE_POINTS: ${CHAT2API_QWEN_AI_HERMES_ROUTING_SUMMARY_MAX_CODE_POINTS:-240}
+      # Non-negative retry counts are bounded by the cumulative request deadline.
+      CHAT2API_QWEN_AI_RETRY_COUNT: ${CHAT2API_QWEN_AI_RETRY_COUNT:-1}
+      CHAT2API_QWEN_AI_BUSY_RETRY_COUNT: ${CHAT2API_QWEN_AI_BUSY_RETRY_COUNT:-1}
+      # Keep HTTP status mutable until the first visible frame by default.
+      # Set a non-negative value only to impose an explicit preflight deadline.
+      CHAT2API_QWEN_AI_STREAM_PREFLIGHT_MAX_HOLD_MS: ${CHAT2API_QWEN_AI_STREAM_PREFLIGHT_MAX_HOLD_MS-}
+      # Resume a Qwen response by chat/response id after a transport reset.
+      # Both values are deployment controls; no request or session is special-cased.
+      CHAT2API_QWEN_AI_STREAM_RESUME_ATTEMPTS: ${CHAT2API_QWEN_AI_STREAM_RESUME_ATTEMPTS:-3}
+      CHAT2API_QWEN_AI_STREAM_RESUME_DELAY_MS: ${CHAT2API_QWEN_AI_STREAM_RESUME_DELAY_MS:-1000}
+      # Blank/default permits one same-chat semantic correction. Zero disables
+      # it; positive values remain bounded by the workflow recovery deadline.
+      CHAT2API_QWEN_AI_WORKFLOW_CONTINUATION_ATTEMPTS: ${CHAT2API_QWEN_AI_WORKFLOW_CONTINUATION_ATTEMPTS:-1}
+      # One cumulative no-progress budget covers transport resumes and
+      # workflow continuations. Active generation does not spend this smaller
+      # budget, but remains bounded by QWEN_AI_REQUEST_TIMEOUT_MS.
+      CHAT2API_QWEN_AI_RECOVERY_BUDGET_MS: ${CHAT2API_QWEN_AI_RECOVERY_BUDGET_MS:-180000}
+      # Once semantic recovery begins, cap the full continuation chain even
+      # while replacement branches keep producing incomplete progress.
+      CHAT2API_QWEN_AI_WORKFLOW_RECOVERY_TIMEOUT_MS: ${CHAT2API_QWEN_AI_WORKFLOW_RECOVERY_TIMEOUT_MS:-840000}
+      # A busy-chat admission response retries the exact same continuation
+      # payload; it never creates another user turn or switches accounts.
+      # Busy-chat admission has its own wall-clock budget; it must not inherit
+      # the much longer generation timeout. Set 0 to disable busy-chat retry.
+      # Leave the generic retry-count override blank for deadline mode used by
+      # ordinary semantic workflow continuations. Bound Responses tool-result
+      # turns use the dedicated override below.
+      CHAT2API_QWEN_AI_CHAT_IN_PROGRESS_RETRY_ATTEMPTS: ${CHAT2API_QWEN_AI_CHAT_IN_PROGRESS_RETRY_ATTEMPTS-}
+      CHAT2API_QWEN_AI_CHAT_IN_PROGRESS_RETRY_DELAY_MS: ${CHAT2API_QWEN_AI_CHAT_IN_PROGRESS_RETRY_DELAY_MS:-1000}
+      CHAT2API_QWEN_AI_CHAT_IN_PROGRESS_RETRY_BUDGET_MS: ${CHAT2API_QWEN_AI_CHAT_IN_PROGRESS_RETRY_BUDGET_MS:-300000}
+      CHAT2API_QWEN_AI_RESPONSES_CONTINUATION_RETRY_ATTEMPTS: ${CHAT2API_QWEN_AI_RESPONSES_CONTINUATION_RETRY_ATTEMPTS:-0}
+      # Explicit governor values take precedence over settings persisted in
+      # /data. Leave them unset to keep the stored profile.
+      CHAT2API_QWEN_AI_AUTO_TUNE_ENABLED: ${CHAT2API_QWEN_AI_AUTO_TUNE_ENABLED-}
+      CHAT2API_QWEN_AI_AUTO_TUNE_MAX_CONCURRENT: ${CHAT2API_QWEN_AI_AUTO_TUNE_MAX_CONCURRENT-}
+      # A 1s floor is the value validated against the current Qwen account
+      # pool; distinct accounts still remain subject to upstream responses.
+      CHAT2API_QWEN_AI_AUTO_TUNE_MIN_GLOBAL_INTERVAL_MS: ${CHAT2API_QWEN_AI_AUTO_TUNE_MIN_GLOBAL_INTERVAL_MS:-1000}
+      CHAT2API_QWEN_AI_MAX_CONCURRENT: ${CHAT2API_QWEN_AI_MAX_CONCURRENT:-16}
+      CHAT2API_QWEN_AI_GLOBAL_MIN_INTERVAL_MS: ${CHAT2API_QWEN_AI_GLOBAL_MIN_INTERVAL_MS-}
+      CHAT2API_QWEN_AI_ACCOUNT_MIN_INTERVAL_MS: ${CHAT2API_QWEN_AI_ACCOUNT_MIN_INTERVAL_MS-}
+      # Leave transport headroom for downstream clients and proxy layers to
+      # receive a structured terminal response. Override per deployment.
+      QWEN_AI_REQUEST_TIMEOUT_MS: ${QWEN_AI_REQUEST_TIMEOUT_MS:-840000}
+      # Zero disables only the additional post-admission response cap. The
+      # cumulative QWEN_AI_REQUEST_TIMEOUT_MS deadline remains authoritative.
+      QWEN_AI_RESPONSE_TIMEOUT_MS: ${QWEN_AI_RESPONSE_TIMEOUT_MS:-0}
+      QWEN_AI_STREAM_IDLE_TIMEOUT_MS: ${QWEN_AI_STREAM_IDLE_TIMEOUT_MS:-180000}
+      # A parse-stage timeout is account-neutral and may continue on another
+      # account while the cumulative request deadline still has budget.
+      QWEN_AI_FILE_PARSE_POLL_INTERVAL_MS: ${QWEN_AI_FILE_PARSE_POLL_INTERVAL_MS:-2000}
+      QWEN_AI_FILE_PARSE_TIMEOUT_MS: ${QWEN_AI_FILE_PARSE_TIMEOUT_MS:-120000}
+      # Emit protocol-neutral SSE comments while a downstream stream is quiet.
+      # Zero disables keep-alives for deployments that manage them elsewhere.
+      CHAT2API_SSE_KEEPALIVE_INTERVAL_MS: ${CHAT2API_SSE_KEEPALIVE_INTERVAL_MS:-15000}
+      CHAT2API_SHUTDOWN_DRAIN_TIMEOUT_MS: ${CHAT2API_SHUTDOWN_DRAIN_TIMEOUT_MS:-540000}
+      # ali-oss refreshes temporary upload credentials during long multipart uploads.
+      QWEN_AI_OSS_STS_REFRESH_INTERVAL_MS: ${QWEN_AI_OSS_STS_REFRESH_INTERVAL_MS:-240000}
+      # Used only when managed stream validation is explicitly enabled.
+      CHAT2API_VALIDATED_SSE_MAX_HOLD_MS: ${CHAT2API_VALIDATED_SSE_MAX_HOLD_MS:-60000}
+    volumes:
+      - chat2api-data:/data
+
+volumes:
+  chat2api-data:

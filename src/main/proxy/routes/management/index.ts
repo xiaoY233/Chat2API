@@ -12,6 +12,7 @@ import sessionsRouter from './sessions'
 import statisticsRouter from './statistics'
 import proxyRouter from './proxy'
 import toolCallingRouter from './toolCalling'
+import qwenAiGovernorRouter from './qwenAiGovernor'
 
 export {
   configRouter,
@@ -23,6 +24,7 @@ export {
   statisticsRouter,
   proxyRouter,
   toolCallingRouter,
+  qwenAiGovernorRouter,
 }
 
 export default [
@@ -35,4 +37,5 @@ export default [
   statisticsRouter,
   proxyRouter,
   toolCallingRouter,
+  qwenAiGovernorRouter,
 ]

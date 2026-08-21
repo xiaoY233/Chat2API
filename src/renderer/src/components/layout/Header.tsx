@@ -14,6 +14,7 @@ export function Header() {
   const [proxyLoading, setProxyLoading] = useState(false)
   const [port, setPort] = useState(8080)
   const [host, setHost] = useState('127.0.0.1')
+  const isDockerWebAdmin = window.__CHAT2API_WEB_ADMIN__ === true
 
   useEffect(() => {
     if (!window.electronAPI?.proxy?.onStatusChanged) return
@@ -52,6 +53,7 @@ export function Header() {
     setProxyLoading(true)
     try {
       if (proxyEnabled) {
+        if (isDockerWebAdmin) return
         await window.electronAPI.proxy.stop()
         setProxyEnabled(false)
       } else {
@@ -137,7 +139,7 @@ export function Header() {
             </span>
             <button
               onClick={handleToggleProxy}
-              disabled={proxyLoading}
+              disabled={proxyLoading || (isDockerWebAdmin && proxyEnabled)}
               className={cn(
                 "w-6 h-6 flex items-center justify-center rounded-full transition-all duration-200",
                 "disabled:opacity-50 disabled:cursor-not-allowed",
@@ -145,7 +147,7 @@ export function Header() {
                   ? "proxy-toggle-btn-active"
                   : "bg-[var(--text-dim)]/10 text-[var(--text-secondary)]"
               )}
-              title={proxyEnabled ? t('proxyStatus.stop') : t('proxyStatus.start')}
+              title={isDockerWebAdmin && proxyEnabled ? t('proxyStatus.managedByDocker') : proxyEnabled ? t('proxyStatus.stop') : t('proxyStatus.start')}
             >
               {proxyLoading ? (
                 <span className="text-[10px]">...</span>

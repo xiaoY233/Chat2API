@@ -1,4 +1,4 @@
-import { net } from 'electron'
+import axios from 'axios'
 import { Readable } from 'stream'
 import { Account, Provider } from '../store/types'
 
@@ -312,93 +312,42 @@ export class PerplexityAdapter {
 
     const data = this.buildRequestData(query, model)
 
-    // Use Electron's net API which uses Chromium's network stack
-    // This bypasses Cloudflare's TLS fingerprint detection
-    const request_ = net.request({
-      method: 'POST',
-      url: QUERY_ENDPOINT,
+    const response = await axios.post(QUERY_ENDPOINT, data, {
+      headers,
+      responseType: 'stream',
+      timeout: 120000,
+      validateStatus: () => true,
     })
 
-    for (const [key, value] of Object.entries(headers)) {
-      request_.setHeader(key, value)
+    if (response.status === 403) {
+      throw new Error('Cloudflare challenge detected')
     }
 
-    const stream = new Readable({
-      read() {}
-    })
+    if (response.status === 429) {
+      throw new Error('Rate limit exceeded')
+    }
 
-    return new Promise((resolve, reject) => {
-      const chunks: Buffer[] = []
-      let errorBodyRead = false
-      
-      request_.on('response', (response) => {
-        const statusCode = response.statusCode
-        
-        if (statusCode === 403) {
-          // Cloudflare challenge - need to handle this
-          stream.emit('error', new Error('Cloudflare challenge detected. Please try again later.'))
-          reject(new Error('Cloudflare challenge detected'))
-          return
-        }
-        
-        if (statusCode === 429) {
-          // Rate limit exceeded
-          stream.emit('error', new Error('Rate limit exceeded. Please wait a moment and try again.'))
-          reject(new Error('Rate limit exceeded'))
-          return
-        }
-        
-        if (statusCode && statusCode >= 400) {
-          // Error response - read full body before rejecting
-          errorBodyRead = true
-          let errorBody = ''
-          response.on('data', (chunk: Buffer) => {
-            errorBody += chunk.toString()
-          })
-          response.on('end', () => {
-            const errorMsg = `HTTP ${statusCode}: ${errorBody.substring(0, 200)}`
-            console.error('[Perplexity] Server error:', errorMsg)
-            stream.emit('error', new Error(errorMsg))
-            reject(new Error(errorMsg))
-          })
-          response.on('error', (error) => {
-            console.error('[Perplexity] Error response stream error:', error)
-            const errorMsg = `HTTP ${statusCode}: Failed to read error response`
-            stream.emit('error', new Error(errorMsg))
-            reject(new Error(errorMsg))
-          })
-          return
-        }
-        
-        // Success response - stream the data
-        response.on('data', (chunk) => {
-          stream.push(chunk)
-          chunks.push(Buffer.from(chunk))
-        })
-        
-        response.on('end', () => {
-          stream.push(null)
-        })
-        
-        response.on('error', (error) => {
-          console.error('[Perplexity] Response error:', error)
-          const errorMessage = this.formatNetworkError(error)
-          stream.emit('error', new Error(errorMessage))
-        })
-        
-        resolve({ stream, sessionId: requestId })
+    if (response.status >= 400) {
+      const errorBody = await this.readErrorBody(response.data)
+      throw new Error(`HTTP ${response.status}: ${errorBody.substring(0, 200)}`)
+    }
+
+    return { stream: response.data, sessionId: requestId }
+  }
+
+  private async readErrorBody(stream: NodeJS.ReadableStream): Promise<string> {
+    const chunks: Buffer[] = []
+
+    return new Promise((resolve) => {
+      stream.on('data', (chunk: Buffer) => {
+        chunks.push(Buffer.from(chunk))
       })
-      
-      request_.on('error', (error) => {
-        console.error('[Perplexity] Request error:', error)
-        const errorMessage = this.formatNetworkError(error)
-        const wrappedError = new Error(errorMessage)
-        stream.emit('error', wrappedError)
-        reject(wrappedError)
+      stream.on('end', () => {
+        resolve(Buffer.concat(chunks).toString('utf8'))
       })
-      
-      request_.write(JSON.stringify(data))
-      request_.end()
+      stream.on('error', () => {
+        resolve('')
+      })
     })
   }
 
@@ -457,43 +406,15 @@ export class PerplexityAdapter {
         read_write_token: sessionData.read_write_token || '',
       }
 
-      return new Promise((resolve) => {
-        const request_ = net.request({
-          method: 'DELETE',
-          url: deleteUrl,
-        })
-
-        for (const [key, value] of Object.entries(headers)) {
-          request_.setHeader(key, value)
-        }
-
-        request_.on('response', (response) => {
-          const statusCode = response.statusCode
-          
-          // Read response body
-          let responseBody = ''
-          response.on('data', (chunk: Buffer) => {
-            responseBody += chunk.toString()
-          })
-          
-          if (statusCode && statusCode >= 200 && statusCode < 300) {
-            sessionCache.delete(cacheKey)
-            resolve(true)
-          } else {
-            sessionCache.delete(cacheKey)
-            resolve(false)
-          }
-        })
-
-        request_.on('error', (error) => {
-          console.error('[Perplexity] Delete request error:', error)
-          sessionCache.delete(cacheKey)
-          resolve(false)
-        })
-
-        request_.write(JSON.stringify(requestBody))
-        request_.end()
+      const response = await axios.delete(deleteUrl, {
+        headers,
+        data: requestBody,
+        timeout: 30000,
+        validateStatus: () => true,
       })
+
+      sessionCache.delete(cacheKey)
+      return response.status >= 200 && response.status < 300
     } catch (error) {
       console.error('[Perplexity] Delete session error:', error)
       sessionCache.delete(cacheKey)
@@ -526,51 +447,24 @@ export class PerplexityAdapter {
       'x-perplexity-request-try-number': '1',
     }
 
-    return new Promise((resolve) => {
-      const request_ = net.request({
-        method: 'DELETE',
-        url: deleteUrl,
+    try {
+      const response = await axios.delete(deleteUrl, {
+        headers,
+        data: { delete_all: true },
+        timeout: 30000,
+        validateStatus: () => true,
       })
 
-      for (const [key, value] of Object.entries(headers)) {
-        request_.setHeader(key, value)
+      if (response.status >= 200 && response.status < 300 && response.data?.status === 'success') {
+        sessionCache.delete(this.account.id)
+        return true
       }
 
-      request_.on('response', (response) => {
-        const statusCode = response.statusCode
-        
-        let responseBody = ''
-        response.on('data', (chunk: Buffer) => {
-          responseBody += chunk.toString()
-        })
-        
-        response.on('end', () => {
-          if (statusCode && statusCode >= 200 && statusCode < 300) {
-            try {
-              const data = JSON.parse(responseBody)
-              if (data.status === 'success') {
-                sessionCache.delete(this.account.id)
-                resolve(true)
-              } else {
-                resolve(false)
-              }
-            } catch {
-              resolve(false)
-            }
-          } else {
-            resolve(false)
-          }
-        })
-      })
-
-      request_.on('error', (error) => {
-        console.error('[Perplexity] Delete all chats error:', error)
-        resolve(false)
-      })
-
-      request_.write(JSON.stringify({ delete_all: true }))
-      request_.end()
-    })
+      return false
+    } catch (error) {
+      console.error('[Perplexity] Delete all chats error:', error)
+      return false
+    }
   }
 
   static isPerplexityProvider(provider: Provider): boolean {

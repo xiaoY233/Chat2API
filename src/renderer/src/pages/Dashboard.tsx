@@ -30,6 +30,7 @@ export function Dashboard() {
   } = useDashboardStore()
   const { proxyEnabled, setProxyEnabled } = useSettingsStore()
   const hasLoadedRef = useRef(false)
+  const isDockerWebAdmin = window.__CHAT2API_WEB_ADMIN__ === true
 
   useEffect(() => {
     if (!hasLoadedRef.current) {
@@ -68,6 +69,7 @@ export function Dashboard() {
     
     try {
       if (proxyStatus?.isRunning) {
+        if (isDockerWebAdmin) return
         await window.electronAPI.proxy.stop()
         setProxyEnabled(false)
       } else {
@@ -184,6 +186,7 @@ export function Dashboard() {
         <div>
           <QuickActions
             proxyRunning={proxyStatus?.isRunning ?? proxyEnabled}
+            proxyManagedExternally={isDockerWebAdmin}
             onToggleProxy={handleToggleProxy}
             onAddAccount={handleAddAccount}
             onToolCalling={handleToolCalling}

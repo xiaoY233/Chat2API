@@ -4,8 +4,8 @@
  */
 
 import axios from 'axios'
-import { shell } from 'electron'
 import { BaseOAuthAdapter } from './base'
+import { getRuntime } from '../../runtime'
 import {
   OAuthResult,
   OAuthOptions,
@@ -56,7 +56,7 @@ export class DeepSeekAdapter extends BaseOAuthAdapter {
     this.emitProgress('pending', 'Opening browser...')
     
     try {
-      await shell.openExternal(DEEPSEEK_API_BASE)
+      await getRuntime().openExternal(DEEPSEEK_API_BASE)
       this.emitProgress('pending', 'Please log in via browser and enter Token manually')
       
       return {

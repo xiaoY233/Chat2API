@@ -6,9 +6,10 @@ import {
   LoadBalanceConfig,
   ProxyStatus,
   AdvancedConfig,
+  QwenAiGovernorPanel,
 } from '@/components/proxy'
 import { useProxyStore } from '@/stores/proxyStore'
-import { Settings, Scale, Activity, Settings2 } from 'lucide-react'
+import { Settings, Scale, Activity, Settings2, Gauge } from 'lucide-react'
 
 export function ProxySettings() {
   const { t } = useTranslation()
@@ -49,6 +50,10 @@ export function ProxySettings() {
             <Settings2 className="h-4 w-4 flex-shrink-0" />
             <span className="hidden md:inline truncate">{t('proxy.advancedConfig')}</span>
           </TabsTrigger>
+          <TabsTrigger value="qwenGovernor" className="flex items-center gap-2 py-2 px-3 flex-1 min-w-0">
+            <Gauge className="h-4 w-4 flex-shrink-0" />
+            <span className="hidden md:inline truncate">{t('proxy.qwenGovernor.tab')}</span>
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="status" className="mt-6">
@@ -65,6 +70,10 @@ export function ProxySettings() {
 
         <TabsContent value="advanced" className="mt-6">
           <AdvancedConfig />
+        </TabsContent>
+
+        <TabsContent value="qwenGovernor" className="mt-6">
+          <QwenAiGovernorPanel />
         </TabsContent>
       </Tabs>
     </div>

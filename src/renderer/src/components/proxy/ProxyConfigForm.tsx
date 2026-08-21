@@ -51,6 +51,7 @@ export function ProxyConfigForm({ onConfigChange }: ProxyConfigFormProps) {
   const [hasChanges, setHasChanges] = useState(false)
   const [showRestartDialog, setShowRestartDialog] = useState(false)
   const [isRestarting, setIsRestarting] = useState(false)
+  const isDockerWebAdmin = window.__CHAT2API_WEB_ADMIN__ === true
 
   useEffect(() => {
     const newFormData = {
@@ -160,6 +161,15 @@ export function ProxyConfigForm({ onConfigChange }: ProxyConfigFormProps) {
     const newHost = formData.host
     const portOrHostChanged = newPort !== proxyConfig.port || newHost !== proxyConfig.host
     const isProxyRunning = proxyStatus?.isRunning
+
+    if (portOrHostChanged && isProxyRunning && isDockerWebAdmin) {
+      await performSave(newPort, newHost)
+      toast({
+        title: t('proxy.dockerRestartRequired'),
+        description: t('proxy.dockerRestartRequiredDesc'),
+      })
+      return
+    }
 
     if (portOrHostChanged && isProxyRunning) {
       setShowRestartDialog(true)

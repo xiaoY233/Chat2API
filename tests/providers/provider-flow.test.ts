@@ -24,9 +24,11 @@ import {
 import {
   createKimiChatPayload,
   encodeKimiGrpcFrame,
+  normalizeProviderModelForMatch,
   resolveDeepSeekChatOptions,
   resolveKimiScenario,
 } from '../../src/main/proxy/adapters/providerModelOptions.ts'
+import { mergeProviderModelCapabilities } from '../../src/main/providers/modelSync.ts'
 
 const root = dirname(dirname(dirname(fileURLToPath(import.meta.url))))
 
@@ -181,8 +183,9 @@ test('GLM, Kimi, and MiniMax built-in default models match current web providers
   assert.deepEqual(glmConfig.supportedModels, ['GLM-5.1'])
   assert.equal(glmConfig.modelMappings?.['GLM-5.1'], 'glm-5.1')
 
-  assert.deepEqual(kimiConfig.supportedModels, ['Kimi-K2.6'])
-  assert.equal(kimiConfig.modelMappings?.['Kimi-K2.6'], 'kimi-k2.6')
+  assert.deepEqual(kimiConfig.supportedModels, ['Kimi-K2.6', 'Kimi-K3'])
+  assert.equal(kimiConfig.modelMappings?.['Kimi-K2.6'], 'k2d6')
+  assert.equal(kimiConfig.modelMappings?.['Kimi-K3'], 'k3')
   assert.equal(kimiConfig.modelMappings?.['Kimi-K2.5'], undefined)
 
   assert.deepEqual(minimaxConfig.supportedModels, ['MiniMax-M2.7'])
@@ -199,28 +202,67 @@ test('GLM, Kimi, and MiniMax built-in default models match current web providers
   assert.doesNotMatch(minimaxAdapterSource, /MiniMax-M2\.5/)
 })
 
-test('Kimi K2.6 model mapping reaches the web chat request payload', () => {
-  assert.deepEqual(kimiConfig.supportedModels, ['Kimi-K2.6'])
-  assert.equal(kimiConfig.modelMappings?.['Kimi-K2.6'], 'kimi-k2.6')
-  assert.equal(resolveKimiScenario('kimi-k2.6'), 'SCENARIO_K2D6')
-  assert.equal(resolveKimiScenario('kimi-k2.5'), 'SCENARIO_K2D5')
+test('Kimi K2.6 and K3 model mappings reach current web chat payloads', () => {
+  assert.deepEqual(kimiConfig.supportedModels, ['Kimi-K2.6', 'Kimi-K3'])
+  assert.deepEqual(kimiConfig.modelMappings, {
+    'Kimi-K2.6': 'k2d6',
+    'Kimi-K3': 'k3',
+  })
+  assert.equal(resolveKimiScenario('k2d5'), 'SCENARIO_K2D5')
+  assert.equal(resolveKimiScenario('k2d6'), 'SCENARIO_K2D5')
+  assert.equal(resolveKimiScenario('k3'), 'SCENARIO_OK_COMPUTER')
+  assert.equal(normalizeProviderModelForMatch('Kimi-K2.5-think-search'), 'Kimi-K2.6')
+  assert.equal(normalizeProviderModelForMatch('Kimi-K2.6-thinking-search'), 'Kimi-K2.6')
+  assert.equal(normalizeProviderModelForMatch('kimi-k2.6'), 'Kimi-K2.6')
+  assert.equal(normalizeProviderModelForMatch('k2d5'), 'Kimi-K2.6')
+  assert.equal(normalizeProviderModelForMatch('k2d6'), 'Kimi-K2.6')
+  assert.equal(normalizeProviderModelForMatch('Qwen3.8-Max-Preview[1m]'), 'Qwen3.8-Max-Preview')
+  assert.equal(normalizeProviderModelForMatch('Qwen3.8-Max-Preview-thinking[1m]'), 'Qwen3.8-Max-Preview')
 
-  const payload = createKimiChatPayload({
-    model: 'kimi-k2.6',
+  const k2Payload = createKimiChatPayload({
+    model: 'k2d5',
     content: 'hello',
     enableWebSearch: true,
     enableThinking: true,
   })
 
-  assert.equal(payload.scenario, 'SCENARIO_K2D6')
-  assert.equal(payload.message.scenario, 'SCENARIO_K2D6')
-  assert.deepEqual(payload.tools, [{ type: 'TOOL_TYPE_SEARCH', search: {} }])
-  assert.equal(payload.options.thinking, true)
+  assert.equal(k2Payload.scenario, 'SCENARIO_K2D5')
+  assert.equal(k2Payload.message.scenario, 'SCENARIO_K2D5')
+  assert.deepEqual(k2Payload.tools, [{ type: 'TOOL_TYPE_SEARCH', search: { force: true } }])
+  assert.equal(k2Payload.options.thinking, true)
+  assert.equal(k2Payload.options.reasoning_effort, 'REASONING_EFFORT_LOW')
+  assert.equal(k2Payload.project_id, '')
 
-  const frame = encodeKimiGrpcFrame(payload)
+  const frame = encodeKimiGrpcFrame(k2Payload)
   assert.equal(frame.readUInt8(0), 0)
   assert.equal(frame.readUInt32BE(1), frame.length - 5)
-  assert.equal(JSON.parse(frame.subarray(5).toString('utf8')).scenario, 'SCENARIO_K2D6')
+  assert.equal(JSON.parse(frame.subarray(5).toString('utf8')).scenario, 'SCENARIO_K2D5')
+
+  const k3Payload = createKimiChatPayload({
+    model: 'k3',
+    content: 'hello from K3',
+    enableWebSearch: false,
+    enableThinking: false,
+  })
+  assert.equal(k3Payload.scenario, 'SCENARIO_OK_COMPUTER')
+  assert.equal(k3Payload.message.scenario, 'SCENARIO_OK_COMPUTER')
+  assert.equal(k3Payload.kimiplus_id, 'ok-computer')
+  assert.equal(k3Payload.options.reasoning_effort, 'REASONING_EFFORT_HIGH')
+  assert.equal(k3Payload.options.context_length, 'CONTEXT_LENGTH_L')
+})
+
+test('Kimi forwarder preserves feature aliases and provider conversation identifiers', () => {
+  const forwarderSource = readFileSync(join(root, 'src/main/proxy/forwarder.ts'), 'utf8')
+
+  assert.match(forwarderSource, /request\.reasoning_effort \?\? request\.reasoningEffort/)
+  assert.match(forwarderSource, /request\.web_search \?\? Boolean\(request\.web_search_options\)/)
+  assert.match(forwarderSource, /originalModel: request\.originalModel \|\| request\.model/)
+  assert.match(forwarderSource, /request\.conversationId \|\| request\.conversation_id/)
+  assert.match(forwarderSource, /accessToken: responseAccessToken/)
+  assert.match(forwarderSource, /invalidateAccessToken\(responseAccessToken\)/)
+  assert.match(forwarderSource, /request\.parentMessageId \|\| request\.parent_message_id/)
+  assert.match(forwarderSource, /providerSessionId: handler\.getConversationId\(\) \?\? undefined/)
+  assert.match(forwarderSource, /parentMessageId: handler\.getLastMessageId\(\) \?\? undefined/)
 })
 
 test('Kimi and domestic Qwen support account-level chat cleanup', () => {
@@ -281,24 +323,32 @@ test('domestic Qwen models match the web chat model ids captured from HAR', () =
   assert.deepEqual(en.qwen.models, expectedMappings)
 })
 
-test('Qwen AI defaults keep only the filtered current web model set', () => {
+test('Qwen AI defaults prefer the configured stable model while retaining explicit compatibility mappings', () => {
   const expectedModels = [
+    'Qwen3.8-Max',
+    'Qwen3.8-Max_Fast',
+    'Qwen3.8-Max_Auto',
+    'Qwen3.8-Max_Thinking',
+    'Qwen3.7-Plus',
     'Qwen3.7-Max',
-    'Qwen3.6-Plus',
-    'Qwen3.6-35B-A3B',
-    'Qwen3.6-27B',
-    'Qwen3-Coder',
   ]
   const expectedMappings = {
+    'Qwen3.8-Max': 'qwen3.8-max',
+    'Qwen3.8-Max_Fast': 'qwen3.8-max',
+    'Qwen3.8-Max_Auto': 'qwen3.8-max',
+    'Qwen3.8-Max_Thinking': 'qwen3.8-max',
+    'Qwen3.8-Max-Preview': 'qwen3.8-max-preview',
+    'Qwen3.7-Plus': 'qwen3.7-plus',
     'Qwen3.7-Max': 'qwen3.7-max',
     'Qwen3.6-Plus': 'qwen3.6-plus',
-    'Qwen3.6-35B-A3B': 'qwen3.6-35b-a3b',
-    'Qwen3.6-27B': 'qwen3.6-27b',
-    'Qwen3-Coder': 'qwen3-coder-plus',
   }
 
   assert.deepEqual(qwenAiConfig.supportedModels, expectedModels)
   assert.deepEqual(qwenAiConfig.modelMappings, expectedMappings)
+  assert.deepEqual(qwenAiConfig.modelCapabilities, {
+    'Qwen3.8-Max-Preview': { thinkingSkippable: false },
+    'qwen3.8-max-preview': { thinkingSkippable: false },
+  })
 
   for (const removedModel of [
     'Qwen3.7-Max-Preview',
@@ -316,15 +366,39 @@ test('Qwen AI defaults keep only the filtered current web model set', () => {
   }
 
   const qwenAiAdapterSource = readFileSync(join(root, 'src/main/proxy/adapters/qwen-ai.ts'), 'utf8')
+  assert.match(qwenAiAdapterSource, /'qwen3\.8':\s*'qwen3\.8-max'/)
+  assert.match(qwenAiAdapterSource, /'qwen3\.8-max-preview':\s*'qwen3\.8-max-preview'/)
   assert.match(qwenAiAdapterSource, /qwen:\s*'qwen3\.7-max'/)
   assert.match(qwenAiAdapterSource, /qwen3:\s*'qwen3\.7-max'/)
   assert.match(qwenAiAdapterSource, /'qwen3\.7':\s*'qwen3\.7-max'/)
+  assert.match(qwenAiAdapterSource, /'qwen3\.7-plus':\s*'qwen3\.7-plus'/)
   assert.match(qwenAiAdapterSource, /'qwen3\.6':\s*'qwen3\.6-plus'/)
-  assert.match(qwenAiAdapterSource, /'qwen3-coder':\s*'qwen3-coder-plus'/)
+  assert.equal(qwenAiConfig.modelMappings?.['Qwen3-Coder'], undefined)
   assert.doesNotMatch(qwenAiAdapterSource, /'qwen3\.5':/)
   assert.doesNotMatch(qwenAiAdapterSource, /'qwen3-vl':/)
   assert.doesNotMatch(qwenAiAdapterSource, /'qwen3-omni':/)
   assert.doesNotMatch(qwenAiAdapterSource, /'qwen2\.5':/)
+
+  assert.equal(normalizeProviderModelForMatch('Qwen3.8-Max_Fast'), 'Qwen3.8-Max')
+  assert.equal(normalizeProviderModelForMatch('Qwen3.8-Max_Auto'), 'Qwen3.8-Max')
+  assert.equal(normalizeProviderModelForMatch('Qwen3.8-Max_Thinking'), 'Qwen3.8-Max')
+  assert.equal(normalizeProviderModelForMatch('Qwen3.8-Max_TeF_AtT'), 'Qwen3.8-Max')
+})
+
+test('model capability metadata merges live values without inventing unknown fallbacks', () => {
+  const existing = {
+    'Qwen3.8-Max-Preview': { thinkingSkippable: false },
+  }
+  const reported = {
+    'Qwen3.8-Max-Preview': { thinkingSkippable: false },
+  }
+
+  const merged = mergeProviderModelCapabilities(existing, reported)
+  assert.deepEqual(merged, reported)
+  assert.notEqual(merged, existing)
+  assert.notEqual(merged?.['Qwen3.8-Max-Preview'], existing['Qwen3.8-Max-Preview'])
+  assert.equal(mergeProviderModelCapabilities(undefined, undefined), undefined)
+  assert.equal(mergeProviderModelCapabilities(undefined, {}), undefined)
 })
 
 test('Z.ai default models match the latest chat.z.ai HAR model ids', () => {

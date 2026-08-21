@@ -65,6 +65,78 @@ router.get('/sessions', managementAuthMiddleware, async (ctx: Context) => {
   }
 })
 
+router.get('/sessions/all', managementAuthMiddleware, async (ctx: Context) => {
+  try {
+    const sessions = sessionManager.getAllSessions()
+    const transformedSessions = sessions.map(transformSession)
+
+    ctx.set('Content-Type', 'application/json')
+    ctx.body = createSuccessResponse(transformedSessions)
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Failed to get sessions'
+    ctx.status = 500
+    ctx.body = createErrorResponse('internal_error', errorMessage)
+  }
+})
+
+router.get('/sessions/config', managementAuthMiddleware, async (ctx: Context) => {
+  try {
+    ctx.set('Content-Type', 'application/json')
+    ctx.body = createSuccessResponse(sessionManager.getSessionConfig())
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Failed to get session config'
+    ctx.status = 500
+    ctx.body = createErrorResponse('internal_error', errorMessage)
+  }
+})
+
+router.put('/sessions/config', managementAuthMiddleware, async (ctx: Context) => {
+  try {
+    const updates = ctx.request.body as Record<string, unknown>
+    ctx.set('Content-Type', 'application/json')
+    ctx.body = createSuccessResponse(sessionManager.updateSessionConfig(updates))
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Failed to update session config'
+    ctx.status = 500
+    ctx.body = createErrorResponse('internal_error', errorMessage)
+  }
+})
+
+router.get('/accounts/:accountId/sessions', managementAuthMiddleware, async (ctx: Context) => {
+  try {
+    const sessions = sessionManager.getSessionsByAccount(ctx.params.accountId)
+    ctx.set('Content-Type', 'application/json')
+    ctx.body = createSuccessResponse(sessions.map(transformSession))
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Failed to get sessions by account'
+    ctx.status = 500
+    ctx.body = createErrorResponse('internal_error', errorMessage)
+  }
+})
+
+router.get('/providers/:providerId/sessions', managementAuthMiddleware, async (ctx: Context) => {
+  try {
+    const sessions = sessionManager.getSessionsByProvider(ctx.params.providerId)
+    ctx.set('Content-Type', 'application/json')
+    ctx.body = createSuccessResponse(sessions.map(transformSession))
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Failed to get sessions by provider'
+    ctx.status = 500
+    ctx.body = createErrorResponse('internal_error', errorMessage)
+  }
+})
+
+router.post('/sessions/clean-expired', managementAuthMiddleware, async (ctx: Context) => {
+  try {
+    ctx.set('Content-Type', 'application/json')
+    ctx.body = createSuccessResponse(sessionManager.cleanExpiredSessions())
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Failed to clean expired sessions'
+    ctx.status = 500
+    ctx.body = createErrorResponse('internal_error', errorMessage)
+  }
+})
+
 /**
  * GET /v0/management/sessions/:id
  * Get session by ID with message history

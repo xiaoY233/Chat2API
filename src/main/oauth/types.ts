@@ -77,6 +77,8 @@ export interface TokenValidationResult {
   valid: boolean
   tokenType?: TokenType
   expiresAt?: number
+  /** Canonical credentials returned after validation or token rotation. */
+  credentials?: Record<string, string>
   accountInfo?: OAuthAccountInfo
   error?: string
 }

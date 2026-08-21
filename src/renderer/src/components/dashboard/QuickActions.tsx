@@ -7,6 +7,7 @@ import { Play, Square, Plus, FileText, Zap, Loader2, Wrench } from 'lucide-react
 
 export interface QuickActionsProps {
   proxyRunning: boolean
+  proxyManagedExternally?: boolean
   onToggleProxy: () => void
   onAddAccount: () => void
   onToolCalling: () => void
@@ -17,6 +18,7 @@ export interface QuickActionsProps {
 
 export function QuickActions({
   proxyRunning,
+  proxyManagedExternally = false,
   onToggleProxy,
   onAddAccount,
   onToolCalling,
@@ -46,17 +48,21 @@ export function QuickActions({
           )}
           variant={proxyRunning ? 'secondary' : 'default'}
           onClick={onToggleProxy}
-          disabled={isLoading}
+          disabled={isLoading || (proxyManagedExternally && proxyRunning)}
         >
           {isLoading ? (
             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-          ) : proxyRunning ? (
+          ) : proxyRunning && !proxyManagedExternally ? (
             <Square className="mr-2 h-4 w-4 text-orange-700 dark:text-orange-400" />
+          ) : proxyRunning ? (
+            <Play className="mr-2 h-4 w-4 text-green-700 dark:text-green-400" />
           ) : (
             <Play className="mr-2 h-4 w-4" />
           )}
           {isLoading
             ? t('common.loading')
+            : proxyManagedExternally && proxyRunning
+            ? t('quickActions.proxyManagedExternally')
             : proxyRunning
             ? t('quickActions.stopProxy')
             : t('quickActions.startProxy')}

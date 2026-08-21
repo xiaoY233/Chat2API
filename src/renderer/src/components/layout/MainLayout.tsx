@@ -10,9 +10,9 @@ export function MainLayout() {
         <div className="bokeh-blob bokeh-blob-2" />
       </div>
       <Header />
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex min-w-0 flex-1 overflow-hidden">
         <Sidebar />
-        <main className="flex-1 overflow-auto p-6">
+        <main className="min-w-0 flex-1 overflow-auto p-3 md:p-6">
           <Outlet />
         </main>
       </div>

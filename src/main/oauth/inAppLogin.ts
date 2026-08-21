@@ -147,7 +147,7 @@ export class InAppLoginManager extends EventEmitter {
       const setCookieHeaders = details.responseHeaders?.['set-cookie'] || details.responseHeaders?.['Set-Cookie']
       if (setCookieHeaders && Array.isArray(setCookieHeaders)) {
         for (const cookieHeader of setCookieHeaders) {
-          console.log('[InAppLogin] Set-Cookie header:', cookieHeader.substring(0, 100))
+          console.log('[InAppLogin] Set-Cookie header received, length:', cookieHeader.length)
           
           const cookieParts = cookieHeader.split(';')
           const nameValue = cookieParts[0]?.trim()
@@ -217,7 +217,7 @@ export class InAppLoginManager extends EventEmitter {
     this.loginSession.cookies.on('changed', async (_event, cookie, _cause, removed) => {
       if (this.isCompleted || removed) return
 
-      console.log('[InAppLogin] Cookie changed:', { name: cookie.name, value: cookie.value ? cookie.value.substring(0, 50) + '...' : 'null', removed })
+      console.log('[InAppLogin] Cookie changed:', { name: cookie.name, valueLength: cookie.value?.length || 0, removed })
 
       if (!this.hasMinTimePassed()) {
         console.log('[InAppLogin] Min time not passed, skipping cookie check')
@@ -231,7 +231,7 @@ export class InAppLoginManager extends EventEmitter {
             console.log('[InAppLogin] Cookie token is valid, emitting tokenFound')
             this.emit('tokenFound', { key: source.key, value: cookie.value })
           } else {
-            console.log('[InAppLogin] Cookie token is invalid:', cookie.value ? cookie.value.substring(0, 50) : 'null')
+            console.log('[InAppLogin] Cookie token is invalid, length:', cookie.value?.length || 0)
           }
         }
       }
@@ -271,22 +271,23 @@ export class InAppLoginManager extends EventEmitter {
   }
 
   private isValidToken(value: string): boolean {
-    console.log('[InAppLogin] Checking token validity:', value.length, value.substring(0, 20))
+    const tokenValue = typeof value === 'string' ? value : ''
+    console.log('[InAppLogin] Checking token validity, length:', tokenValue.length)
     
-    if (!value || value.length < 5) {
+    if (!tokenValue || tokenValue.length < 5) {
       console.log('[InAppLogin] Token rejected: too short or empty')
       return false
     }
     
     // Check for JWT format (3 parts) or JWE format (5 parts)
-    if (value.startsWith('eyJ')) {
-      const parts = value.split('.')
+    if (tokenValue.startsWith('eyJ')) {
+      const parts = tokenValue.split('.')
       
       // JWE format (5 parts) - used by Perplexity and some other providers
       if (parts.length === 5) {
         console.log('[InAppLogin] Token appears to be JWE format (5 parts)')
         // JWE tokens are encrypted, we can't decode them, but they're valid if properly formatted
-        if (value.length >= 100) {
+        if (tokenValue.length >= 100) {
           console.log('[InAppLogin] Token accepted as valid JWE')
           return true
         }
@@ -298,7 +299,7 @@ export class InAppLoginManager extends EventEmitter {
       if (parts.length === 3) {
         try {
           const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString())
-          console.log('[InAppLogin] JWT payload:', payload)
+          console.log('[InAppLogin] JWT payload keys:', Object.keys(payload || {}))
           
           // Reject guest accounts
           if (payload.email && payload.email.includes('@guest.com')) {
@@ -318,27 +319,27 @@ export class InAppLoginManager extends EventEmitter {
     }
     
     // Accept long tokens (>= 64 chars) - includes base64 chars like / + and *
-    if (value.length >= 64 && /^[a-zA-Z0-9_\-+/*]+$/.test(value)) {
+    if (tokenValue.length >= 64 && /^[a-zA-Z0-9_\-+/*]+$/.test(tokenValue)) {
       console.log('[InAppLogin] Token accepted as long token')
       return true
     }
     
     // Accept medium tokens (32-63 chars) - includes base64 chars and *
-    if (value.length >= 32 && value.length < 64 && /^[a-zA-Z0-9_\-+/*]+$/.test(value)) {
+    if (tokenValue.length >= 32 && tokenValue.length < 64 && /^[a-zA-Z0-9_\-+/*]+$/.test(tokenValue)) {
       console.log('[InAppLogin] Token accepted as medium token')
       return true
     }
     
     // Accept Base64-encoded tokens (may contain = padding and /)
     // This handles tokens like "SME5/AEwvmtjSu4XO18SYg=="
-    if (value.length >= 20 && /^[a-zA-Z0-9_\-+/]+=*$/.test(value)) {
+    if (tokenValue.length >= 20 && /^[a-zA-Z0-9_\-+/]+=*$/.test(tokenValue)) {
       console.log('[InAppLogin] Token accepted as Base64 token')
       return true
     }
     
     // Accept any token that looks like a valid string (at least 5 chars, no spaces)
     // This handles short tokens like userId
-    if (value.length >= 5 && !/\s/.test(value)) {
+    if (tokenValue.length >= 5 && !/\s/.test(tokenValue)) {
       console.log('[InAppLogin] Token accepted as generic token')
       return true
     }
@@ -378,7 +379,7 @@ export class InAppLoginManager extends EventEmitter {
           (function() {
             try {
               const value = localStorage.getItem('${source.key}');
-              console.log('[InAppLogin] localStorage.getItem("${source.key}"):', value);
+              console.log('[InAppLogin] localStorage key read: ${source.key}');
               return value || null;
             } catch (e) {
               console.error('[InAppLogin] Error reading localStorage:', e);
@@ -387,7 +388,7 @@ export class InAppLoginManager extends EventEmitter {
           })()
         `
         const value = await webContents.executeJavaScript(script)
-        console.log('[InAppLogin] Got value from localStorage:', source.key, value ? value.substring(0, 50) + '...' : 'null')
+        console.log('[InAppLogin] Got localStorage value:', source.key, 'length:', value?.length || 0)
 
         if (source.key === 'user_detail_agent' && value) {
           try {
@@ -409,7 +410,7 @@ export class InAppLoginManager extends EventEmitter {
             const parsed = JSON.parse(value)
             if (parsed.value) {
               tokenValue = parsed.value
-              console.log('[InAppLogin] Extracted token from JSON:', tokenValue.substring(0, 50) + '...')
+              console.log('[InAppLogin] Extracted token from JSON, length:', tokenValue.length)
             }
           } catch (e) {
             console.error('[InAppLogin] Error parsing JSON token:', e)
@@ -428,7 +429,7 @@ export class InAppLoginManager extends EventEmitter {
 
         const allCookies = await this.loginSession.cookies.get({})
         console.log('[InAppLogin] All cookies count:', allCookies.length)
-        console.log('[InAppLogin] All cookies:', allCookies.map(c => `${c.name}=${c.value?.substring(0, 20)}...`))
+        console.log('[InAppLogin] All cookie names:', allCookies.map(c => c.name))
         
         const targetDomains = this.config?.targetDomains || []
         let cookiesToSearch = allCookies
@@ -451,7 +452,7 @@ export class InAppLoginManager extends EventEmitter {
 
         const cookie = cookiesToSearch.find(c => c.name === source.key)
         if (cookie) {
-          console.log('[InAppLogin] Found cookie:', source.key, cookie.value ? cookie.value.substring(0, 50) + '...' : 'null')
+          console.log('[InAppLogin] Found cookie:', source.key, 'length:', cookie.value?.length || 0)
 
           if (cookie.value && this.isValidToken(cookie.value)) {
             console.log('[InAppLogin] Token found and valid from cookie:', source.key, 'emitting tokenFound event')
@@ -463,7 +464,7 @@ export class InAppLoginManager extends EventEmitter {
             }
             this.emit('tokenFound', { key: source.key, value: cookie.value, allCookies: allCookiesObj })
           } else {
-            console.log('[InAppLogin] Cookie token is invalid:', source.key, cookie.value ? cookie.value.substring(0, 50) : 'null')
+            console.log('[InAppLogin] Cookie token is invalid:', source.key, 'length:', cookie.value?.length || 0)
           }
         } else {
           console.log('[InAppLogin] Cookie not found:', source.key)

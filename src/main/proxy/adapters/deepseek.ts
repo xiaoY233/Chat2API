@@ -303,6 +303,7 @@ export class DeepSeekAdapter {
         text = toolProfile.formatToolResult({
           toolCallId: message.tool_call_id,
           content: String(message.content || ''),
+          isError: (message as { is_error?: boolean }).is_error === true,
         })
       }
       else if (Array.isArray(message.content)) {

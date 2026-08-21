@@ -11,6 +11,7 @@ import { streamHandler } from '../stream'
 import { proxyStatusManager } from '../status'
 import { modelMapper } from '../modelMapper'
 import { storeManager } from '../../store/store'
+import { SseKeepAliveStream } from '../utils/sseKeepAlive'
 
 const router = new Router({ prefix: '/v1' })
 
@@ -187,8 +188,10 @@ router.post('/completions', async (ctx: Context) => {
       ctx.set('X-Accel-Buffering', 'no')
 
       const transformStream = streamHandler.createTransformStream(actualModel, requestId)
+      const keepAliveStream = new SseKeepAliveStream()
       result.stream.pipe(transformStream)
-      ctx.body = transformStream
+      transformStream.pipe(keepAliveStream)
+      ctx.body = keepAliveStream
     } else {
       ctx.set('Content-Type', 'application/json')
       ctx.body = result.body

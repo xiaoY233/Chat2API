@@ -6,6 +6,7 @@
 import { storeManager } from './store'
 import { Account, AccountStatus, ValidationResult } from './types'
 import { validateCredentials } from './validator'
+import { qwenAiTokenRefresher } from '../proxy/adapters/qwen-ai-token-refresh'
 
 /**
  * Account Manager class
@@ -230,10 +231,33 @@ export class AccountManager {
       }
     }
     
-    const result = await validateCredentials(provider, account.credentials)
+    let validationAccount = account
+    if (provider.id === 'qwen-ai' || provider.apiEndpoint.includes('chat.qwen.ai')) {
+      try {
+        validationAccount = await qwenAiTokenRefresher.repairWebSession(account)
+      } catch (error) {
+        const repairError = error as Error & { code?: string }
+        storeManager.addLog('warn', 'Qwen AI account validation could not repair the web session', {
+          accountId: account.id,
+          providerId: account.providerId,
+          errorCode: repairError.code,
+        })
+      }
+    }
+
+    const result = await validateCredentials(provider, validationAccount.credentials)
     
     if (result.valid) {
       this.updateStatus(id, 'active')
+
+      if (result.credentials) {
+        storeManager.updateAccount(id, {
+          credentials: {
+            ...validationAccount.credentials,
+            ...result.credentials,
+          },
+        })
+      }
       
       if (result.accountInfo?.email) {
         storeManager.updateAccount(id, { email: result.accountInfo.email })

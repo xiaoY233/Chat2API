@@ -22,6 +22,9 @@ import type {
   ToolCallingConfig,
   LegacyToolPromptConfig,
   EffectiveModel,
+  QwenAiGovernorConfig,
+  QwenAiGovernorStatus,
+  QwenAiSessionMode,
 } from '../../../shared/types'
 
 export type { 
@@ -48,6 +51,9 @@ export type {
   ToolCallingConfig,
   LegacyToolPromptConfig,
   EffectiveModel,
+  QwenAiGovernorConfig,
+  QwenAiGovernorStatus,
+  QwenAiSessionMode,
 }
 
 export interface CustomProviderFormData {
@@ -89,9 +95,14 @@ interface ProvidersAPI {
     type?: 'builtin' | 'custom'
     authType: AuthType
     apiEndpoint: string
+    chatPath?: string
     headers?: Record<string, string>
     description?: string
     supportedModels?: string[]
+    modelMappings?: Record<string, string>
+    modelCapabilities?: Record<string, { thinkingSkippable?: boolean }>
+    modelsApiEndpoint?: string
+    modelsApiHeaders?: Record<string, string>
     credentialFields?: CredentialField[]
   }) => Promise<Provider>
   update: (id: string, updates: Partial<Provider>) => Promise<Provider | null>
@@ -139,6 +150,7 @@ interface AccountsAPI {
   validateToken: (providerId: string, credentials: Record<string, string>) => Promise<{
     valid: boolean
     error?: string
+    credentials?: Record<string, string>
     userInfo?: {
       name?: string
       email?: string
@@ -165,6 +177,7 @@ interface OAuthAPI {
     valid: boolean
     tokenType?: string
     expiresAt?: number
+    credentials?: Record<string, string>
     accountInfo?: {
       userId?: string
       email?: string
@@ -189,6 +202,23 @@ interface OAuthAPI {
     progress?: number
     data?: Record<string, unknown>
   }) => void) => () => void
+}
+
+interface BrowserImportSession {
+  id: string
+  providerId: string
+  createdAt: number
+  expiresAt: number
+  status: 'pending' | 'success' | 'error' | 'expired'
+  credentials?: Record<string, string>
+  error?: string
+}
+
+interface BrowserImportAPI {
+  createSession: (providerId: string) => Promise<BrowserImportSession>
+  getSession: (id: string) => Promise<BrowserImportSession | null>
+  buildImportScript: (id: string) => Promise<string>
+  applyImportPayload: (input: string) => Promise<BrowserImportSession>
 }
 
 interface LogFilter {
@@ -462,12 +492,20 @@ interface ToolCallingAPI {
   runSmoke: (input: { clientAdapterId: string }) => Promise<{ success: boolean; data?: unknown; error?: { message?: string } }>
 }
 
+interface QwenAiGovernorAPI {
+  getStatus: () => Promise<QwenAiGovernorStatus | null>
+  updateConfig: (updates: Partial<QwenAiGovernorConfig>) => Promise<QwenAiGovernorConfig>
+  clearAccountCooldown: (accountId: string) => Promise<void>
+  clearAllCooldowns: () => Promise<void>
+}
+
 interface ElectronAPI {
   proxy: ProxyAPI
   store: StoreAPI
   providers: ProvidersAPI
   accounts: AccountsAPI
   oauth: OAuthAPI
+  browserImport: BrowserImportAPI
   logs: LogsAPI
   requestLogs: RequestLogsAPI
   statistics: StatisticsAPI
@@ -478,6 +516,7 @@ interface ElectronAPI {
   managementApi: ManagementApiAPI
   contextManagement: ContextManagementAPI
   toolCalling: ToolCallingAPI
+  qwenAiGovernor: QwenAiGovernorAPI
   tray: TrayAPI
   on: (channel: string, callback: (...args: unknown[]) => void) => () => void
   send: (channel: string, ...args: unknown[]) => void
@@ -487,6 +526,7 @@ interface ElectronAPI {
 declare global {
   interface Window {
     electronAPI: ElectronAPI
+    __CHAT2API_WEB_ADMIN__?: boolean
   }
 }
 

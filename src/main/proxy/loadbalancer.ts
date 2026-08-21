@@ -6,15 +6,46 @@
 import { Account, Provider, LoadBalanceStrategy } from '../store/types'
 import { AccountSelection } from './types'
 import { storeManager } from '../store/store'
+import { normalizeProviderModelForMatch } from './adapters/providerModelOptions'
+import { hasQwenAiSessionCookie } from './adapters/qwen-ai-token-refresh'
+import { qwenAiRequestGovernor } from './qwenAiRequestGovernor'
+
+const LOAD_BALANCER_DEBUG = process.env.CHAT2API_LOAD_BALANCER_DEBUG === 'true'
+
+export interface AccountSelectionConstraints {
+  /** Keep one failover chain inside accounts with an established Qwen web session. */
+  qwenAiWebSessionTier?: 'complete'
+  /**
+   * A retained Qwen chat is valid only for its creating account. Let the
+   * governor queue that account instead of silently selecting another one.
+   */
+  allowQueuedQwenAiPreferredAccount?: boolean
+}
+
+type AccountFailureState = {
+  count: number
+  lastFailTime: number
+  cooldownUntil?: number
+  reason?: string
+}
+
+export type AccountFailureSnapshot = AccountFailureState & {
+  recoveryUntil?: number
+}
+
+function debugLoadBalancer(message: string): void {
+  if (LOAD_BALANCER_DEBUG) console.log(message)
+}
 
 /**
  * Load Balancer
  */
 export class LoadBalancer {
   private roundRobinIndex: Map<string, number> = new Map()
-  private failedAccounts: Map<string, { count: number; lastFailTime: number }> = new Map()
-  private static readonly FAIL_THRESHOLD = 3
+  private failedAccounts: Map<string, AccountFailureState> = new Map()
+  private static readonly FAIL_THRESHOLD = 1
   private static readonly RECOVERY_TIME = 60000 // 1 minute
+  private static readonly QWEN_AI_RISK_COOLDOWN = 10 * 60 * 1000
 
   /**
    * Mark account as failed
@@ -24,7 +55,24 @@ export class LoadBalancer {
     this.failedAccounts.set(accountId, {
       count: current.count + 1,
       lastFailTime: Date.now(),
+      cooldownUntil: current.cooldownUntil,
+      reason: current.reason || 'request_failure',
     })
+  }
+
+  markAccountCooldown(accountId: string, cooldownMs: number, reason: string): void {
+    const current = this.failedAccounts.get(accountId) || { count: 0, lastFailTime: 0 }
+    this.failedAccounts.set(accountId, {
+      count: current.count + 1,
+      lastFailTime: Date.now(),
+      cooldownUntil: Date.now() + cooldownMs,
+      reason,
+    })
+    console.warn(`[LoadBalancer] Account ${accountId} cooled down for ${Math.ceil(cooldownMs / 1000)}s: ${reason}`)
+  }
+
+  markQwenAiRiskControl(accountId: string): void {
+    this.markAccountCooldown(accountId, LoadBalancer.QWEN_AI_RISK_COOLDOWN, 'qwen_ai_risk_control')
   }
 
   /**
@@ -34,6 +82,36 @@ export class LoadBalancer {
     this.failedAccounts.delete(accountId)
   }
 
+  clearAllAccountFailures(): void {
+    this.failedAccounts.clear()
+  }
+
+  getAccountFailureSnapshot(): Record<string, AccountFailureSnapshot> {
+    const now = Date.now()
+    const snapshot: Record<string, AccountFailureSnapshot> = {}
+
+    this.failedAccounts.forEach((failure, accountId) => {
+      if (failure.cooldownUntil && failure.cooldownUntil <= now) {
+        this.failedAccounts.delete(accountId)
+        return
+      }
+
+      if (!failure.cooldownUntil && now - failure.lastFailTime > LoadBalancer.RECOVERY_TIME) {
+        this.failedAccounts.delete(accountId)
+        return
+      }
+
+      snapshot[accountId] = {
+        ...failure,
+        ...(!failure.cooldownUntil
+          ? { recoveryUntil: failure.lastFailTime + LoadBalancer.RECOVERY_TIME }
+          : {}),
+      }
+    })
+
+    return snapshot
+  }
+
   /**
    * Check if account is in failure state
    */
@@ -41,12 +119,34 @@ export class LoadBalancer {
     const failure = this.failedAccounts.get(accountId)
     if (!failure) return false
 
-    if (Date.now() - failure.lastFailTime > LoadBalancer.RECOVERY_TIME) {
+    const now = Date.now()
+    if (failure.cooldownUntil && failure.cooldownUntil > now) {
+      return true
+    }
+
+    if (failure.cooldownUntil && failure.cooldownUntil <= now) {
+      this.failedAccounts.delete(accountId)
+      return false
+    }
+
+    if (now - failure.lastFailTime > LoadBalancer.RECOVERY_TIME) {
       this.failedAccounts.delete(accountId)
       return false
     }
 
     return failure.count >= LoadBalancer.FAIL_THRESHOLD
+  }
+
+  private isAccountInHardCooldown(accountId: string): boolean {
+    const failure = this.failedAccounts.get(accountId)
+    if (!failure?.cooldownUntil) return false
+
+    if (failure.cooldownUntil <= Date.now()) {
+      this.failedAccounts.delete(accountId)
+      return false
+    }
+
+    return true
   }
 
   /**
@@ -60,9 +160,32 @@ export class LoadBalancer {
     model: string,
     strategy: LoadBalanceStrategy = 'round-robin',
     preferredProviderId?: string,
-    preferredAccountId?: string
+    preferredAccountId?: string,
+    excludedAccountIds: ReadonlySet<string> = new Set(),
+    constraints: AccountSelectionConstraints = {},
   ): AccountSelection | null {
-    const candidates = this.getAvailableAccounts(model, preferredProviderId, strategy === 'failover')
+    let candidates = this.getAvailableAccounts(
+      model,
+      preferredProviderId,
+      true,
+      excludedAccountIds,
+    )
+
+    if (constraints.qwenAiWebSessionTier === 'complete') {
+      candidates = candidates.filter(candidate => this.hasCompleteQwenAiWebSession(candidate))
+    }
+
+    if (candidates.length === 0) {
+      candidates = this.getAvailableAccounts(
+        model,
+        preferredProviderId,
+        false,
+        excludedAccountIds,
+      )
+      if (constraints.qwenAiWebSessionTier === 'complete') {
+        candidates = candidates.filter(candidate => this.hasCompleteQwenAiWebSession(candidate))
+      }
+    }
 
     if (candidates.length === 0) {
       return null
@@ -70,9 +193,34 @@ export class LoadBalancer {
 
     if (preferredAccountId) {
       const preferred = candidates.find(c => c.account.id === preferredAccountId)
-      if (preferred && !this.isAccountInFailure(preferredAccountId)) {
+      if (
+        preferred
+        && !this.isAccountInFailure(preferredAccountId)
+        && (
+          !this.isQwenAiProvider(preferred.provider)
+          || constraints.allowQueuedQwenAiPreferredAccount === true
+          || qwenAiRequestGovernor.isAccountImmediatelyAvailable(preferredAccountId)
+        )
+      ) {
         return preferred
       }
+    }
+
+    if (constraints.qwenAiWebSessionTier !== 'complete') {
+      const sessionReadyCandidates = candidates.filter(candidate => (
+        !this.hasIncompleteQwenAiWebSession(candidate)
+      ))
+      if (sessionReadyCandidates.length > 0) {
+        candidates = sessionReadyCandidates
+      }
+    }
+
+    const immediatelyAvailable = candidates.filter(candidate => (
+      !this.isQwenAiProvider(candidate.provider)
+      || qwenAiRequestGovernor.isAccountImmediatelyAvailable(candidate.account.id)
+    ))
+    if (immediatelyAvailable.length > 0) {
+      candidates = immediatelyAvailable
     }
 
     if (strategy === 'fill-first') {
@@ -92,7 +240,8 @@ export class LoadBalancer {
   private getAvailableAccounts(
     model: string,
     preferredProviderId?: string,
-    excludeFailed: boolean = false
+    excludeFailed: boolean = false,
+    excludedAccountIds: ReadonlySet<string> = new Set(),
   ): AccountSelection[] {
     const providers = storeManager.getProviders().filter(p => p.enabled)
     const candidates: AccountSelection[] = []
@@ -108,12 +257,14 @@ export class LoadBalancer {
 
       const accounts = storeManager.getAccountsByProviderId(provider.id, true)
         .filter(account => this.isAccountAvailable(account))
+        .filter(account => !excludedAccountIds.has(account.id))
+        .filter(account => !this.isAccountInHardCooldown(account.id))
         .filter(account => !excludeFailed || !this.isAccountInFailure(account.id))
 
-      console.log(`[LoadBalancer] Provider ${provider.name} (${provider.id}) has ${accounts.length} available accounts`)
+      debugLoadBalancer(`[LoadBalancer] Provider ${provider.name} (${provider.id}) has ${accounts.length} available accounts`)
 
       for (const account of accounts) {
-        console.log(`[LoadBalancer] Account ${account.name} (${account.id}) Token: ${(account.credentials.token || '').substring(0, 20)}...`)
+        debugLoadBalancer(`[LoadBalancer] Account ${account.name} (${account.id}) selected as candidate`)
         candidates.push({
           account,
           provider,
@@ -134,13 +285,14 @@ export class LoadBalancer {
       return true
     }
 
-    const normalizedModel = model.toLowerCase()
+    const normalizedModel = this.normalizeModelForProviderMatch(model).toLowerCase()
     const supported = effectiveModels.some(m => {
-      const normalizedSupported = m.displayName.toLowerCase()
+      const normalizedSupported = this.normalizeModelForProviderMatch(m.displayName).toLowerCase()
+      const normalizedActualModel = this.normalizeModelForProviderMatch(m.actualModelId).toLowerCase()
       if (normalizedSupported.endsWith('*')) {
         return normalizedModel.startsWith(normalizedSupported.slice(0, -1))
       }
-      return normalizedSupported === normalizedModel
+      return normalizedSupported === normalizedModel || normalizedActualModel === normalizedModel
     })
     
     if (supported) {
@@ -152,30 +304,56 @@ export class LoadBalancer {
     if (globalMapping) {
       if (globalMapping.preferredProviderId) {
         if (globalMapping.preferredProviderId === provider.id) {
-          console.log(`[LoadBalancer] Model "${model}" matched preferred provider ${provider.name}`)
+          debugLoadBalancer(`[LoadBalancer] Model "${model}" matched preferred provider ${provider.name}`)
           return true
         }
         return false
       }
       
       const actualModel = globalMapping.actualModel
-      const normalizedActualModel = actualModel.toLowerCase()
+      const normalizedActualModel = this.normalizeModelForProviderMatch(actualModel).toLowerCase()
       const actualSupported = effectiveModels.some(m => {
-        const normalizedSupported = m.displayName.toLowerCase()
+        const normalizedSupported = this.normalizeModelForProviderMatch(m.displayName).toLowerCase()
+        const normalizedSupportedActual = this.normalizeModelForProviderMatch(m.actualModelId).toLowerCase()
         if (normalizedSupported.endsWith('*')) {
           return normalizedActualModel.startsWith(normalizedSupported.slice(0, -1))
         }
         return normalizedSupported === normalizedActualModel
+          || normalizedSupportedActual === normalizedActualModel
       })
       
       if (actualSupported) {
-        console.log(`[LoadBalancer] Model "${model}" (actualModel: "${actualModel}") supported by ${provider.name}`)
+      debugLoadBalancer(`[LoadBalancer] Model "${model}" (actualModel: "${actualModel}") supported by ${provider.name}`)
         return true
       }
     }
-    
-    console.log(`[LoadBalancer] Provider ${provider.name} does not support model ${model}`)
+
+    debugLoadBalancer(`[LoadBalancer] Provider ${provider.name} does not support model ${model}`)
     return false
+  }
+
+  private normalizeModelForProviderMatch(model: string): string {
+    return normalizeProviderModelForMatch(model)
+  }
+
+  private isQwenAiProvider(provider: Provider): boolean {
+    return provider.id === 'qwen-ai' || provider.apiEndpoint.includes('chat.qwen.ai')
+  }
+
+  hasCompleteQwenAiWebSession(candidate: AccountSelection): boolean {
+    if (!this.isQwenAiProvider(candidate.provider)) return false
+
+    const credentials = candidate.account.credentials || {}
+    const cookies = String(credentials.cookies || credentials.cookie || '').trim()
+    return hasQwenAiSessionCookie(cookies)
+  }
+
+  private hasIncompleteQwenAiWebSession(candidate: AccountSelection): boolean {
+    if (!this.isQwenAiProvider(candidate.provider)) return false
+
+    const credentials = candidate.account.credentials || {}
+    const cookies = String(credentials.cookies || credentials.cookie || '').trim()
+    return Boolean(cookies && !hasQwenAiSessionCookie(cookies))
   }
 
   /**
@@ -197,15 +375,17 @@ export class LoadBalancer {
    * Map model name
    */
   private mapModel(model: string, provider: Provider): string {
-    console.log(`[LoadBalancer] mapModel called with model="${model}", provider="${provider.name}"`)
+    debugLoadBalancer(`[LoadBalancer] mapModel called with model="${model}", provider="${provider.name}"`)
     
     const effectiveModels = storeManager.getEffectiveModels(provider.id)
-    const effectiveModel = effectiveModels.find(m => 
-      m.displayName.toLowerCase() === model.toLowerCase()
+    const normalizedModel = this.normalizeModelForProviderMatch(model).toLowerCase()
+    const effectiveModel = effectiveModels.find(m =>
+      this.normalizeModelForProviderMatch(m.displayName).toLowerCase() === normalizedModel
+      || this.normalizeModelForProviderMatch(m.actualModelId).toLowerCase() === normalizedModel
     )
     
     if (effectiveModel) {
-      console.log(`[LoadBalancer] Model mapped from "${model}" to "${effectiveModel.actualModelId}" via effective models`)
+      debugLoadBalancer(`[LoadBalancer] Model mapped from "${model}" to "${effectiveModel.actualModelId}" via effective models`)
       return effectiveModel.actualModelId
     }
 
@@ -214,20 +394,22 @@ export class LoadBalancer {
 
     if (mapping && (!mapping.preferredProviderId || mapping.preferredProviderId === provider.id)) {
       const actualModel = mapping.actualModel
-      console.log(`[LoadBalancer] Model mapped from "${model}" to "${actualModel}" via global mapping`)
+      debugLoadBalancer(`[LoadBalancer] Model mapped from "${model}" to "${actualModel}" via global mapping`)
       
-      const actualEffectiveModel = effectiveModels.find(m => 
-        m.displayName.toLowerCase() === actualModel.toLowerCase()
+      const normalizedActualModel = this.normalizeModelForProviderMatch(actualModel).toLowerCase()
+      const actualEffectiveModel = effectiveModels.find(m =>
+        this.normalizeModelForProviderMatch(m.displayName).toLowerCase() === normalizedActualModel
+        || this.normalizeModelForProviderMatch(m.actualModelId).toLowerCase() === normalizedActualModel
       )
       if (actualEffectiveModel) {
-        console.log(`[LoadBalancer] Model further mapped from "${actualModel}" to "${actualEffectiveModel.actualModelId}" via effective models`)
+        debugLoadBalancer(`[LoadBalancer] Model further mapped from "${actualModel}" to "${actualEffectiveModel.actualModelId}" via effective models`)
         return actualEffectiveModel.actualModelId
       }
       
       return actualModel
     }
 
-    console.log(`[LoadBalancer] No mapping found, returning original model "${model}"`)
+    debugLoadBalancer(`[LoadBalancer] No mapping found, returning original model "${model}"`)
     return model
   }
 
@@ -235,7 +417,7 @@ export class LoadBalancer {
    * Round Robin strategy
    */
   private selectRoundRobin(candidates: AccountSelection[]): AccountSelection {
-    const providerIds = [...new Set(candidates.map(c => c.provider.id))]
+    const providerIds = Array.from(new Set(candidates.map(c => c.provider.id)))
     const key = providerIds.join(',')
 
     const currentIndex = this.roundRobinIndex.get(key) || 0
@@ -334,7 +516,7 @@ export class LoadBalancer {
       }
     }
 
-    return [...models]
+    return Array.from(models)
   }
 }
 

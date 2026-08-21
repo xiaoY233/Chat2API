@@ -14,5 +14,7 @@ declare module 'zstd-codec' {
     Streaming: new() => ZstdStreaming
   }
   
-  export function run(callback: (zstd: Zstd) => void): void
+  export const ZstdCodec: {
+    run(callback: (zstd: Zstd) => void): void
+  }
 }

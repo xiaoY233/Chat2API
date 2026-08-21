@@ -8,6 +8,7 @@ export function sanitizeRequestLogEntry(
   const sanitized: Omit<RequestLogEntry, 'id'> = {
     ...entry,
     userInput: truncateText(entry.userInput, 500),
+    errorCode: truncateText(entry.errorCode, 200),
     errorStack: undefined,
   }
 
@@ -34,6 +35,7 @@ export function sanitizeRequestLogUpdates(
   const sanitized: Partial<RequestLogEntry> = {
     ...updates,
     userInput: truncateText(updates.userInput, 500),
+    errorCode: truncateText(updates.errorCode, 200),
     errorStack: undefined,
   }
 

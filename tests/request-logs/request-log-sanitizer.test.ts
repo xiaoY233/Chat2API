@@ -28,6 +28,7 @@ function createEntry(overrides: Partial<RequestLogEntry> = {}): Omit<RequestLogE
     responsePreview: 'y'.repeat(64),
     userInput: 'z'.repeat(600),
     errorMessage: 'e'.repeat(80),
+    errorCode: 'c'.repeat(240),
     errorStack: 'very long stack trace',
     ...overrides,
   }
@@ -48,6 +49,8 @@ test('sanitizeRequestLogEntry redacts and truncates persisted fields', () => {
   const sanitized = sanitizeRequestLogEntry(createEntry(), createConfig())
 
   assert.equal(sanitized.errorStack, undefined)
+  assert.equal(sanitized.errorCode?.length, 223)
+  assert.match(sanitized.errorCode || '', /^c{200}\.\.\.\[truncated 40 chars\]$/)
   assert.ok(sanitized.userInput?.includes('[truncated'))
   assert.ok(sanitized.requestBody?.includes('[REDACTED]'))
   assert.ok(sanitized.requestBody?.includes('[truncated'))
@@ -70,12 +73,14 @@ test('sanitizeRequestLogUpdates applies the same persistence rules to updates', 
     {
       requestBody: JSON.stringify({ token: 'secret-token' }),
       responseBody: 'x'.repeat(128),
+      errorCode: 'qwen_ai_capacity_limit',
       errorStack: 'stack',
     },
     createConfig(),
   )
 
   assert.equal(sanitized.errorStack, undefined)
+  assert.equal(sanitized.errorCode, 'qwen_ai_capacity_limit')
   assert.ok(sanitized.requestBody?.includes('[REDACTED]'))
   assert.ok(sanitized.responseBody?.includes('[truncated'))
 })

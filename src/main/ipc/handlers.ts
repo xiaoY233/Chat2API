@@ -7,6 +7,8 @@ import { AccountManager } from '../store/accounts'
 import { ProviderChecker } from '../providers/checker'
 import { CustomProviderManager } from '../providers/custom'
 import { getBuiltinProviders, getBuiltinProvider } from '../providers/builtin'
+import { mergeProviderModelCapabilities, parseProviderModelsResponse } from '../providers/modelSync'
+import { withQwenAiModelModeAliases } from '../providers/qwen-ai-model-mode'
 import { oauthManager } from '../oauth/manager'
 import { ProxyServer } from '../proxy/server'
 import { proxyStatusManager } from '../proxy/status'
@@ -24,7 +26,7 @@ import { PerplexityAdapter } from '../proxy/adapters/perplexity'
 import { QwenAdapter } from '../proxy/adapters/qwen'
 import { QwenAiAdapter } from '../proxy/adapters/qwen-ai'
 import { ZaiAdapter } from '../proxy/adapters/zai'
-import type { Provider, Account, ProxyStatus, ProviderCheckResult, OAuthResult, AuthType, CredentialField, LogLevel, LogEntry, ProviderVendor, AppConfig } from '../../shared/types'
+import type { Provider, Account, ProxyStatus, ProviderCheckResult, OAuthResult, AuthType, CredentialField, LogLevel, LogEntry, ProviderVendor, AppConfig, ProviderModelCapability } from '../../shared/types'
 import type { SystemPrompt, SessionConfig, SessionRecord, ManagementApiConfig } from '../store/types'
 import type { ProviderType } from '../oauth/types'
 
@@ -47,6 +49,7 @@ const clearChatsHandlers: Record<string, (provider: Provider, account: Account) 
 export async function registerIpcHandlers(mainWindow: BrowserWindow | null): Promise<void> {
   try {
     await storeManager.initialize()
+    await storeManager.syncDynamicBuiltinProviderModels()
   } catch (error) {
     console.error('[IPC] Failed to initialize storage:', error)
     
@@ -271,9 +274,14 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow | null): Pro
     type?: 'builtin' | 'custom'
     authType: AuthType
     apiEndpoint: string
+    chatPath?: string
     headers?: Record<string, string>
     description?: string
     supportedModels?: string[]
+    modelMappings?: Record<string, string>
+    modelCapabilities?: Record<string, ProviderModelCapability>
+    modelsApiEndpoint?: string
+    modelsApiHeaders?: Record<string, string>
     credentialFields?: CredentialField[]
   }): Promise<Provider> => {
     return CustomProviderManager.create(data)
@@ -345,16 +353,22 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow | null): Pro
     success: boolean
     supportedModels?: string[]
     modelMappings?: Record<string, string>
+    modelCapabilities?: Record<string, ProviderModelCapability>
     error?: string
   }> => {
     try {
       const result = await ProviderChecker.fetchProviderModels(providerId)
       
       const provider = ProviderManager.getById(providerId)
+      const mergedModelCapabilities = mergeProviderModelCapabilities(
+        provider?.modelCapabilities,
+        result.modelCapabilities,
+      )
       if (provider) {
         ProviderManager.update(providerId, {
           supportedModels: result.supportedModels,
           modelMappings: result.modelMappings,
+          modelCapabilities: mergedModelCapabilities,
         })
       }
 
@@ -362,6 +376,7 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow | null): Pro
         success: true,
         supportedModels: result.supportedModels,
         modelMappings: result.modelMappings,
+        modelCapabilities: mergedModelCapabilities,
       }
     } catch (error) {
       return {
@@ -434,43 +449,26 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow | null): Pro
         }
       }
 
-      const models = response.data.data || response.data
+      const parsedModels = parseProviderModelsResponse(response.data)
+      const { supportedModels, modelMappings, modelCapabilities } = providerId === 'qwen-ai'
+        ? withQwenAiModelModeAliases(parsedModels)
+        : parsedModels
 
-      if (!Array.isArray(models) || models.length === 0) {
+      if (supportedModels.length === 0) {
         return {
           success: false,
           error: 'No models found in the response',
         }
       }
 
-      const supportedModels: string[] = []
-      const modelMappings: Record<string, string> = {}
-
-      models.forEach((model: any) => {
-        if (typeof model === 'string') {
-          supportedModels.push(model)
-          modelMappings[model] = model
-        } else if (model && typeof model === 'object') {
-          const modelId = model.id || model.model_id || model.name
-          const modelName = model.name || model.display_name || modelId
-          
-          if (modelId) {
-            supportedModels.push(modelName || modelId)
-            modelMappings[modelName || modelId] = modelId
-          }
-        }
-      })
-
-      if (supportedModels.length === 0) {
-        return {
-          success: false,
-          error: 'Failed to parse models from the response',
-        }
-      }
-
+      const mergedModelCapabilities = mergeProviderModelCapabilities(
+        provider.modelCapabilities,
+        modelCapabilities,
+      )
       ProviderManager.update(providerId, {
         supportedModels,
         modelMappings,
+        modelCapabilities: mergedModelCapabilities,
       })
 
       return {
@@ -596,6 +594,13 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow | null): Pro
           description: builtinConfig.description,
           supportedModels: builtinConfig.supportedModels || [],
           modelMappings: builtinConfig.modelMappings || {},
+          modelCapabilities: mergeProviderModelCapabilities(
+            undefined,
+            builtinConfig.modelCapabilities,
+          ),
+          credentialFields: builtinConfig.credentialFields,
+          modelsApiEndpoint: builtinConfig.modelsApiEndpoint,
+          modelsApiHeaders: builtinConfig.modelsApiHeaders,
           createdAt: Date.now(),
           updatedAt: Date.now(),
         }

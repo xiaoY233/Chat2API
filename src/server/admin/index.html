@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Chat2API Admin</title>
+    <link rel="stylesheet" href="/admin/app.css" />
+  </head>
+  <body>
+    <div id="app">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">C2</div>
+          <span>Chat2API</span>
+        </div>
+        <nav class="nav">
+          <button class="nav-item active" data-view="providers">Providers</button>
+          <button class="nav-item" data-view="apiKeys">API Keys</button>
+          <button class="nav-item" data-view="settings">Settings</button>
+        </nav>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <div>
+            <h1>Provider Management</h1>
+            <p>Manage API provider authentication and server accounts.</p>
+          </div>
+          <div class="status">
+            <span id="serverStatus" class="status-dot"></span>
+            <span id="statusText">Checking</span>
+          </div>
+        </header>
+
+        <section id="loginPanel" class="panel auth-panel">
+          <h2>Management Login</h2>
+          <p>Enter the Docker management secret to access account management.</p>
+          <form id="loginForm" class="auth-form">
+            <input id="secretInput" type="password" autocomplete="current-password" placeholder="Management secret" required />
+            <button type="submit">Unlock</button>
+          </form>
+        </section>
+
+        <section id="providersView" class="view hidden">
+          <div class="toolbar">
+            <input id="providerSearch" type="search" placeholder="Search providers..." />
+            <select id="providerFilter">
+              <option value="all">All Providers</option>
+              <option value="withAccounts">With Accounts</option>
+              <option value="builtin">Built-in</option>
+            </select>
+            <button id="refreshButton" class="secondary">Refresh</button>
+            <button id="addAccountButton">Add Account</button>
+          </div>
+
+          <div class="summary">
+            <span id="summaryTotal">Total: 0</span>
+            <span id="summaryOnline">Online: 0</span>
+            <span id="summaryAccounts">Accounts: 0</span>
+          </div>
+
+          <div id="providerGrid" class="provider-grid"></div>
+        </section>
+
+        <section id="apiKeysView" class="view hidden">
+          <div class="panel">
+            <h2>API Keys</h2>
+            <p>Use the management API to create client keys. Web creation will be added after account workflows are stable.</p>
+          </div>
+        </section>
+
+        <section id="settingsView" class="view hidden">
+          <div class="panel">
+            <h2>Server Settings</h2>
+            <p id="endpointText"></p>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <dialog id="accountDialog">
+      <form id="accountForm" method="dialog" class="dialog-card">
+        <header>
+          <h2>Add Account</h2>
+          <button id="closeDialogButton" type="button" class="icon-button">x</button>
+        </header>
+        <label>
+          Provider
+          <select id="accountProvider" required></select>
+        </label>
+        <label>
+          Account name
+          <input id="accountName" type="text" placeholder="qwen-account-1" required />
+        </label>
+        <label>
+          Email
+          <input id="accountEmail" type="email" placeholder="optional@example.com" />
+        </label>
+        <div id="credentialFields" class="credential-fields"></div>
+        <footer>
+          <button id="cancelAccountButton" type="button" class="secondary">Cancel</button>
+          <button type="submit">Save Account</button>
+        </footer>
+      </form>
+    </dialog>
+
+    <div id="toast" class="toast hidden"></div>
+    <script src="/admin/app.js" defer></script>
+  </body>
+</html>

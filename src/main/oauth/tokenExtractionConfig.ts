@@ -27,6 +27,30 @@ export const TOKEN_EXTRACTION_CONFIGS: Record<ProviderType, TokenExtractionConfi
     loginUrl: 'https://www.kimi.com',
     tokenSources: [
       {
+        type: 'localStorage',
+        key: 'access_token',
+      },
+      {
+        type: 'localStorage',
+        key: 'refresh_token',
+      },
+      {
+        type: 'localStorage',
+        key: 'accessToken',
+      },
+      {
+        type: 'localStorage',
+        key: 'refreshToken',
+      },
+      {
+        type: 'localStorage',
+        key: 'kimi-auth',
+      },
+      {
+        type: 'cookie',
+        key: 'kimi-auth',
+      },
+      {
         type: 'networkHeader',
         key: 'token',
         urlPattern: '*://*.kimi.com/*',

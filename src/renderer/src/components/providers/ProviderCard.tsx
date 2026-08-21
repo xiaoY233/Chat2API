@@ -173,7 +173,7 @@ export function ProviderCard({
                   {t('providers.manageModels')}
                 </DropdownMenuItem>
               )}
-              {isBuiltin && (provider as any).modelsApiEndpoint && (
+              {isBuiltin && provider.modelsApiEndpoint && (
                 <DropdownMenuItem onClick={() => onUpdateModels?.(provider.id)}>
                   <Download className="mr-2 h-4 w-4" />
                   {t('providers.updateModels')}

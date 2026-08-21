@@ -1,5 +1,5 @@
 import { storeManager } from '../store/store'
-import type { Provider, AuthType } from '../../shared/types'
+import type { Provider, AuthType, ProviderModelCapability } from '../../shared/types'
 import type { CredentialField } from '../store/types'
 
 export interface CustomProviderData {
@@ -8,10 +8,15 @@ export interface CustomProviderData {
   type?: 'builtin' | 'custom'
   authType: AuthType
   apiEndpoint: string
+  chatPath?: string
   headers?: Record<string, string>
   description?: string
   icon?: string
   supportedModels?: string[]
+  modelMappings?: Record<string, string>
+  modelCapabilities?: Record<string, ProviderModelCapability>
+  modelsApiEndpoint?: string
+  modelsApiHeaders?: Record<string, string>
   credentialFields?: CredentialField[]
 }
 
@@ -175,6 +180,7 @@ export class CustomProviderManager {
       type: data.type || 'custom',
       authType: data.authType,
       apiEndpoint: data.apiEndpoint.trim(),
+      chatPath: data.chatPath,
       headers: data.headers || {},
       enabled: true,
       createdAt: now,
@@ -182,6 +188,10 @@ export class CustomProviderManager {
       description: data.description?.trim(),
       icon: data.icon?.trim(),
       supportedModels: data.supportedModels || [],
+      modelMappings: data.modelMappings,
+      modelCapabilities: data.modelCapabilities,
+      modelsApiEndpoint: data.modelsApiEndpoint,
+      modelsApiHeaders: data.modelsApiHeaders,
       credentialFields: data.credentialFields,
     }
     
@@ -287,6 +297,8 @@ export class CustomProviderManager {
       description: existing.description,
       icon: existing.icon,
       supportedModels: existing.supportedModels ? [...existing.supportedModels] : [],
+      modelCapabilities: existing.modelCapabilities ? { ...existing.modelCapabilities } : undefined,
+      modelMappings: existing.modelMappings ? { ...existing.modelMappings } : undefined,
     })
   }
 
@@ -305,6 +317,8 @@ export class CustomProviderManager {
       description: provider.description,
       icon: provider.icon,
       supportedModels: provider.supportedModels,
+      modelMappings: provider.modelMappings,
+      modelCapabilities: provider.modelCapabilities,
     }
     
     return JSON.stringify(exportData, null, 2)

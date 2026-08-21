@@ -328,6 +328,7 @@ export class GLMAdapter {
           content: toolProfile.formatToolResult({
             toolCallId: msg.tool_call_id,
             content: String(msg.content || ''),
+            isError: (msg as { is_error?: boolean }).is_error === true,
           }),
         }
       }
@@ -726,6 +727,15 @@ export class GLMStreamHandler {
     let sentContent = ''
     let sentReasoning = ''
     let sentRole = false
+    let finalized = false
+
+    const failProtocol = (): boolean => {
+      const error = this.toolStreamParser?.getProtocolError()
+      if (!error) return false
+      finalized = true
+      transStream.destroy(error)
+      return true
+    }
 
     transStream.write(
       `data: ${JSON.stringify({
@@ -857,6 +867,7 @@ export class GLMStreamHandler {
             // Flush any remaining tool call buffer before finishing
             const baseChunk = createBaseChunk(this.conversationId, this.model, this.created)
             const flushChunks = this.toolStreamParser?.flush(baseChunk) ?? []
+            if (failProtocol()) return
             for (const outChunk of flushChunks) {
               transStream.write(`data: ${JSON.stringify(outChunk)}\n\n`)
             }
@@ -883,6 +894,7 @@ export class GLMStreamHandler {
                 created: this.created,
               })}\n\n`
             )
+            finalized = true
             transStream.end('data: [DONE]\n\n')
             this.onEnd?.()
           }
@@ -901,6 +913,7 @@ export class GLMStreamHandler {
       // Flush any remaining tool call buffer
       const baseChunk = createBaseChunk(this.conversationId, this.model, this.created)
       const flushChunks = this.toolStreamParser?.flush(baseChunk) ?? []
+      if (failProtocol()) return
       for (const outChunk of flushChunks) {
         transStream.write(`data: ${JSON.stringify(outChunk)}\n\n`)
       }
@@ -914,6 +927,7 @@ export class GLMStreamHandler {
           created: this.created,
         })}\n\n`
       )
+      finalized = true
       transStream.end('data: [DONE]\n\n')
       this.onEnd?.()
     })
@@ -922,9 +936,10 @@ export class GLMStreamHandler {
     stream.once('close', () => {
       console.log('[GLM] Stream closed')
       // Only send finish if we haven't already
-      if (!transStream.closed) {
+      if (!finalized && !transStream.closed) {
         const baseChunk = createBaseChunk(this.conversationId, this.model, this.created)
         const flushChunks = this.toolStreamParser?.flush(baseChunk) ?? []
+        if (failProtocol()) return
         for (const outChunk of flushChunks) {
           transStream.write(`data: ${JSON.stringify(outChunk)}\n\n`)
         }
@@ -938,6 +953,7 @@ export class GLMStreamHandler {
             created: this.created,
           })}\n\n`
         )
+        finalized = true
         transStream.end('data: [DONE]\n\n')
         this.onEnd?.()
       }

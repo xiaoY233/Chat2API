@@ -4,6 +4,7 @@ import {
   createParseResult,
   genericToolResultBlock,
   detectMarkers,
+  getMissingRequiredArguments,
   renderToolList,
   stripFencedCodeBlocks,
   toolNames,
@@ -29,6 +30,7 @@ Use Anthropic-style tool invocation only when this protocol is enabled.`
     const rawMatches: string[] = []
     const invalidToolNames: string[] = []
     const toolCalls = []
+    const toolDefinitions = new Map(context.tools.map((tool) => [tool.name, tool]))
     const blockPattern = /<antml:function_calls>([\s\S]*?)<\/antml:function_calls>/g
     let blockMatch: RegExpExecArray | null
 
@@ -45,13 +47,20 @@ Use Anthropic-style tool invocation only when this protocol is enabled.`
         }
 
         const parameters = invokeMatch[2].match(/<antml:parameters>([\s\S]*?)<\/antml:parameters>/)
+        const args = parameters ? parameters[1] : '{}'
+        const tool = toolDefinitions.get(name)
+        if (getMissingRequiredArguments(args, tool).length > 0) {
+          continue
+        }
+
         toolCalls.push(
           buildToolCall(
             `call_${toolCalls.length}`,
             toolCalls.length,
             name,
-            parameters ? parameters[1] : '{}',
+            args,
             invokeMatch[0],
+            tool,
           ),
         )
       }

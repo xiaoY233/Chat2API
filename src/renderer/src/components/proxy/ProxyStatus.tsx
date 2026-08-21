@@ -38,6 +38,7 @@ export function ProxyStatus({ onStatusChange }: ProxyStatusProps) {
   const { toast } = useToast()
   
   const [isRefreshing, setIsRefreshing] = useState(false)
+  const isDockerWebAdmin = window.__CHAT2API_WEB_ADMIN__ === true
 
   useEffect(() => {
     fetchProxyStatus()
@@ -71,6 +72,14 @@ export function ProxyStatus({ onStatusChange }: ProxyStatusProps) {
   }
 
   const handleStop = async () => {
+    if (isDockerWebAdmin) {
+      toast({
+        title: t('proxy.dockerManaged'),
+        description: t('proxy.dockerManagedDesc'),
+      })
+      return
+    }
+
     const success = await stopProxy()
     if (success) {
       toast({
@@ -211,6 +220,11 @@ export function ProxyStatus({ onStatusChange }: ProxyStatusProps) {
               <Button onClick={handleStart} disabled={isLoading}>
                 <Play className="h-4 w-4 mr-2" />
                 {t('dashboard.startProxy')}
+              </Button>
+            ) : isDockerWebAdmin ? (
+              <Button disabled variant="secondary">
+                <Server className="h-4 w-4 mr-2" />
+                {t('proxy.dockerManaged')}
               </Button>
             ) : (
               <Button

@@ -3,7 +3,7 @@
  * Defines core data structures for accounts, providers, and configuration
  */
 
-import type { ProviderStatus } from '../../shared/types'
+import type { ProviderModelCapability, ProviderStatus } from '../../shared/types'
 import type { LegacyToolPromptConfig, ToolCallingConfig } from '../../shared/toolCalling.ts'
 import { DEFAULT_TOOL_CALLING_CONFIG } from '../../shared/toolCalling.ts'
 
@@ -84,6 +84,65 @@ export type LoadBalanceStrategy = 'round-robin' | 'fill-first' | 'failover'
  */
 export type Theme = 'light' | 'dark' | 'system'
 
+/** Qwen AI tool-result conversation handling strategy. */
+export type QwenAiSessionMode = 'legacy' | 'tool-call-binding'
+
+export const DEFAULT_QWEN_AI_SESSION_MODE: QwenAiSessionMode = 'tool-call-binding'
+
+export function normalizeQwenAiSessionMode(value: unknown): QwenAiSessionMode {
+  return value === 'legacy' || value === 'tool-call-binding'
+    ? value
+    : DEFAULT_QWEN_AI_SESSION_MODE
+}
+
+export interface QwenAiGovernorConfig {
+  autoTuneEnabled: boolean
+  autoTuneMaxConcurrent: number
+  autoTuneMinGlobalIntervalMs: number
+  maxConcurrent: number
+  globalMinIntervalMs: number
+  accountMinIntervalMs: number
+  riskCooldownMs: number
+  maxRiskCooldownMs: number
+  failureCooldownMs: number
+  globalRiskCooldownMs: number
+  maxGlobalRiskCooldownMs: number
+  riskWindowMs: number
+  /**
+   * Number of distinct accounts that must hit Qwen AI risk control inside
+   * riskWindowMs before opening the provider-wide circuit.
+   */
+  globalRiskThreshold: number
+}
+
+/**
+ * Hard safety ceiling for Qwen AI concurrency settings.
+ *
+ * The adaptive governor may scale below this value based on the number of
+ * healthy accounts. Keeping a finite ceiling prevents a malformed config or
+ * an accidental environment value from creating an unbounded request fanout.
+ */
+export const MAX_QWEN_AI_CONCURRENCY = 100
+const MAX_QWEN_AI_GOVERNOR_DURATION_MS = 24 * 60 * 60 * 1000
+
+function normalizeQwenAiInteger(
+  value: unknown,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
+  const fallbackValue = Number.isInteger(fallback)
+    ? Math.min(max, Math.max(min, fallback))
+    : min
+  return Number.isInteger(value)
+    ? Math.min(max, Math.max(min, value as number))
+    : fallbackValue
+}
+
+export function normalizeQwenAiConcurrency(value: unknown, fallback: number): number {
+  return normalizeQwenAiInteger(value, fallback, 1, MAX_QWEN_AI_CONCURRENCY)
+}
+
 /**
  * Account Interface
  * Represents account configuration under a provider
@@ -150,6 +209,12 @@ export interface Provider {
   supportedModels?: string[]
   /** Model name mapping */
   modelMappings?: Record<string, string>
+  /** Model capability metadata reported by the provider */
+  modelCapabilities?: Record<string, ProviderModelCapability>
+  /** Models list API endpoint for dynamic model fetching */
+  modelsApiEndpoint?: string
+  /** Additional headers for models API request */
+  modelsApiHeaders?: Record<string, string>
   /** Provider status */
   status?: ProviderStatus
   /** Last status check time */
@@ -215,6 +280,10 @@ export interface AppConfig {
   toolCallingConfig: ToolCallingConfig
   /** Legacy migration input from pre-v2 tool prompt settings */
   toolPromptConfig?: LegacyToolPromptConfig
+  /** Qwen AI request governor configuration */
+  qwenAiGovernorConfig: QwenAiGovernorConfig
+  /** Qwen AI tool-result conversation handling strategy */
+  qwenAiSessionMode: QwenAiSessionMode
   /** Management API configuration */
   managementApi: ManagementApiConfig
   /** Context management configuration */
@@ -460,6 +529,8 @@ export interface RequestLogEntry {
 
   /** Error message */
   errorMessage?: string
+  /** Stable machine-readable error code */
+  errorCode?: string
   /** Error stack trace */
   errorStack?: string
 }
@@ -564,6 +635,8 @@ export interface ValidationResult {
   error?: string
   /** Validation time */
   validatedAt: number
+  /** Canonical credentials returned after validation or token rotation */
+  credentials?: Record<string, string>
   /** Account info (returned when validation succeeds) */
   accountInfo?: {
     name?: string
@@ -681,6 +754,122 @@ export const DEFAULT_STATISTICS: PersistentStatistics = {
 export const DEFAULT_USER_MODEL_OVERRIDES: UserModelOverrides = {}
 
 export const DEFAULT_TOOL_CALLING_CONFIG_VALUE = DEFAULT_TOOL_CALLING_CONFIG
+
+export const DEFAULT_QWEN_AI_GOVERNOR_CONFIG: QwenAiGovernorConfig = {
+  autoTuneEnabled: true,
+  autoTuneMaxConcurrent: MAX_QWEN_AI_CONCURRENCY,
+  // A one-second floor lets the adaptive policy use the account pool. Older
+  // persisted configs retain their own value during normalization.
+  autoTuneMinGlobalIntervalMs: 1000,
+  maxConcurrent: 1,
+  globalMinIntervalMs: 15000,
+  accountMinIntervalMs: 120000,
+  riskCooldownMs: 10 * 60 * 1000,
+  maxRiskCooldownMs: 30 * 60 * 1000,
+  failureCooldownMs: 2 * 60 * 1000,
+  globalRiskCooldownMs: 30 * 60 * 1000,
+  maxGlobalRiskCooldownMs: 2 * 60 * 60 * 1000,
+  riskWindowMs: 5 * 60 * 1000,
+  globalRiskThreshold: 3,
+}
+
+/**
+ * Merge a partial persisted value with defaults and clamp the two concurrency
+ * controls to the shared safety ceiling. Existing values within the range are
+ * retained verbatim so upgrading does not silently change user preferences.
+ */
+export function normalizeQwenAiGovernorConfig(
+  config?: Partial<QwenAiGovernorConfig>,
+): QwenAiGovernorConfig {
+  const merged = {
+    ...DEFAULT_QWEN_AI_GOVERNOR_CONFIG,
+    ...(config || {}),
+  }
+
+  const riskCooldownMs = normalizeQwenAiInteger(
+    merged.riskCooldownMs,
+    DEFAULT_QWEN_AI_GOVERNOR_CONFIG.riskCooldownMs,
+    0,
+    MAX_QWEN_AI_GOVERNOR_DURATION_MS,
+  )
+  const globalRiskCooldownMs = normalizeQwenAiInteger(
+    merged.globalRiskCooldownMs,
+    DEFAULT_QWEN_AI_GOVERNOR_CONFIG.globalRiskCooldownMs,
+    0,
+    MAX_QWEN_AI_GOVERNOR_DURATION_MS,
+  )
+
+  return {
+    ...merged,
+    autoTuneEnabled: typeof merged.autoTuneEnabled === 'boolean'
+      ? merged.autoTuneEnabled
+      : DEFAULT_QWEN_AI_GOVERNOR_CONFIG.autoTuneEnabled,
+    autoTuneMaxConcurrent: normalizeQwenAiConcurrency(
+      merged.autoTuneMaxConcurrent,
+      DEFAULT_QWEN_AI_GOVERNOR_CONFIG.autoTuneMaxConcurrent,
+    ),
+    autoTuneMinGlobalIntervalMs: normalizeQwenAiInteger(
+      merged.autoTuneMinGlobalIntervalMs,
+      DEFAULT_QWEN_AI_GOVERNOR_CONFIG.autoTuneMinGlobalIntervalMs,
+      0,
+      MAX_QWEN_AI_GOVERNOR_DURATION_MS,
+    ),
+    maxConcurrent: normalizeQwenAiConcurrency(
+      merged.maxConcurrent,
+      DEFAULT_QWEN_AI_GOVERNOR_CONFIG.maxConcurrent,
+    ),
+    globalMinIntervalMs: normalizeQwenAiInteger(
+      merged.globalMinIntervalMs,
+      DEFAULT_QWEN_AI_GOVERNOR_CONFIG.globalMinIntervalMs,
+      0,
+      MAX_QWEN_AI_GOVERNOR_DURATION_MS,
+    ),
+    accountMinIntervalMs: normalizeQwenAiInteger(
+      merged.accountMinIntervalMs,
+      DEFAULT_QWEN_AI_GOVERNOR_CONFIG.accountMinIntervalMs,
+      0,
+      MAX_QWEN_AI_GOVERNOR_DURATION_MS,
+    ),
+    riskCooldownMs,
+    maxRiskCooldownMs: Math.max(
+      riskCooldownMs,
+      normalizeQwenAiInteger(
+        merged.maxRiskCooldownMs,
+        DEFAULT_QWEN_AI_GOVERNOR_CONFIG.maxRiskCooldownMs,
+        0,
+        MAX_QWEN_AI_GOVERNOR_DURATION_MS,
+      ),
+    ),
+    failureCooldownMs: normalizeQwenAiInteger(
+      merged.failureCooldownMs,
+      DEFAULT_QWEN_AI_GOVERNOR_CONFIG.failureCooldownMs,
+      0,
+      MAX_QWEN_AI_GOVERNOR_DURATION_MS,
+    ),
+    globalRiskCooldownMs,
+    maxGlobalRiskCooldownMs: Math.max(
+      globalRiskCooldownMs,
+      normalizeQwenAiInteger(
+        merged.maxGlobalRiskCooldownMs,
+        DEFAULT_QWEN_AI_GOVERNOR_CONFIG.maxGlobalRiskCooldownMs,
+        0,
+        MAX_QWEN_AI_GOVERNOR_DURATION_MS,
+      ),
+    ),
+    riskWindowMs: normalizeQwenAiInteger(
+      merged.riskWindowMs,
+      DEFAULT_QWEN_AI_GOVERNOR_CONFIG.riskWindowMs,
+      1000,
+      MAX_QWEN_AI_GOVERNOR_DURATION_MS,
+    ),
+    globalRiskThreshold: normalizeQwenAiInteger(
+      merged.globalRiskThreshold,
+      DEFAULT_QWEN_AI_GOVERNOR_CONFIG.globalRiskThreshold,
+      1,
+      100,
+    ),
+  }
+}
 
 /**
  * Default Management API Configuration
@@ -813,6 +1002,8 @@ export const DEFAULT_CONFIG: AppConfig = {
   sessionConfig: DEFAULT_SESSION_CONFIG,
   toolCallingConfig: DEFAULT_TOOL_CALLING_CONFIG,
   toolPromptConfig: undefined,
+  qwenAiGovernorConfig: DEFAULT_QWEN_AI_GOVERNOR_CONFIG,
+  qwenAiSessionMode: DEFAULT_QWEN_AI_SESSION_MODE,
   managementApi: DEFAULT_MANAGEMENT_API_CONFIG,
   contextManagement: DEFAULT_CONTEXT_MANAGEMENT_CONFIG,
 }

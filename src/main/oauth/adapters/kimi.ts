@@ -4,8 +4,8 @@
  */
 
 import axios from 'axios'
-import { shell } from 'electron'
 import { BaseOAuthAdapter } from './base'
+import { getRuntime } from '../../runtime'
 import {
   OAuthResult,
   OAuthOptions,
@@ -56,14 +56,20 @@ export class KimiAdapter extends BaseOAuthAdapter {
    * Generate device ID
    */
   private generateDeviceId(): string {
-    return `${Math.floor(Math.random() * 999999999999999999) + 7000000000000000000}`
+    return `7${Array.from({ length: 18 }, () => Math.floor(Math.random() * 10)).join('')}`
   }
 
   /**
    * Generate session ID
    */
   private generateSessionId(): string {
-    return `${Math.floor(Math.random() * 99999999999999999) + 1700000000000000000}`
+    return `17${Array.from({ length: 17 }, () => Math.floor(Math.random() * 10)).join('')}`
+  }
+
+  private normalizeToken(value: unknown): string {
+    return typeof value === 'string'
+      ? value.trim().replace(/^Bearer\s+/i, '').trim()
+      : ''
   }
 
   /**
@@ -71,6 +77,7 @@ export class KimiAdapter extends BaseOAuthAdapter {
    * Reference: detectTokenType function from Kimi-Free-API
    */
   detectTokenType(token: string): 'jwt' | 'refresh' {
+    token = this.normalizeToken(token)
     if (token.startsWith('eyJ') && token.split('.').length === 3) {
       try {
         const payload = this.parseJWT(token)
@@ -84,59 +91,100 @@ export class KimiAdapter extends BaseOAuthAdapter {
     return 'refresh'
   }
 
-  /**
-   * Extract device ID from JWT token
-   */
-  private extractDeviceIdFromJWT(token: string): string | undefined {
-    const payload = this.parseJWT(token)
-    return payload?.device_id as string | undefined
+  private getCredentialTokens(credentials: Record<string, string>): {
+    accessToken: string
+    refreshToken: string
+  } {
+    const candidates = [
+      credentials.access_token,
+      credentials.accessToken,
+      credentials.token,
+      credentials.kimiAuth,
+      credentials['kimi-auth'],
+    ].map((value) => this.normalizeToken(value)).filter(Boolean)
+    const accessToken = candidates.find((value) => this.detectTokenType(value) === 'jwt') || ''
+    const refreshToken = [credentials.refreshToken, credentials.refresh_token]
+      .map((value) => this.normalizeToken(value))
+      .find(Boolean)
+      || candidates.find((value) => value !== accessToken && this.detectTokenType(value) === 'refresh')
+      || ''
+
+    return { accessToken, refreshToken }
   }
 
-  /**
-   * Extract session ID from JWT token
-   */
-  private extractSessionIdFromJWT(token: string): string | undefined {
-    const payload = this.parseJWT(token)
-    return payload?.ssid as string | undefined
-  }
+  private buildCanonicalCredentials(
+    accessToken: string,
+    refreshToken: string,
+    credentials: Record<string, string> = {},
+    extra: Record<string, string> = {},
+  ): Record<string, string> {
+    const claims = this.parseJWT(accessToken) || {}
+    const deviceId = credentials.deviceId || credentials.device_id || credentials.webId
+      || credentials.web_id || extra.deviceId
+      || (typeof claims.device_id === 'string' ? claims.device_id : this.deviceId)
+    const sessionId = credentials.sessionId || credentials.session_id || credentials.ssid
+      || extra.sessionId || (typeof claims.ssid === 'string' ? claims.ssid : this.sessionId)
+    const trafficId = credentials.trafficId || credentials.traffic_id || credentials.mshUserId
+      || credentials.msh_user_id || credentials.userId || credentials.user_id || extra.trafficId
+      || (typeof claims.sub === 'string' ? claims.sub : '')
 
-  /**
-   * Extract user ID from JWT token
-   */
-  private extractUserIdFromJWT(token: string): string | undefined {
-    const payload = this.parseJWT(token)
-    return payload?.sub as string | undefined
+    return {
+      token: accessToken,
+      accessToken,
+      ...(refreshToken ? { refreshToken } : {}),
+      ...(deviceId ? { deviceId } : {}),
+      ...(sessionId ? { sessionId } : {}),
+      ...(trafficId ? { trafficId } : {}),
+    }
   }
 
   /**
    * Get request headers
    */
-  private getHeaders(token?: string): Record<string, string> {
+  private getHeaders(token?: string, credentials: Record<string, string> = {}): Record<string, string> {
+    const normalizedToken = this.normalizeToken(token)
+    // Refresh JWTs carry the same device/session claims as access JWTs. Decode
+    // either token type so refresh requests can reuse the browser identity.
+    const claims = normalizedToken ? this.parseJWT(normalizedToken) : null
+    const deviceId = credentials.deviceId || credentials.device_id || credentials.webId
+      || credentials.web_id || (typeof claims?.device_id === 'string' ? claims.device_id : this.deviceId)
+    const sessionId = credentials.sessionId || credentials.session_id || credentials.ssid
+      || (typeof claims?.ssid === 'string' ? claims.ssid : this.sessionId)
+    const trafficId = credentials.trafficId || credentials.traffic_id || credentials.mshUserId
+      || credentials.msh_user_id || credentials.userId || credentials.user_id
+      || (typeof claims?.sub === 'string' ? claims.sub : '')
     const headers: Record<string, string> = {
       ...FAKE_HEADERS,
-      'X-Msh-Device-Id': this.deviceId,
-      'X-Msh-Session-Id': this.sessionId,
+      Referer: `${KIMI_API_BASE}/`,
+      'R-Timezone': Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai',
+      'X-Msh-Version': '2.0.0',
+      'X-Msh-Device-Id': deviceId,
+      'X-Msh-Session-Id': sessionId,
+      'X-Traffic-Id': trafficId,
       'Connect-Protocol-Version': '1',
     }
     
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`
+    if (normalizedToken) {
+      headers.Authorization = `Bearer ${normalizedToken}`
     }
     
     return headers
   }
 
   
-  private async callGrpcApi(token: string, service: string, body: object): Promise<any> {
+  private async callGrpcApi(
+    token: string,
+    service: string,
+    body: object,
+    credentials: Record<string, string> = {}
+  ): Promise<any> {
     const response = await axios.post(
       `${KIMI_API_BASE}${service}`,
       body,
       {
         headers: {
-          Authorization: `Bearer ${token}`,
+          ...this.getHeaders(token, credentials),
           'Content-Type': 'application/json',
-          'Connect-Protocol-Version': '1',
-          ...FAKE_HEADERS,
         },
         timeout: 15000,
         validateStatus: () => true,
@@ -157,7 +205,7 @@ export class KimiAdapter extends BaseOAuthAdapter {
     this.emitProgress('pending', 'Opening browser...')
     
     try {
-      await shell.openExternal(KIMI_API_BASE)
+      await getRuntime().openExternal(KIMI_API_BASE)
       this.emitProgress('pending', 'Please log in via browser and enter Token manually')
       
       return {
@@ -184,50 +232,49 @@ export class KimiAdapter extends BaseOAuthAdapter {
    */
   async loginWithToken(providerId: string, token: string): Promise<OAuthResult> {
     this.emitProgress('pending', 'Validating Token...')
-    
-    const tokenType = this.detectTokenType(token)
-    this.emitProgress('pending', `Detected token type: ${tokenType === 'jwt' ? 'JWT Access Token' : 'Unknown Token'}`)
-    
+
     try {
-      const credentials: Record<string, string> = { accessToken: token }
-      let accountInfo: Record<string, string> = {}
-      
-      if (tokenType === 'jwt') {
-        const userId = this.extractUserIdFromJWT(token)
-        const deviceId = this.extractDeviceIdFromJWT(token)
-        
-        if (deviceId) {
-          this.deviceId = deviceId
+      const normalizedToken = this.normalizeToken(token)
+      const tokenType = this.detectTokenType(normalizedToken)
+      let accessToken = tokenType === 'jwt' ? normalizedToken : ''
+      let refreshToken = tokenType === 'refresh' ? normalizedToken : ''
+      let extra: Record<string, string> = {}
+
+      if (!accessToken) {
+        this.emitProgress('pending', 'Refreshing Kimi Access Token...')
+        const refreshed = await this.refreshToken({ refreshToken })
+        if (!refreshed) {
+          return {
+            success: false,
+            providerId,
+            providerType: 'kimi',
+            error: 'Refresh Token is invalid or expired',
+          }
         }
-        
-        accountInfo = { userId: userId || '' }
+        accessToken = refreshed.value
+        refreshToken = refreshed.refreshToken || refreshToken
+        extra = refreshed.extra || {}
       }
-      
-      const userResponse = await this.callGrpcApi(token, '/apiv2/kimi.gateway.order.v1.SubscriptionService/GetSubscription', {})
-      
-      if (!userResponse || !userResponse.subscription) {
+
+      const validationCredentials = { accessToken, refreshToken, ...extra }
+      const validation = await this.validateToken(validationCredentials)
+      if (!validation.valid) {
         return {
           success: false,
           providerId,
           providerType: 'kimi',
-          error: 'Token is invalid or expired',
+          error: validation.error || 'Token is invalid or expired',
         }
       }
-      
-      accountInfo = {
-        ...accountInfo,
-        userId: userResponse.subscription?.userId || '',
-        name: userResponse.subscription?.userName || '',
-      }
-      
+
       this.emitProgress('success', 'Token validation successful')
-      
+
       return {
         success: true,
         providerId,
         providerType: 'kimi',
-        credentials,
-        accountInfo,
+        credentials: this.buildCanonicalCredentials(accessToken, refreshToken, validationCredentials, extra),
+        accountInfo: validation.accountInfo,
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error'
@@ -253,35 +300,82 @@ export class KimiAdapter extends BaseOAuthAdapter {
    * Validate token validity using gRPC API
    */
   async validateToken(credentials: Record<string, string>): Promise<TokenValidationResult> {
-    // Support multiple key variations for flexibility
-    const accessToken = credentials.accessToken || credentials.token || credentials.access_token || credentials.apiKey || credentials.api_key
-    
-    if (!accessToken) {
+    let { accessToken, refreshToken } = this.getCredentialTokens(credentials)
+    let credentialsChanged = false
+
+    if (!accessToken && !refreshToken) {
       return {
         valid: false,
-        error: 'Token cannot be empty',
+        error: 'Kimi access_token or refresh_token is required',
       }
     }
-    
-    const tokenType = this.detectTokenType(accessToken)
-    
+
     try {
-      const result = await this.callGrpcApi(accessToken, '/apiv2/kimi.gateway.order.v1.SubscriptionService/GetSubscription', {})
-      
-      if (!result || !result.subscription) {
+      const claims = accessToken ? this.parseJWT(accessToken) : null
+      const expiresAt = typeof claims?.exp === 'number' ? claims.exp : undefined
+      if ((!accessToken || (expiresAt !== undefined && expiresAt <= this.getTimestamp() + 60)) && refreshToken) {
+        const refreshed = await this.refreshToken({ ...credentials, refreshToken })
+        if (!refreshed) {
+          return { valid: false, error: 'Refresh Token expired or invalid' }
+        }
+        accessToken = refreshed.value
+        refreshToken = refreshed.refreshToken || refreshToken
+        credentialsChanged = true
+      }
+
+      if (!accessToken) {
+        return { valid: false, error: 'Access Token expired or invalid' }
+      }
+
+      let result = await this.callGrpcApi(
+        accessToken,
+        '/apiv2/kimi.gateway.order.v1.SubscriptionService/GetSubscription',
+        {},
+        credentials
+      )
+      let subscription = result?.subscription || result?.data?.subscription
+
+      // The access JWT may be revoked before its exp claim.  Retry validation
+      // once with the saved refresh token so the account dialog does not report
+      // a healthy, refreshable account as permanently invalid.
+      if (!subscription && refreshToken && !credentialsChanged) {
+        const refreshed = await this.refreshToken({ ...credentials, refreshToken })
+        if (refreshed) {
+          accessToken = refreshed.value
+          refreshToken = refreshed.refreshToken || refreshToken
+          credentialsChanged = true
+          result = await this.callGrpcApi(
+            accessToken,
+            '/apiv2/kimi.gateway.order.v1.SubscriptionService/GetSubscription',
+            {},
+            credentials,
+          )
+          subscription = result?.subscription || result?.data?.subscription
+        }
+      }
+
+      if (!subscription) {
         return {
           valid: false,
           error: 'Token is invalid or expired',
         }
       }
       
+      const nextCredentials = credentialsChanged
+        ? this.buildCanonicalCredentials(accessToken, refreshToken, credentials)
+        : undefined
+
       return {
         valid: true,
-        tokenType,
+        tokenType: 'jwt',
+        expiresAt: typeof this.parseJWT(accessToken)?.exp === 'number'
+          ? this.parseJWT(accessToken)?.exp as number
+          : undefined,
         accountInfo: {
-          userId: result.subscription?.userId || '',
-          name: result.subscription?.userName || '',
+          userId: subscription.userId || '',
+          name: subscription.userName || '',
         },
+        ...(nextCredentials ? { credentials: nextCredentials } : {}),
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Validation request failed'
@@ -292,11 +386,48 @@ export class KimiAdapter extends BaseOAuthAdapter {
     }
   }
 
-  /**
-   * Refresh token - Kimi no longer supports refresh token API
-   */
   async refreshToken(credentials: Record<string, string>): Promise<CredentialInfo | null> {
-    return null
+    const { refreshToken } = this.getCredentialTokens(credentials)
+    if (!refreshToken) return null
+
+    try {
+      const response = await axios.get(`${KIMI_API_BASE}/api/auth/token/refresh`, {
+        headers: this.getHeaders(refreshToken, credentials),
+        timeout: 15000,
+        validateStatus: () => true,
+      })
+      const responseData = response.data?.data && typeof response.data.data === 'object'
+        ? response.data.data
+        : response.data
+      const accessToken = this.normalizeToken(
+        responseData?.access_token || responseData?.accessToken || responseData?.token,
+      )
+      if (response.status !== 200 || this.detectTokenType(accessToken) !== 'jwt') {
+        return null
+      }
+
+      const claims = this.parseJWT(accessToken)
+      const rotatedRefreshToken = this.normalizeToken(
+        responseData?.refresh_token || responseData?.refreshToken,
+      ) || refreshToken
+      const deviceId = credentials.deviceId || credentials.device_id || credentials.webId
+        || credentials.web_id || (typeof claims?.device_id === 'string' ? claims.device_id : this.deviceId)
+      const sessionId = credentials.sessionId || credentials.session_id || credentials.ssid
+        || (typeof claims?.ssid === 'string' ? claims.ssid : this.sessionId)
+      const trafficId = credentials.trafficId || credentials.traffic_id || credentials.mshUserId
+        || credentials.msh_user_id || credentials.userId || credentials.user_id
+        || (typeof claims?.sub === 'string' ? claims.sub : '')
+
+      return {
+        type: 'jwt',
+        value: accessToken,
+        expiresAt: typeof claims?.exp === 'number' ? claims.exp : undefined,
+        refreshToken: rotatedRefreshToken,
+        extra: { deviceId, sessionId, trafficId },
+      }
+    } catch {
+      return null
+    }
   }
 
   /**

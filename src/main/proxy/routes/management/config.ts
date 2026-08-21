@@ -86,12 +86,11 @@ function maskConfig(config: AppConfig): Record<string, unknown> {
 router.get('/', async (ctx: Context) => {
   try {
     const config = ConfigManager.get()
-    const maskedConfig = maskConfig(config)
 
     ctx.body = {
       success: true,
-      data: maskedConfig,
-    } as ManagementApiResponse<Record<string, unknown>>
+      data: config,
+    } as ManagementApiResponse<AppConfig>
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error'
     ctx.status = 500
@@ -137,12 +136,11 @@ router.put('/', async (ctx: Context) => {
     }
 
     const updatedConfig = ConfigManager.update(updates as Partial<AppConfig>)
-    const maskedConfig = maskConfig(updatedConfig)
 
     ctx.body = {
       success: true,
-      data: maskedConfig,
-    } as ManagementApiResponse<Record<string, unknown>>
+      data: updatedConfig,
+    } as ManagementApiResponse<AppConfig>
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error'
     ctx.status = 500

@@ -1,0 +1,16 @@
+.git
+.codex
+.config
+node_modules
+out
+out-server
+out-admin
+dist
+coverage
+backup
+logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.log
+docs/screenshots

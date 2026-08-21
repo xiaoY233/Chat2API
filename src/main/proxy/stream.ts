@@ -126,11 +126,9 @@ export class SSEFormatter {
  * Stream Response Handler
  */
 export class StreamHandler {
-  private parser: SSEParser
   private formatter: SSEFormatter
 
   constructor() {
-    this.parser = new SSEParser()
     this.formatter = new SSEFormatter()
   }
 
@@ -141,12 +139,14 @@ export class StreamHandler {
   createTransformStream(
     model: string,
     responseId: string,
-    onEnd?: () => void
+    onEnd?: () => void,
+    options: { requireDoneMarker?: boolean } = {},
   ): Transform {
     let isFirstChunk = true
+    let sawDoneMarker = false
     const created = Math.floor(Date.now() / 1000)
-    const parser = this.parser
-    const formatter = this.formatter
+    const parser = new SSEParser()
+    const formatter = new SSEFormatter()
     const transformChunk = this.transformChunk.bind(this)
 
     // Tool call buffering state
@@ -162,6 +162,7 @@ export class StreamHandler {
 
           for (const event of events) {
             if (event.data === '[DONE]') {
+              sawDoneMarker = true
               // Flush any remaining buffer before done
               if (contentBuffer) {
                 const finalData = transformChunk({ content: contentBuffer }, model, responseId, created, isFirstChunk)
@@ -180,6 +181,23 @@ export class StreamHandler {
               parsedData = JSON.parse(event.data)
             } catch {
               this.push(formatter.format(event))
+              continue
+            }
+
+            if (parsedData?.error) {
+              this.push(formatter.formatJSON(parsedData))
+              continue
+            }
+
+            if (parsedData?.usage && (!Array.isArray(parsedData.choices) || parsedData.choices.length === 0)) {
+              this.push(formatter.formatJSON({
+                id: responseId,
+                object: 'chat.completion.chunk',
+                created,
+                model,
+                choices: [],
+                usage: parsedData.usage,
+              }))
               continue
             }
 
@@ -347,7 +365,9 @@ export class StreamHandler {
             }
           }
         }
-        this.push(formatter.formatDone())
+        if (!sawDoneMarker && !options.requireDoneMarker) {
+          this.push(formatter.formatDone())
+        }
         onEnd?.()
         callback()
       },
@@ -413,6 +433,7 @@ export class StreamHandler {
         delta,
         finish_reason: finishReason,
       }],
+      ...(data.usage ? { usage: data.usage } : {}),
     }
   }
 
@@ -425,6 +446,7 @@ export class StreamHandler {
     responseId: string
   ): Promise<ChatCompletionResponse> {
     return new Promise((resolve, reject) => {
+      const parser = new SSEParser()
       let content = ''
       let reasoningContent = ''
       let finishReason: ChatCompletionChoice['finish_reason'] = null
@@ -432,7 +454,7 @@ export class StreamHandler {
       const created = Math.floor(Date.now() / 1000)
 
       stream.on('data', (chunk: Buffer) => {
-        const events = this.parser.parse(chunk.toString())
+        const events = parser.parse(chunk.toString())
 
         for (const event of events) {
           if (event.data === '[DONE]') continue

@@ -50,6 +50,53 @@ function generateId(): string {
   return Date.now().toString(36) + Math.random().toString(36).substr(2)
 }
 
+async function copyTextToClipboard(text: string): Promise<boolean> {
+  try {
+    if (window.isSecureContext && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+      await navigator.clipboard.writeText(text)
+      return true
+    }
+  } catch (error) {
+    console.warn('Clipboard API copy failed:', error)
+  }
+
+  const textarea = document.createElement('textarea')
+  textarea.value = text
+  textarea.setAttribute('readonly', '')
+  textarea.style.position = 'fixed'
+  textarea.style.top = '0'
+  textarea.style.left = '0'
+  textarea.style.width = '1px'
+  textarea.style.height = '1px'
+  textarea.style.padding = '0'
+  textarea.style.border = '0'
+  textarea.style.opacity = '0'
+
+  document.body.appendChild(textarea)
+
+  const selection = window.getSelection()
+  const selectedRange = selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null
+  const activeElement = document.activeElement instanceof HTMLElement ? document.activeElement : null
+
+  textarea.focus()
+  textarea.select()
+  textarea.setSelectionRange(0, textarea.value.length)
+
+  try {
+    return document.execCommand('copy')
+  } catch (error) {
+    console.warn('Fallback clipboard copy failed:', error)
+    return false
+  } finally {
+    document.body.removeChild(textarea)
+    if (selectedRange && selection) {
+      selection.removeAllRanges()
+      selection.addRange(selectedRange)
+    }
+    activeElement?.focus()
+  }
+}
+
 export default function ApiKeysPage() {
   const { t } = useTranslation()
   const { config, updateConfig, fetchConfig } = useSettingsStore()
@@ -111,11 +158,21 @@ export default function ApiKeysPage() {
     })
   }
 
-  const handleCopyKey = (key: string) => {
-    navigator.clipboard.writeText(key)
+  const handleCopyKey = async (key: string) => {
+    const copied = await copyTextToClipboard(key)
+
+    if (copied) {
+      toast({
+        title: t('apiKeys.copied'),
+        description: t('apiKeys.copiedToClipboard'),
+      })
+      return
+    }
+
     toast({
-      title: t('apiKeys.copied'),
-      description: t('apiKeys.copiedToClipboard'),
+      title: t('logs.copyFailed'),
+      description: t('logs.unableToCopy'),
+      variant: 'destructive',
     })
   }
 

@@ -25,12 +25,16 @@ export const kimiConfig: BuiltinProviderConfig = {
     'Priority': 'u=1, i',
   },
   enabled: true,
-  description: 'Kimi K2.6 AI assistant by Moonshot, supports thinking mode and web search',
+  description: 'Kimi web assistant by Moonshot, supports K2.6, K3, thinking mode, and web search',
   supportedModels: [
     'Kimi-K2.6',
+    'Kimi-K3',
   ],
   modelMappings: {
-    'Kimi-K2.6': 'kimi-k2.6',
+    // The public model metadata exposes K2.6 as k2d6. The upstream chat
+    // request still selects its legacy SCENARIO_K2D5 backend scenario.
+    'Kimi-K2.6': 'k2d6',
+    'Kimi-K3': 'k3',
   },
   credentialFields: [
     {

@@ -4,8 +4,8 @@
  */
 
 import axios from 'axios'
-import { shell } from 'electron'
 import { BaseOAuthAdapter } from './base'
+import { getRuntime } from '../../runtime'
 import {
   OAuthResult,
   OAuthOptions,
@@ -82,7 +82,7 @@ export class GLMAdapter extends BaseOAuthAdapter {
     this.emitProgress('pending', 'Opening browser...')
     
     try {
-      await shell.openExternal(GLM_API_BASE)
+      await getRuntime().openExternal(GLM_API_BASE)
       this.emitProgress('pending', 'Please log in via browser and enter Token manually')
       
       return {

@@ -5,6 +5,7 @@ export type ToolProtocolId =
   | 'openai_chat'
   | 'managed_bracket'
   | 'managed_xml'
+  | 'qwen_hermes'
   | 'anthropic_tool_use'
   | 'codex_responses'
 
@@ -30,6 +31,7 @@ export interface NormalizedToolResult {
   toolCallId: string
   name?: string
   content: string
+  isError?: boolean
 }
 
 export interface ToolCallDiagnostics {
@@ -53,6 +55,8 @@ export interface ToolCallDiagnostics {
   toolChoiceMode?: 'auto' | 'none' | 'required' | 'forced'
   forcedToolName?: string
   allowedToolNames?: string[]
+  workflowContinuation: boolean
+  failedToolResultPending: boolean
 }
 
 export interface ToolCallingPlan {
@@ -65,6 +69,8 @@ export interface ToolCallingPlan {
   shouldParseResponse: boolean
   toolChoiceMode: 'auto' | 'none' | 'required' | 'forced'
   allowedToolNames: Set<string>
+  workflowContinuation: boolean
+  failedToolResultPending: boolean
   forcedToolName?: string
   diagnostics: ToolCallDiagnostics
 }
@@ -78,6 +84,7 @@ export interface ToolCallingTransformResult {
 export interface ToolParseContext {
   tools: NormalizedToolDefinition[]
   protocol: ToolProtocolId
+  allowPartial?: boolean
 }
 
 export interface ToolParseResult {

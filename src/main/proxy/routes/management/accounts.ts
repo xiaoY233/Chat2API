@@ -7,6 +7,16 @@ import Router from '@koa/router'
 import type { Context } from 'koa'
 import { managementAuthMiddleware } from '../../middleware/managementAuth'
 import AccountManager from '../../../store/accounts'
+import ProviderManager from '../../../store/providers'
+import { KimiAdapter } from '../../adapters/kimi'
+import { QwenAdapter } from '../../adapters/qwen'
+import { QwenAiAdapter } from '../../adapters/qwen-ai'
+import { MiniMaxAdapter } from '../../adapters/minimax'
+import { ZaiAdapter } from '../../adapters/zai'
+import { PerplexityAdapter } from '../../adapters/perplexity'
+import { DeepSeekAdapter } from '../../adapters/deepseek'
+import { GLMAdapter } from '../../adapters/glm'
+import { MimoAdapter } from '../../adapters/mimo'
 import type { 
   Account, 
   CreateAccountRequest, 
@@ -31,6 +41,14 @@ function maskCredentials(account: Account): Account {
     ...account,
     credentials: maskedCredentials,
   }
+}
+
+function shouldIncludeCredentials(ctx: Context): boolean {
+  return ctx.query.includeCredentials === 'true' || ctx.query.includeCredentials === '1'
+}
+
+function maybeMask(account: Account, includeCredentials: boolean): Account {
+  return includeCredentials ? account : maskCredentials(account)
 }
 
 /**
@@ -62,11 +80,12 @@ function createSuccessResponse<T>(data: T): ManagementApiResponse<T> {
  */
 router.get('/accounts', managementAuthMiddleware, async (ctx: Context) => {
   try {
-    const accounts = AccountManager.getAll(false)
-    const maskedAccounts = accounts.map(maskCredentials)
+    const includeCredentials = shouldIncludeCredentials(ctx)
+    const accounts = AccountManager.getAll(includeCredentials)
+    const responseAccounts = accounts.map((account) => maybeMask(account, includeCredentials))
     
     ctx.set('Content-Type', 'application/json')
-    ctx.body = createSuccessResponse(maskedAccounts)
+    ctx.body = createSuccessResponse(responseAccounts)
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Failed to get accounts'
     ctx.status = 500
@@ -81,11 +100,12 @@ router.get('/accounts', managementAuthMiddleware, async (ctx: Context) => {
 router.get('/providers/:providerId/accounts', managementAuthMiddleware, async (ctx: Context) => {
   try {
     const providerId = ctx.params.providerId
-    const accounts = AccountManager.getByProviderId(providerId, false)
-    const maskedAccounts = accounts.map(maskCredentials)
+    const includeCredentials = shouldIncludeCredentials(ctx)
+    const accounts = AccountManager.getByProviderId(providerId, includeCredentials)
+    const responseAccounts = accounts.map((account) => maybeMask(account, includeCredentials))
     
     ctx.set('Content-Type', 'application/json')
-    ctx.body = createSuccessResponse(maskedAccounts)
+    ctx.body = createSuccessResponse(responseAccounts)
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Failed to get accounts by provider'
     ctx.status = 500
@@ -101,7 +121,8 @@ router.get('/providers/:providerId/accounts', managementAuthMiddleware, async (c
 router.get('/accounts/:id', managementAuthMiddleware, async (ctx: Context) => {
   try {
     const id = ctx.params.id
-    const account = AccountManager.getById(id, false)
+    const includeCredentials = shouldIncludeCredentials(ctx)
+    const account = AccountManager.getById(id, includeCredentials)
     
     if (!account) {
       ctx.status = 404
@@ -109,9 +130,8 @@ router.get('/accounts/:id', managementAuthMiddleware, async (ctx: Context) => {
       return
     }
     
-    const maskedAccount = maskCredentials(account)
     ctx.set('Content-Type', 'application/json')
-    ctx.body = createSuccessResponse(maskedAccount)
+    ctx.body = createSuccessResponse(maybeMask(account, includeCredentials))
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Failed to get account'
     ctx.status = 500
@@ -270,6 +290,76 @@ router.post('/accounts/:id/validate', managementAuthMiddleware, async (ctx: Cont
     const errorMessage = error instanceof Error ? error.message : 'Failed to validate account'
     ctx.status = 500
     ctx.body = createErrorResponse('internal_error', errorMessage)
+  }
+})
+
+router.get('/accounts/:id/credits', managementAuthMiddleware, async (ctx: Context) => {
+  try {
+    const account = AccountManager.getById(ctx.params.id, true)
+    if (!account) {
+      ctx.status = 404
+      ctx.body = createErrorResponse('account_not_found', `Account not found: ${ctx.params.id}`)
+      return
+    }
+
+    const provider = ProviderManager.getById(account.providerId)
+    if (!provider || provider.id !== 'minimax') {
+      ctx.body = createSuccessResponse(null)
+      return
+    }
+
+    const adapter = new MiniMaxAdapter(provider, account)
+    ctx.set('Content-Type', 'application/json')
+    ctx.body = createSuccessResponse(await adapter.getCredits())
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Failed to get account credits'
+    ctx.status = 500
+    ctx.body = createErrorResponse('internal_error', errorMessage)
+  }
+})
+
+router.post('/accounts/:id/clear-chats', managementAuthMiddleware, async (ctx: Context) => {
+  try {
+    const account = AccountManager.getById(ctx.params.id, true)
+    if (!account) {
+      ctx.status = 404
+      ctx.body = createErrorResponse('account_not_found', `Account not found: ${ctx.params.id}`)
+      return
+    }
+
+    const provider = ProviderManager.getById(account.providerId)
+    if (!provider) {
+      ctx.status = 404
+      ctx.body = createErrorResponse('provider_not_found', `Provider not found: ${account.providerId}`)
+      return
+    }
+
+    const clearChatsHandlers: Record<string, () => Promise<boolean>> = {
+      kimi: () => new KimiAdapter(provider, account).deleteAllChats(),
+      qwen: () => new QwenAdapter(provider, account).deleteAllChats(),
+      'qwen-ai': () => new QwenAiAdapter(provider, account).deleteAllChats(),
+      minimax: () => new MiniMaxAdapter(provider, account).deleteAllChats(),
+      zai: () => new ZaiAdapter(provider, account).deleteAllChats(),
+      perplexity: () => new PerplexityAdapter(provider, account).deleteAllChats(),
+      deepseek: () => new DeepSeekAdapter(provider, account).deleteAllChats(),
+      glm: () => new GLMAdapter(provider, account).deleteAllChats(),
+      mimo: () => new MimoAdapter(provider, account).deleteAllChats(),
+    }
+
+    const handler = clearChatsHandlers[provider.id]
+    if (!handler) {
+      ctx.body = createSuccessResponse({
+        success: false,
+        error: 'This feature is not available for this provider',
+      })
+      return
+    }
+
+    ctx.body = createSuccessResponse({ success: await handler() })
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Failed to clear chats'
+    ctx.status = 500
+    ctx.body = createSuccessResponse({ success: false, error: errorMessage })
   }
 })
 

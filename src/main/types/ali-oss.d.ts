@@ -4,7 +4,17 @@ declare module 'ali-oss' {
     accessKeySecret: string
     bucket: string
     endpoint: string
+    region?: string
     stsToken?: string
+    authorizationV4?: boolean
+    timeout?: number
+    retryMax?: number
+    refreshSTSToken?: () => Promise<{
+      accessKeyId: string
+      accessKeySecret: string
+      stsToken: string
+    }>
+    refreshSTSTokenInterval?: number
   }
 
   interface PutResult {
@@ -15,7 +25,8 @@ declare module 'ali-oss' {
 
   class OSS {
     constructor(options: OSSOptions)
-    put(name: string, data: Buffer | string): Promise<PutResult>
+    put(name: string, data: Buffer | string | NodeJS.ReadableStream, options?: any): Promise<PutResult>
+    multipartUpload(name: string, data: Buffer | string | NodeJS.ReadableStream, options?: any): Promise<any>
   }
 
   export default OSS

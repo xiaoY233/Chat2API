@@ -111,6 +111,13 @@ export class QwenAiAdapter extends BaseOAuthAdapter {
           try {
             const userInfo = await this.getUserInfo(token)
             console.log('[QwenAi OAuth] User info:', userInfo)
+
+            if (!userInfo) {
+              return {
+                valid: false,
+                error: 'Token validation failed against chat.qwen.ai user API. Re-import token and cookies from a logged-in browser session.',
+              }
+            }
             
             if (userInfo && userInfo.is_guest === true) {
               return {
@@ -129,15 +136,10 @@ export class QwenAiAdapter extends BaseOAuthAdapter {
               },
             }
           } catch (apiError) {
-            console.log('[QwenAi OAuth] API validation failed, using JWT payload only:', apiError)
+            console.log('[QwenAi OAuth] API validation failed:', apiError)
             return {
-              valid: true,
-              tokenType: 'access',
-              accountInfo: {
-                userId: userId,
-                email: payload.email || '',
-                name: payload.name || payload.email || userId,
-              },
+              valid: false,
+              error: 'Token validation request failed. Re-import token and cookies from a logged-in browser session.',
             }
           }
         }

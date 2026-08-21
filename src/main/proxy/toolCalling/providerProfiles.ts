@@ -1,5 +1,6 @@
 import type { NormalizedToolResult, ToolProtocolId } from './types.ts'
 import { managedXmlProtocol } from './protocols/managedXml.ts'
+import { qwenHermesProtocol } from './protocols/qwenHermes.ts'
 
 export interface ProviderToolProfile {
   providerId: 'deepseek' | 'kimi' | 'glm' | 'qwen' | string
@@ -22,6 +23,18 @@ const chat2ApiXmlHistoryProfile: Omit<ProviderToolProfile, 'providerId'> = {
   },
 }
 
+const qwenAiHermesHistoryProfile: Omit<ProviderToolProfile, 'providerId'> = {
+  managedSupport: true,
+  supportsNativeTools: false,
+  preferredManagedProtocol: 'qwen_hermes',
+  formatAssistantToolCalls(calls) {
+    return qwenHermesProtocol.formatAssistantToolCalls(calls)
+  },
+  formatToolResult(result) {
+    return qwenHermesProtocol.formatToolResult(result)
+  },
+}
+
 const profiles: Record<string, ProviderToolProfile> = {
   deepseek: {
     providerId: 'deepseek',
@@ -38,6 +51,10 @@ const profiles: Record<string, ProviderToolProfile> = {
   qwen: {
     providerId: 'qwen',
     ...chat2ApiXmlHistoryProfile,
+  },
+  'qwen-ai': {
+    providerId: 'qwen-ai',
+    ...qwenAiHermesHistoryProfile,
   },
 }
 

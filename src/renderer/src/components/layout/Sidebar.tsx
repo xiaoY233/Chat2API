@@ -103,6 +103,8 @@ export function Sidebar() {
       >
         <NavLink
           to={item.href}
+          aria-label={title}
+          title={title}
           onClick={(e) => {
             if (hasBlockers && location.pathname !== item.href) {
               e.preventDefault()
@@ -112,6 +114,7 @@ export function Sidebar() {
             cn(
               'sidebar-nav-item',
               sidebarCollapsed ? 'collapsed' : 'expanded',
+              'max-md:justify-center max-md:gap-0 max-md:px-0',
               isActive ? 'active' : 'inactive'
             )
           }
@@ -119,7 +122,7 @@ export function Sidebar() {
           <item.icon className="h-5 w-5 flex-shrink-0" />
           <span
             className={cn(
-              'whitespace-nowrap transition-all duration-300',
+              'whitespace-nowrap transition-all duration-300 max-md:hidden',
               sidebarCollapsed ? 'w-0 opacity-0 overflow-hidden' : 'w-auto opacity-100'
             )}
           >
@@ -140,10 +143,11 @@ export function Sidebar() {
       <aside
         className={cn(
           'glass-sidebar flex flex-col transition-all duration-300 ease-in-out',
-          sidebarCollapsed ? 'w-[72px]' : 'w-64'
+          'max-md:!mx-2 max-md:w-14 max-md:flex-none',
+          sidebarCollapsed ? 'md:w-[72px]' : 'md:w-64'
         )}
       >
-        <nav className="flex-1 p-3 space-y-1 overflow-x-hidden overflow-y-auto pt-5">
+        <nav className="flex-1 space-y-1 overflow-x-hidden overflow-y-auto p-2 pt-5 md:p-3 md:pt-5">
           {navItems.map((item) => (
             <NavButton key={item.href} item={item} />
           ))}
@@ -151,7 +155,7 @@ export function Sidebar() {
 
         <div className="mx-4 border-t border-[var(--glass-border)] opacity-50" />
 
-        <div className="p-3 overflow-hidden flex justify-center">
+        <div className="hidden p-3 overflow-hidden justify-center md:flex">
           <button
             className="sidebar-collapse-btn"
             onClick={toggleSidebar}

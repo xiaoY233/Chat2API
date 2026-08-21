@@ -418,11 +418,17 @@ export class DeepSeekStreamHandler {
 
   private handleDone(transStream: PassThrough, isFoldModel: boolean, isSearchSilentModel: boolean): void {
     if (this.isDone) return
-    this.isDone = true
 
     // Flush tool call buffer before finishing
     const baseChunk = createBaseChunk(`${this.sessionId}@${this.messageId}`, this.model, this.created)
     const flushChunks = this.toolStreamParser?.flush(baseChunk) ?? []
+    const protocolError = this.toolStreamParser?.getProtocolError()
+    if (protocolError) {
+      this.isDone = true
+      transStream.destroy(protocolError)
+      return
+    }
+    this.isDone = true
     for (const outChunk of flushChunks) {
       transStream.write(`data: ${JSON.stringify(outChunk)}\n\n`)
     }

@@ -14,8 +14,13 @@
     "dev:win": "electron-vite dev",
     "check:source-artifacts": "node scripts/check-source-artifacts.js",
     "build": "npm run check:source-artifacts && electron-vite build",
+    "build:admin": "vite build --config vite.admin.config.ts",
+    "build:server": "npm run build:admin && vite build --config vite.server.config.ts",
     "preview": "electron-vite preview",
     "start": "electron-vite preview",
+    "start:server": "node out-server/server/index.js",
+    "test:server-compat": "npm run build:server && node tests/server/run-server-tests.mjs",
+    "test:litellm": "npm run build:server && node --test tests/litellm/integration.test.mjs",
     "start:sandbox": "electron . --no-sandbox",
     "postinstall": "electron-builder install-app-deps",
     "prebuild:check": "node scripts/prebuild-check.js",
@@ -69,6 +74,7 @@
     "zustand": "^5.0.1"
   },
   "devDependencies": {
+    "@google/genai": "^2.8.0",
     "@types/koa": "^2.15.0",
     "@types/koa-bodyparser": "^4.3.12",
     "@types/koa-router": "^7.4.8",

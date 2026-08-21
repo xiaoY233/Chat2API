@@ -400,6 +400,7 @@ export async function validateCredentials(
       valid: result.valid,
       error: result.error,
       validatedAt: Date.now(),
+      credentials: result.credentials,
       accountInfo: result.userInfo,
     }
   }

@@ -1,6 +1,8 @@
 import axios, { AxiosError } from 'axios'
 import { getBuiltinProvider } from './builtin'
-import type { Provider, ProviderCheckResult, Account } from '../../shared/types'
+import { parseProviderModelsResponse } from './modelSync'
+import { withQwenAiModelModeAliases } from './qwen-ai-model-mode'
+import type { Provider, ProviderCheckResult, Account, ProviderModelCapability } from '../../shared/types'
 import type { BuiltinProviderConfig } from '../store/types'
 
 const CHECK_TIMEOUT = 15000
@@ -8,6 +10,8 @@ const CHECK_TIMEOUT = 15000
 export interface TokenCheckResult {
   valid: boolean
   error?: string
+  /** Canonical credentials returned after a provider rotates or normalizes tokens. */
+  credentials?: Record<string, string>
   userInfo?: {
     name?: string
     email?: string
@@ -135,7 +139,7 @@ export class ProviderChecker {
       case 'glm':
         return this.checkGLMToken(account.credentials.refresh_token)
       case 'kimi':
-        return this.checkKimiToken(account.credentials.token)
+        return this.checkKimiToken(account.credentials)
       case 'minimax':
         return this.checkMiniMaxToken(
           account.credentials.realUserID || '',
@@ -144,7 +148,7 @@ export class ProviderChecker {
       case 'qwen':
         return this.checkQwenToken(account.credentials.ticket)
       case 'qwen-ai':
-        return this.checkQwenAiToken(account.credentials.token)
+        return this.checkQwenAiToken(account.credentials)
       case 'perplexity':
         return this.checkPerplexityToken(account.credentials.sessionToken || account.credentials.token)
       case 'mimo':
@@ -324,35 +328,188 @@ export class ProviderChecker {
     return { timestamp, nonce, sign }
   }
 
-  private static async checkKimiToken(token: string): Promise<TokenCheckResult> {
+  private static normalizeKimiToken(value: unknown): string {
+    return typeof value === 'string'
+      ? value.trim().replace(/^Bearer\s+/i, '').trim()
+      : ''
+  }
+
+  private static parseKimiAccessToken(token: string): Record<string, unknown> | null {
+    if (!token.startsWith('eyJ') || token.split('.').length !== 3) return null
+
     try {
-      console.log('[Kimi] Validating Token:', token.substring(0, 20) + '...')
-      
-      const response = await axios.post(
+      const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8'))
+      return payload?.app_id === 'kimi' && payload?.typ === 'access' ? payload : null
+    } catch {
+      return null
+    }
+  }
+
+  private static parseKimiTokenClaims(token: string): Record<string, unknown> | null {
+    if (!token.startsWith('eyJ') || token.split('.').length !== 3) return null
+
+    try {
+      const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8'))
+      return payload && typeof payload === 'object' ? payload : null
+    } catch {
+      return null
+    }
+  }
+
+  private static getKimiHeaders(
+    credentials: Record<string, string>,
+    token: string
+  ): Record<string, string> {
+    const claims = this.parseKimiTokenClaims(token)
+    const deviceId = credentials.deviceId || credentials.device_id || credentials.webId
+      || credentials.web_id || (typeof claims?.device_id === 'string' ? claims.device_id : '')
+    const sessionId = credentials.sessionId || credentials.session_id || credentials.ssid
+      || (typeof claims?.ssid === 'string' ? claims.ssid : '')
+    const trafficId = credentials.trafficId || credentials.traffic_id || credentials.mshUserId
+      || credentials.msh_user_id || credentials.userId || credentials.user_id
+      || (typeof claims?.sub === 'string' ? claims.sub : '')
+
+    return {
+      Authorization: `Bearer ${token}`,
+      Accept: '*/*',
+      Origin: 'https://www.kimi.com',
+      Referer: 'https://www.kimi.com/',
+      'R-Timezone': Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai',
+      'Connect-Protocol-Version': '1',
+      'x-msh-version': '2.0.0',
+      'x-msh-platform': 'web',
+      'x-msh-device-id': deviceId,
+      'x-msh-session-id': sessionId,
+      'X-Traffic-Id': trafficId,
+    }
+  }
+
+  private static async checkKimiToken(credentials: Record<string, string>): Promise<TokenCheckResult> {
+    try {
+      const accessCandidates = [
+        credentials.access_token,
+        credentials.accessToken,
+        credentials.token,
+        credentials.kimiAuth,
+        credentials['kimi-auth'],
+      ].map((value) => this.normalizeKimiToken(value)).filter(Boolean)
+      let accessToken = accessCandidates.find((value) => Boolean(this.parseKimiAccessToken(value))) || ''
+      let refreshToken = [credentials.refreshToken, credentials.refresh_token]
+        .map((value) => this.normalizeKimiToken(value))
+        .find(Boolean)
+        || accessCandidates.find((value) => value !== accessToken && !this.parseKimiAccessToken(value))
+        || ''
+      let credentialsChanged = false
+
+      const accessClaims = accessToken ? this.parseKimiAccessToken(accessToken) : null
+      const accessExpired = typeof accessClaims?.exp === 'number'
+        && accessClaims.exp <= Math.floor(Date.now() / 1000) + 60
+      if ((!accessToken || accessExpired) && refreshToken) {
+        const refreshResponse = await axios.get(
+          'https://www.kimi.com/api/auth/token/refresh',
+          {
+            headers: this.getKimiHeaders(credentials, refreshToken),
+            timeout: CHECK_TIMEOUT,
+            validateStatus: () => true,
+          }
+        )
+        const refreshData = refreshResponse.data?.data && typeof refreshResponse.data.data === 'object'
+          ? refreshResponse.data.data
+          : refreshResponse.data
+        const refreshedAccessToken = this.normalizeKimiToken(
+          refreshData?.access_token || refreshData?.accessToken || refreshData?.token,
+        )
+        if (refreshResponse.status !== 200 || !this.parseKimiAccessToken(refreshedAccessToken)) {
+          return { valid: false, error: 'Refresh Token expired or invalid' }
+        }
+        accessToken = refreshedAccessToken
+        refreshToken = this.normalizeKimiToken(
+          refreshData?.refresh_token || refreshData?.refreshToken,
+        ) || refreshToken
+        credentialsChanged = true
+      }
+
+      if (!accessToken || (accessExpired && !refreshToken)) {
+        return { valid: false, error: 'Kimi access_token or refresh_token is required' }
+      }
+
+      const requestSubscription = (token: string) => axios.post(
         'https://www.kimi.com/apiv2/kimi.gateway.order.v1.SubscriptionService/GetSubscription',
         {},
         {
           headers: {
-            Authorization: `Bearer ${token}`,
+            ...this.getKimiHeaders(credentials, token),
             'Content-Type': 'application/json',
-            'Connect-Protocol-Version': '1',
-            'Accept': '*/*',
-            'Origin': 'https://www.kimi.com',
-            'Referer': 'https://www.kimi.com/',
           },
           timeout: CHECK_TIMEOUT,
           validateStatus: () => true,
-        }
+        },
       )
-      
-      console.log('[Kimi] Response status:', response.status)
-      console.log('[Kimi] Response data:', JSON.stringify(response.data, null, 2))
-      
-      if (response.status === 200 && response.data?.subscription) {
+
+      let response = await requestSubscription(accessToken)
+      let subscription = response.data?.subscription || response.data?.data?.subscription
+
+      // An access JWT can be revoked before its exp claim.  Give the saved
+      // refresh token one chance to rotate it before reporting the account as
+      // invalid, matching the runtime adapter's 401 recovery behavior.
+      if ((!subscription || response.status === 401) && refreshToken && !credentialsChanged) {
+        const refreshResponse = await axios.get(
+          'https://www.kimi.com/api/auth/token/refresh',
+          {
+            headers: this.getKimiHeaders(credentials, refreshToken),
+            timeout: CHECK_TIMEOUT,
+            validateStatus: () => true,
+          },
+        )
+        const refreshData = refreshResponse.data?.data && typeof refreshResponse.data.data === 'object'
+          ? refreshResponse.data.data
+          : refreshResponse.data
+        const refreshedAccessToken = this.normalizeKimiToken(
+          refreshData?.access_token || refreshData?.accessToken || refreshData?.token,
+        )
+        if (refreshResponse.status === 200 && this.parseKimiAccessToken(refreshedAccessToken)) {
+          accessToken = refreshedAccessToken
+          refreshToken = this.normalizeKimiToken(
+            refreshData?.refresh_token || refreshData?.refreshToken,
+          ) || refreshToken
+          credentialsChanged = true
+          response = await requestSubscription(accessToken)
+          subscription = response.data?.subscription || response.data?.data?.subscription
+        }
+      }
+
+      if (response.status === 200 && subscription) {
+        const nextCredentials = credentialsChanged
+          ? {
+              token: accessToken,
+              accessToken,
+              ...(Object.prototype.hasOwnProperty.call(credentials, 'access_token')
+                ? { access_token: accessToken }
+                : {}),
+              ...(refreshToken ? { refreshToken } : {}),
+              ...(refreshToken && Object.prototype.hasOwnProperty.call(credentials, 'refresh_token')
+                ? { refresh_token: refreshToken }
+                : {}),
+              ...(credentials.deviceId || credentials.device_id || credentials.webId || credentials.web_id
+                ? { deviceId: credentials.deviceId || credentials.device_id || credentials.webId || credentials.web_id }
+                : {}),
+              ...(credentials.sessionId || credentials.session_id || credentials.ssid
+                ? { sessionId: credentials.sessionId || credentials.session_id || credentials.ssid }
+                : {}),
+              ...(credentials.trafficId || credentials.traffic_id || credentials.mshUserId || credentials.msh_user_id
+                || credentials.userId || credentials.user_id
+                ? {
+                    trafficId: credentials.trafficId || credentials.traffic_id || credentials.mshUserId
+                      || credentials.msh_user_id || credentials.userId || credentials.user_id,
+                  }
+                : {}),
+            }
+          : undefined
         return {
           valid: true,
+          ...(nextCredentials ? { credentials: nextCredentials } : {}),
           userInfo: {
-            name: response.data.subscription.userName,
+            name: subscription.userName,
           },
         }
       }
@@ -537,28 +694,58 @@ export class ProviderChecker {
     }
   }
 
-  private static async checkQwenAiToken(token: string): Promise<TokenCheckResult> {
+  private static getQwenAiCookieHeader(cookies: unknown): string {
+    if (typeof cookies === 'string') {
+      return cookies
+    }
+
+    if (cookies && typeof cookies === 'object' && !Array.isArray(cookies)) {
+      return Object.entries(cookies as Record<string, unknown>)
+        .filter(([, value]) => typeof value === 'string' && value)
+        .map(([key, value]) => `${key}=${value}`)
+        .join('; ')
+    }
+
+    return ''
+  }
+
+  private static async checkQwenAiToken(credentials: Record<string, unknown>): Promise<TokenCheckResult> {
+    const token = typeof credentials.token === 'string' ? credentials.token : ''
+
+    if (!token) {
+      return { valid: false, error: 'Token is required' }
+    }
+
     try {
+      const headers: Record<string, string> = {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        source: 'web',
+        Version: '0.2.67',
+        Timezone: new Date().toString().replace(/\s*\(.+\)$/, ''),
+      }
+      const cookieHeader = this.getQwenAiCookieHeader(credentials.cookies || credentials.cookie)
+      if (cookieHeader) {
+        headers.Cookie = cookieHeader
+      }
+
       const response = await axios.get(
-        'https://chat.qwen.ai/api/v2/user',
+        'https://chat.qwen.ai/api/v2/users/user/settings',
         {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json',
-            Accept: 'application/json',
-            source: 'web',
-          },
+          headers,
           timeout: CHECK_TIMEOUT,
           validateStatus: () => true,
         }
       )
 
-      if (response.status === 200 && response.data?.data) {
+      if (response.status === 200 && response.data?.success !== false && response.data?.data) {
+        const userInfo = response.data.data.user || response.data.data.user_info || response.data.data
         return {
           valid: true,
           userInfo: {
-            name: response.data.data.name || response.data.data.email,
-            email: response.data.data.email,
+            name: userInfo.name || userInfo.email,
+            email: userInfo.email,
           },
         }
       }
@@ -567,7 +754,8 @@ export class ProviderChecker {
         return { valid: false, error: 'Token expired or invalid' }
       }
 
-      return { valid: false, error: `Validation failed: HTTP ${response.status}` }
+      const upstreamError = response.data?.message || response.data?.msg || response.data?.data?.details || response.data?.data?.code
+      return { valid: false, error: `Validation failed: HTTP ${response.status}${upstreamError ? ` ${upstreamError}` : ''}` }
     } catch (error) {
       return {
         valid: false,
@@ -700,6 +888,7 @@ export class ProviderChecker {
   ): Promise<{
     supportedModels: string[]
     modelMappings: Record<string, string>
+    modelCapabilities: Record<string, ProviderModelCapability>
   }> {
     const builtinConfig = getBuiltinProvider(providerId)
     
@@ -726,18 +915,12 @@ export class ProviderChecker {
         throw new Error(`Failed to fetch models: HTTP ${response.status}`)
       }
 
-      const models = response.data.data || []
-      const supportedModels: string[] = []
-      const modelMappings: Record<string, string> = {}
+      const parsedModels = parseProviderModelsResponse(response.data)
+      const { supportedModels, modelMappings, modelCapabilities } = providerId === 'qwen-ai'
+        ? withQwenAiModelModeAliases(parsedModels)
+        : parsedModels
 
-      for (const model of models) {
-        if (model.name && model.id) {
-          supportedModels.push(model.name)
-          modelMappings[model.name] = model.id
-        }
-      }
-
-      return { supportedModels, modelMappings }
+      return { supportedModels, modelMappings, modelCapabilities }
     } catch (error) {
       console.error(`[ProviderChecker] Failed to fetch models for ${providerId}:`, error)
       throw error

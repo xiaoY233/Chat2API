@@ -288,6 +288,7 @@ export function buildMimoQuery(messages: MimoMessage[]): string {
         content: toolProfile.formatToolResult({
           toolCallId: message.tool_call_id,
           content: extractTextContent(message.content),
+          isError: (message as { is_error?: boolean }).is_error === true,
         }),
       })
       continue
@@ -743,6 +744,8 @@ export class MimoStreamHandler {
     }
 
     const flushChunks = this.toolStreamParser?.flush(this.createBaseChunk(id, created)) ?? []
+    const protocolError = this.toolStreamParser?.getProtocolError()
+    if (protocolError) throw protocolError
     for (const chunk of flushChunks) {
       yield `data: ${JSON.stringify(chunk)}\n\n`
     }

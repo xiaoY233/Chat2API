@@ -7,7 +7,7 @@
 import axios, { AxiosResponse } from 'axios'
 import { PassThrough } from 'stream'
 import { createGunzip, createInflate, createBrotliDecompress } from 'zlib'
-import * as ZstdCodec from 'zstd-codec'
+import { ZstdCodec } from 'zstd-codec'
 import { createParser } from 'eventsource-parser'
 import { Account, Provider } from '../../store/types'
 import { hasToolUse, parseToolUse, ToolCall } from '../promptToolUse'
@@ -359,6 +359,7 @@ export class QwenAdapter {
         conversationParts.push(toolProfile.formatToolResult({
           toolCallId: msg.tool_call_id,
           content: extractTextContent(msg.content),
+          isError: (msg as { is_error?: boolean }).is_error === true,
         }))
       }
     }
@@ -589,9 +590,28 @@ export class QwenStreamHandler {
 
     let buffer = ''
     let streamEnded = false
+    let decompressStream: any = stream
+
+    const failStream = (error: Error) => {
+      if (streamEnded) return
+      this.hasError = true
+      streamEnded = true
+      if (decompressStream !== stream && !decompressStream.destroyed) {
+        decompressStream.destroy(error)
+      }
+      if (!stream.destroyed) stream.destroy(error)
+      transStream.destroy(error)
+    }
+
+    const failProtocol = (): boolean => {
+      const error = this.toolStreamParser?.getProtocolError()
+      if (!error) return false
+      failStream(error)
+      return true
+    }
 
     const safeEnd = (data?: string) => {
-      if (streamEnded) return
+      if (streamEnded || failProtocol()) return
       streamEnded = true
       if (data) {
         transStream.end(data)
@@ -600,25 +620,46 @@ export class QwenStreamHandler {
       }
     }
 
-    const processBuffer = () => {
+    const failTransport = (error: unknown) => {
+      const protocolError = this.toolStreamParser?.getProtocolError()
+      failStream(protocolError ?? (error instanceof Error ? error : new Error(String(error))))
+    }
+
+    const failPrematureClose = () => {
+      const error = Object.assign(
+        new Error('Qwen upstream stream closed before end'),
+        { code: 'ERR_STREAM_PREMATURE_CLOSE' },
+      )
+      failTransport(error)
+    }
+
+    const processBuffer = (flushFinalEvent: boolean = false) => {
       while (true) {
-        const doubleNewlineIndex = buffer.indexOf('\n\n')
-        if (doubleNewlineIndex === -1) break
+        const separator = /\r?\n\r?\n/.exec(buffer)
+        let eventBlock: string
+        if (separator) {
+          eventBlock = buffer.substring(0, separator.index)
+          buffer = buffer.substring(separator.index + separator[0].length)
+        } else {
+          if (!flushFinalEvent) break
+          eventBlock = buffer
+          buffer = ''
+          if (!eventBlock.trim()) break
+        }
 
-        const eventBlock = buffer.substring(0, doubleNewlineIndex)
-        buffer = buffer.substring(doubleNewlineIndex + 2)
-
-        const lines = eventBlock.split('\n')
+        const lines = eventBlock.split(/\r?\n/)
         let eventType = 'message'
-        let eventData = ''
+        const eventDataLines: string[] = []
 
         for (const line of lines) {
           if (line.startsWith('event:')) {
             eventType = line.substring(6).trim()
           } else if (line.startsWith('data:')) {
-            eventData = line.substring(5)
+            const value = line.substring(5)
+            eventDataLines.push(value.startsWith(' ') ? value.substring(1) : value)
           }
         }
+        const eventData = eventDataLines.join('\n')
 
         if (eventData && eventData !== '[DONE]') {
           try {
@@ -741,6 +782,7 @@ export class QwenStreamHandler {
                       ...baseChunk,
                       choices: [{ index: 0, delta: { ...(!this.sentRole ? { role: 'assistant' } : {}), content: chunk }, finish_reason: null }],
                     }]
+                    if (failProtocol()) return
 
                     for (const outChunk of outputChunks) {
                       transStream.write(`data: ${JSON.stringify(outChunk)}\n\n`)
@@ -762,6 +804,7 @@ export class QwenStreamHandler {
                     // Flush any remaining tool calls
                     const baseChunk = createBaseChunk(this.responseId || this.sessionId, this.model, this.created)
                     const flushChunks = this.toolStreamParser?.flush(baseChunk) ?? []
+                    if (failProtocol()) return
                     
                     for (const outChunk of flushChunks) {
                       transStream.write(`data: ${JSON.stringify(outChunk)}\n\n`)
@@ -814,6 +857,7 @@ export class QwenStreamHandler {
             // Flush any remaining tool calls
             const baseChunk = createBaseChunk(this.responseId || this.sessionId, this.model, this.created)
             const flushChunks = this.toolStreamParser?.flush(baseChunk) ?? []
+            if (failProtocol()) return
             
             for (const outChunk of flushChunks) {
               transStream.write(`data: ${JSON.stringify(outChunk)}\n\n`)
@@ -838,8 +882,38 @@ export class QwenStreamHandler {
       }
     }
 
-    let decompressStream: any = stream
-    
+    const finishWithoutExplicitComplete = () => {
+      if (streamEnded) return
+      processBuffer(true)
+      if (streamEnded) return
+
+      const baseChunk = createBaseChunk(this.responseId || this.sessionId, this.model, this.created)
+      const flushChunks = this.toolStreamParser?.flush(baseChunk) ?? []
+      if (failProtocol()) return
+
+      for (const outChunk of flushChunks) {
+        transStream.write(`data: ${JSON.stringify(outChunk)}\n\n`)
+      }
+
+      if (!this.stopSent) {
+        this.stopSent = true
+        const finishReason = this.toolStreamParser?.hasEmittedToolCall() ? 'tool_calls' : 'stop'
+        transStream.write(
+          `data: ${JSON.stringify({
+            id: this.responseId || this.sessionId,
+            model: this.model,
+            object: 'chat.completion.chunk',
+            choices: [{ index: 0, delta: {}, finish_reason: finishReason }],
+            usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+            created: this.created,
+          })}\n\n`
+        )
+      }
+
+      safeEnd('data: [DONE]\n\n')
+      this.onEnd?.(this.sessionId)
+    }
+
     if (contentEncoding === 'gzip') {
       console.log('[Qwen] Decompressing gzip stream...')
       decompressStream = stream.pipe(createGunzip())
@@ -852,31 +926,42 @@ export class QwenStreamHandler {
     } else if (contentEncoding === 'zstd') {
       console.log('[Qwen] Decompressing zstd stream...')
       const chunks: Buffer[] = []
+      let sourceEnded = false
       stream.on('data', (chunk: Buffer) => chunks.push(chunk))
       stream.once('end', () => {
+        sourceEnded = true
         if (streamEnded) return
         try {
           const compressedData = Buffer.concat(chunks)
           ZstdCodec.run((zstd) => {
-            const simple = new zstd.Simple()
-            const decompressed = simple.decompress(compressedData)
-            const decompressedStr = Buffer.from(decompressed).toString('utf8')
-            buffer = decompressedStr
-            processBuffer()
-            safeEnd('data: [DONE]\n\n')
+            try {
+              const simple = new zstd.Simple()
+              const decompressed = simple.decompress(compressedData)
+              const decompressedStr = Buffer.from(decompressed).toString('utf8')
+              buffer = decompressedStr
+              finishWithoutExplicitComplete()
+            } catch (err) {
+              console.error('[Qwen] Zstd decompression error:', err)
+              failTransport(err)
+            }
           })
         } catch (err) {
           console.error('[Qwen] Zstd decompression error:', err)
-          safeEnd('data: [DONE]\n\n')
+          failTransport(err)
         }
       })
       stream.once('error', (err: Error) => {
         console.error('[Qwen] Stream error:', err)
-        safeEnd('data: [DONE]\n\n')
+        failTransport(err)
+      })
+      stream.once('close', () => {
+        if (!sourceEnded) failPrematureClose()
       })
       return transStream
     }
 
+    let decodedStreamEnded = false
+    let sourceStreamEnded = false
     decompressStream.on('data', (bufferChunk: Buffer) => {
       if (streamEnded) return
       buffer += bufferChunk.toString()
@@ -884,13 +969,28 @@ export class QwenStreamHandler {
     })
     decompressStream.once('error', (err: Error) => {
       console.error('[Qwen] Stream error:', err)
-      safeEnd('data: [DONE]\n\n')
+      failTransport(err)
+    })
+    if (decompressStream !== stream) {
+      stream.once('end', () => {
+        sourceStreamEnded = true
+      })
+      stream.once('error', (err: Error) => {
+        console.error('[Qwen] Source stream error:', err)
+        failTransport(err)
+      })
+      stream.once('close', () => {
+        if (!sourceStreamEnded) failPrematureClose()
+      })
+    }
+    decompressStream.once('end', () => {
+      decodedStreamEnded = true
+      console.log('[Qwen] Stream ended')
+      finishWithoutExplicitComplete()
     })
     decompressStream.once('close', () => {
       console.log('[Qwen] Stream closed')
-      if (streamEnded) return
-      processBuffer()
-      safeEnd('data: [DONE]\n\n')
+      if (!decodedStreamEnded) failPrematureClose()
     })
 
     return transStream

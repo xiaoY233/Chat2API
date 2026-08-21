@@ -10,8 +10,31 @@ import {
   Theme,
   ModelMapping,
   DEFAULT_CONFIG,
+  MAX_QWEN_AI_CONCURRENCY,
 } from './types'
 import { normalizeToolCallingConfig } from '../../shared/toolCalling'
+
+function validateNonNegativeInteger(
+  value: unknown,
+  key: string,
+  errors: string[],
+  options: { min?: number; max?: number } = {},
+): void {
+  if (value === undefined) return
+
+  if (!Number.isInteger(value)) {
+    errors.push(`${key} must be an integer`)
+    return
+  }
+
+  const min = options.min ?? 0
+  const max = options.max
+  const numberValue = value as number
+
+  if (numberValue < min || (max !== undefined && numberValue > max)) {
+    errors.push(`${key} must be between ${min}-${max ?? 'unlimited'}`)
+  }
+}
 
 /**
  * Config Manager class
@@ -336,6 +359,14 @@ export class ConfigManager {
       }
     }
 
+    if (
+      config.qwenAiSessionMode !== undefined
+      && config.qwenAiSessionMode !== 'legacy'
+      && config.qwenAiSessionMode !== 'tool-call-binding'
+    ) {
+      errors.push('qwenAiSessionMode must be one of: legacy, tool-call-binding')
+    }
+
     if (config.toolCallingConfig) {
       const normalized = normalizeToolCallingConfig(config.toolCallingConfig)
       if (
@@ -349,6 +380,103 @@ export class ConfigManager {
         !['standard-openai-tools', 'cherry-studio-mcp'].includes(String(config.toolCallingConfig.clientAdapterId))
       ) {
         errors.push('toolCallingConfig.clientAdapterId must be one of: standard-openai-tools, cherry-studio-mcp')
+      }
+    }
+
+    if (config.qwenAiGovernorConfig) {
+      if (
+        config.qwenAiGovernorConfig.autoTuneEnabled !== undefined &&
+        typeof config.qwenAiGovernorConfig.autoTuneEnabled !== 'boolean'
+      ) {
+        errors.push('qwenAiGovernorConfig.autoTuneEnabled must be a boolean')
+      }
+      validateNonNegativeInteger(
+        config.qwenAiGovernorConfig.autoTuneMaxConcurrent,
+        'qwenAiGovernorConfig.autoTuneMaxConcurrent',
+        errors,
+        { min: 1, max: MAX_QWEN_AI_CONCURRENCY },
+      )
+      validateNonNegativeInteger(
+        config.qwenAiGovernorConfig.autoTuneMinGlobalIntervalMs,
+        'qwenAiGovernorConfig.autoTuneMinGlobalIntervalMs',
+        errors,
+        { max: 24 * 60 * 60 * 1000 },
+      )
+      validateNonNegativeInteger(
+        config.qwenAiGovernorConfig.maxConcurrent,
+        'qwenAiGovernorConfig.maxConcurrent',
+        errors,
+        { min: 1, max: MAX_QWEN_AI_CONCURRENCY },
+      )
+      validateNonNegativeInteger(
+        config.qwenAiGovernorConfig.globalMinIntervalMs,
+        'qwenAiGovernorConfig.globalMinIntervalMs',
+        errors,
+        { max: 24 * 60 * 60 * 1000 },
+      )
+      validateNonNegativeInteger(
+        config.qwenAiGovernorConfig.accountMinIntervalMs,
+        'qwenAiGovernorConfig.accountMinIntervalMs',
+        errors,
+        { max: 24 * 60 * 60 * 1000 },
+      )
+      validateNonNegativeInteger(
+        config.qwenAiGovernorConfig.riskCooldownMs,
+        'qwenAiGovernorConfig.riskCooldownMs',
+        errors,
+        { max: 24 * 60 * 60 * 1000 },
+      )
+      validateNonNegativeInteger(
+        config.qwenAiGovernorConfig.maxRiskCooldownMs,
+        'qwenAiGovernorConfig.maxRiskCooldownMs',
+        errors,
+        { max: 24 * 60 * 60 * 1000 },
+      )
+      validateNonNegativeInteger(
+        config.qwenAiGovernorConfig.failureCooldownMs,
+        'qwenAiGovernorConfig.failureCooldownMs',
+        errors,
+        { max: 24 * 60 * 60 * 1000 },
+      )
+      validateNonNegativeInteger(
+        config.qwenAiGovernorConfig.globalRiskCooldownMs,
+        'qwenAiGovernorConfig.globalRiskCooldownMs',
+        errors,
+        { max: 24 * 60 * 60 * 1000 },
+      )
+      validateNonNegativeInteger(
+        config.qwenAiGovernorConfig.maxGlobalRiskCooldownMs,
+        'qwenAiGovernorConfig.maxGlobalRiskCooldownMs',
+        errors,
+        { max: 24 * 60 * 60 * 1000 },
+      )
+      validateNonNegativeInteger(
+        config.qwenAiGovernorConfig.riskWindowMs,
+        'qwenAiGovernorConfig.riskWindowMs',
+        errors,
+        { min: 1000, max: 24 * 60 * 60 * 1000 },
+      )
+      validateNonNegativeInteger(
+        config.qwenAiGovernorConfig.globalRiskThreshold,
+        'qwenAiGovernorConfig.globalRiskThreshold',
+        errors,
+        { min: 1, max: 100 },
+      )
+
+      if (
+        typeof config.qwenAiGovernorConfig.riskCooldownMs === 'number' &&
+        typeof config.qwenAiGovernorConfig.maxRiskCooldownMs === 'number' &&
+        config.qwenAiGovernorConfig.maxRiskCooldownMs < config.qwenAiGovernorConfig.riskCooldownMs
+      ) {
+        errors.push('qwenAiGovernorConfig.maxRiskCooldownMs must be greater than or equal to riskCooldownMs')
+      }
+
+      if (
+        typeof config.qwenAiGovernorConfig.globalRiskCooldownMs === 'number' &&
+        typeof config.qwenAiGovernorConfig.maxGlobalRiskCooldownMs === 'number' &&
+        config.qwenAiGovernorConfig.maxGlobalRiskCooldownMs < config.qwenAiGovernorConfig.globalRiskCooldownMs
+      ) {
+        errors.push('qwenAiGovernorConfig.maxGlobalRiskCooldownMs must be greater than or equal to globalRiskCooldownMs')
       }
     }
     
