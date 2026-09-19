@@ -34,7 +34,7 @@ declare module 'electron' {
   }
 }
 
-const gotTheLock = app.requestSingleInstanceLock()
+const gotTheLock = process.env.C2A_DEBUG_PORT ? true : app.requestSingleInstanceLock()
 
 if (!gotTheLock) {
   app.quit()

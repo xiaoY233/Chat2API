@@ -28,7 +28,7 @@ export function normalizeRequestLogConfig(config?: Partial<RequestLogConfig>): R
   return {
     enabled: true,
     maxEntries: 200,
-    includeBodies: false,
+    includeBodies: true,
     maxBodyChars: 8000,
     redactSensitiveData: true,
     ...config,

@@ -76,9 +76,10 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow | null): Pro
 
   // Check if auto-start proxy is needed
   const config = storeManager.getConfig()
-  if (config.autoStartProxy) {
+  const debugPortOverride = process.env.C2A_DEBUG_PORT
+  if (config.autoStartProxy || debugPortOverride) {
     console.log('[App] Auto-starting proxy service...')
-    const proxyPort = config.proxyPort
+    const proxyPort = debugPortOverride ? Number(debugPortOverride) : config.proxyPort
     const proxyHost = config.proxyHost || '127.0.0.1'
     try {
       proxyServer = new ProxyServer()

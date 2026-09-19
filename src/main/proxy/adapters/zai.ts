@@ -11,6 +11,8 @@ import FormData from 'form-data'
 import { Account, Provider } from '../../store/types'
 import { hasToolUse, parseToolUse, ToolCall } from '../promptToolUse'
 import { parseToolCallsFromText } from '../utils/toolParser'
+import { ToolStreamParser } from '../toolCalling/ToolStreamParser'
+import type { ToolCallingPlan } from '../toolCalling/types'
 import { 
   createToolCallState, 
   processStreamContent, 
@@ -580,12 +582,14 @@ export class ZaiStreamHandler {
   private streamEnded: boolean = false
   private citationBuffer: { value: string } = { value: '' }
   private thinkingCitationBuffer: { value: string } = { value: '' }
+  private toolParser?: ToolStreamParser
 
-  constructor(model: string, onEnd?: (chatId: string) => void) {
+  constructor(model: string, onEnd?: (chatId: string) => void, plan?: ToolCallingPlan) {
     this.model = model
     this.created = Math.floor(Date.now() / 1000)
     this.onEnd = onEnd
     this.toolCallState = createToolCallState()
+    this.toolParser = plan?.shouldParseResponse ? new ToolStreamParser(plan) : undefined
   }
 
   setChatId(chatId: string) {
@@ -720,32 +724,57 @@ export class ZaiStreamHandler {
             
             // Process tool call interception
             const baseChunk = createBaseChunk(this.chatId, this.model, this.created)
-            const { chunks: outputChunks } = processStreamContent(
-              cleanedContent, 
-              this.toolCallState, 
-              baseChunk, 
-              !this.sentRole && !this.sentThinkingRole,
-              'zai'
-            )
 
-            for (const outChunk of outputChunks) {
-              transStream.write(`data: ${JSON.stringify(outChunk)}\n\n`)
+            if (this.toolParser) {
+              const outputChunks = this.toolParser.push(
+                cleanedContent,
+                baseChunk,
+                !this.sentRole && !this.sentThinkingRole,
+              )
+              for (const outChunk of outputChunks) {
+                transStream.write(`data: ${JSON.stringify(outChunk)}\n\n`)
+                if (outChunk?.choices?.[0]?.delta?.tool_calls) this.toolCallsSent = true
+              }
+              if (outputChunks.length > 0) this.sentRole = true
+            } else {
+              const { chunks: outputChunks } = processStreamContent(
+                cleanedContent,
+                this.toolCallState,
+                baseChunk,
+                !this.sentRole && !this.sentThinkingRole,
+                'zai'
+              )
+
+              for (const outChunk of outputChunks) {
+                transStream.write(`data: ${JSON.stringify(outChunk)}\n\n`)
+              }
+
+              if (outputChunks.length > 0) this.sentRole = true
             }
-
-            if (outputChunks.length > 0) this.sentRole = true
           } else if (result.phase === 'done' && result.done) {
             console.log('[Z.ai] Stream finished, content length:', this.content.length)
             
             // Flush any remaining tool calls
             const baseChunk = createBaseChunk(this.chatId, this.model, this.created)
-            const flushChunks = flushToolCallBuffer(this.toolCallState, baseChunk, 'zai')
-            
-            for (const outChunk of flushChunks) {
-              transStream.write(`data: ${JSON.stringify(outChunk)}\n\n`)
+
+            let flushChunks: any[] = []
+            if (this.toolParser) {
+              flushChunks = this.toolParser.flush(baseChunk)
+              for (const outChunk of flushChunks) {
+                transStream.write(`data: ${JSON.stringify(outChunk)}\n\n`)
+                if (outChunk?.choices?.[0]?.delta?.tool_calls) this.toolCallsSent = true
+              }
+            } else {
+              flushChunks = flushToolCallBuffer(this.toolCallState, baseChunk, 'zai')
+              for (const outChunk of flushChunks) {
+                transStream.write(`data: ${JSON.stringify(outChunk)}\n\n`)
+              }
             }
             
             // Check if we emitted tool calls
-            const finishReason = this.toolCallState.hasEmittedToolCall ? 'tool_calls' : 'stop'
+            const finishReason = this.toolParser
+              ? (this.toolCallsSent ? 'tool_calls' : 'stop')
+              : (this.toolCallState.hasEmittedToolCall ? 'tool_calls' : 'stop')
             
             const usage = result.usage || { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 }
             

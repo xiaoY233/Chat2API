@@ -199,6 +199,8 @@ export interface AppConfig {
   logRetentionDays: number
   /** Request log persistence configuration */
   requestLogConfig: RequestLogConfig
+  /** One-shot flag: old builds defaulted to hiding request/response bodies, this flips them on once */
+  requestLogBodiesMigrated?: boolean
   /** Request timeout (milliseconds) */
   requestTimeout: number
   /** Retry count */
@@ -706,7 +708,7 @@ export const DEFAULT_CONTEXT_MANAGEMENT_CONFIG: ContextManagementConfig = {
 export const DEFAULT_REQUEST_LOG_CONFIG: RequestLogConfig = {
   enabled: true,
   maxEntries: 200,
-  includeBodies: false,
+  includeBodies: true,
   maxBodyChars: 8000,
   redactSensitiveData: true,
 }

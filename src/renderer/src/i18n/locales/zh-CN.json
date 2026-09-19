@@ -612,6 +612,7 @@
     "tabError": "错误",
     "tabResponse": "响应",
     "responseBody": "响应内容",
+    "responsePreview": "响应摘要",
     "webSearch": "网络搜索",
     "reasoningEffort": "深度思考",
     "logDetails": "日志详情",

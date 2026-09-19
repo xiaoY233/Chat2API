@@ -40,7 +40,7 @@ export function DataManagement() {
   const requestLogConfig = config?.requestLogConfig ?? {
     enabled: true,
     maxEntries: 200,
-    includeBodies: false,
+    includeBodies: true,
     maxBodyChars: 8000,
     redactSensitiveData: true,
   }

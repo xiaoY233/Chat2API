@@ -8,7 +8,9 @@ import axios, { AxiosResponse } from 'axios'
 import { PassThrough } from 'stream'
 import { createParser } from 'eventsource-parser'
 import { Account, Provider } from '../../store/types'
-import { hasToolUse, parseToolUse, ToolCall } from '../promptToolUse'
+import { getProviderToolProfile } from '../toolCalling/providerProfiles'
+import type { ToolCallingPlan } from '../toolCalling/types'
+import { ToolStreamParser } from '../toolCalling/ToolStreamParser'
 
 const QWEN_AI_BASE = 'https://chat.qwen.ai'
 
@@ -43,8 +45,25 @@ const MODEL_ALIASES: Record<string, string> = {
 }
 
 interface QwenAiMessage {
-  role: 'user' | 'assistant' | 'system'
-  content: string
+  role: 'user' | 'assistant' | 'system' | 'tool'
+  content: string | Array<{ type: string; text?: string }>
+  tool_calls?: Array<{
+    id: string
+    type?: string
+    function: { name: string; arguments: string }
+  }>
+  tool_call_id?: string
+}
+
+function extractTextContent(content: string | Array<{ type: string; text?: string }>): string {
+  if (typeof content === 'string') return content
+  if (Array.isArray(content)) {
+    return content
+      .filter((item) => item.type === 'text')
+      .map((item) => item.text || '')
+      .join('\n')
+  }
+  return ''
 }
 
 interface ChatCompletionRequest {
@@ -64,6 +83,21 @@ function uuid(): string {
     const r = (Math.random() * 16) | 0
     const v = c === 'x' ? r : (r & 0x3) | 0x8
     return v.toString(16)
+  })
+}
+
+/** Drain a stream into a string (bounded), used to surface upstream error bodies. */
+function drainStream(stream: any, limit: number): Promise<string> {
+  return new Promise((resolve) => {
+    let text = ''
+    const finish = () => resolve(text)
+    stream.on('data', (chunk: any) => {
+      if (text.length < limit) {
+        text += Buffer.from(chunk).toString('utf-8')
+      }
+    })
+    stream.on('end', finish)
+    stream.on('error', finish)
   })
 }
 
@@ -261,20 +295,51 @@ export class QwenAiAdapter {
     console.log('[QwenAI] Created new chat:', chatId)
 
     const messages = request.messages
-    
-    // Extract system message and user message
+
+    // Build a multi-turn transcript.
+    // The upstream chat is recreated for every request, so the whole conversation
+    // (including assistant tool calls and tool results) has to be flattened into
+    // the single user message we send. Without this, a tool-calling client loop
+    // (OpenClaw / Claude Code / Cline) can never feed tool results back.
+    const toolProfile = getProviderToolProfile(this.provider?.id || 'qwen-ai')
+
     let systemContent = ''
-    let userContent = ''
-    
-    // Single-turn mode: extract all messages
+    const conversationParts: string[] = []
+
     for (const msg of messages) {
+      const text = extractTextContent(msg.content)
+
       if (msg.role === 'system') {
-        systemContent += (systemContent ? '\n\n' : '') + msg.content
+        systemContent += (systemContent ? '\n\n' : '') + text
       } else if (msg.role === 'user') {
-        userContent = msg.content
+        conversationParts.push(text)
+      } else if (msg.role === 'assistant') {
+        if (msg.tool_calls && msg.tool_calls.length > 0) {
+          conversationParts.push(
+            toolProfile.formatAssistantToolCalls(
+              msg.tool_calls.map((call) => ({
+                id: call.id,
+                name: call.function?.name || '',
+                arguments: call.function?.arguments || '{}',
+              })),
+            ),
+          )
+          if (text) conversationParts.push(`Assistant: ${text}`)
+        } else if (text) {
+          conversationParts.push(`Assistant: ${text}`)
+        }
+      } else if (msg.role === 'tool') {
+        conversationParts.push(
+          toolProfile.formatToolResult({
+            toolCallId: msg.tool_call_id || 'call_unknown',
+            content: text,
+          }),
+        )
       }
     }
-    
+
+    let userContent = conversationParts.join('\n\n')
+
     // If system prompt exists, prepend it to user content
     if (systemContent) {
       userContent = `${systemContent}\n\nUser: ${userContent}`
@@ -354,11 +419,36 @@ export class QwenAiAdapter {
     console.log('[QwenAI] Response status:', response.status)
     console.log('[QwenAI] Response headers:', JSON.stringify(response.headers, null, 2))
 
+    // Surface upstream failures instead of silently returning an empty answer.
+    // When the session is rejected (or the API contract drifts) Qwen answers with
+    // a plain JSON error body while still replying 200. The SSE parser then finds
+    // no events at all and the caller gets an empty 200, which is impossible to
+    // diagnose from the outside. Read it out and fail loudly.
+    await this.assertEventStream(response)
+
     return {
       response,
       chatId,
       parentId: null,
     }
+  }
+
+  /**
+   * Verify the upstream really answered with an SSE stream.
+   * Anything else (JSON error body, HTML challenge page, ...) is drained and
+   * re-thrown so the client sees the real reason.
+   */
+  private async assertEventStream(response: AxiosResponse): Promise<void> {
+    const contentType = String(response.headers?.['content-type'] || '').toLowerCase()
+    if (!contentType) return // unknown: let the stream parser deal with it
+    if (contentType.includes('event-stream') || contentType.includes('text/plain')) return
+    if (response.status >= 400) return // already handled by the caller
+
+    const body = await drainStream(response.data, 2000)
+    console.error('[QwenAI] Upstream returned non-stream body:', contentType, body.slice(0, 400))
+    throw new Error(
+      `Qwen upstream did not return an SSE stream (HTTP ${response.status}, content-type: ${contentType}): ${body.slice(0, 300)}`,
+    )
   }
 
   static isQwenAiProvider(provider: Provider): boolean {
@@ -374,67 +464,80 @@ export class QwenAiStreamHandler {
   private responseId: string = ''
   private content: string = ''
   private toolCallsSent: boolean = false
+  private toolParser: ToolStreamParser | null = null
+  private streamFinished: boolean = false
 
-  constructor(model: string, onEnd?: (chatId: string) => void) {
+  constructor(model: string, onEnd?: (chatId: string) => void, plan?: ToolCallingPlan) {
     this.model = model
     this.created = Math.floor(Date.now() / 1000)
     this.onEnd = onEnd
+    this.toolParser = plan && plan.shouldParseResponse ? new ToolStreamParser(plan) : null
   }
 
   setChatId(chatId: string) {
     this.chatId = chatId
   }
 
-  private sendToolCalls(transStream: PassThrough): void {
-    if (this.toolCallsSent) return
-    
-    const toolCalls = parseToolUse(this.content)
-    if (toolCalls && toolCalls.length > 0) {
-      this.toolCallsSent = true
-      
-      // Send tool_calls delta
-      for (let i = 0; i < toolCalls.length; i++) {
-        const tc = toolCalls[i]
-        transStream.write(
-          `data: ${JSON.stringify({
-            id: this.responseId || this.chatId,
-            model: this.model,
-            object: 'chat.completion.chunk',
-            choices: [{
-              index: 0,
-              delta: {
-                tool_calls: [{
-                  index: i,
-                  id: tc.id,
-                  type: 'function',
-                  function: {
-                    name: tc.function.name,
-                    arguments: tc.function.arguments,
-                  },
-                }],
-              },
-              finish_reason: null,
-            }],
-            created: this.created,
-          })}\n\n`
-        )
-      }
-      
-      // Send finish with tool_calls
+  private baseChunk(): any {
+    return {
+      id: this.responseId || this.chatId,
+      model: this.model,
+      object: 'chat.completion.chunk',
+      created: this.created,
+    }
+  }
+
+  /**
+   * Emit a content delta, routing through the managed tool parser when the
+   * request declared tools. The parser buffers partial tool markers and only
+   * releases tool_calls once a complete block has arrived.
+   */
+  private emitAnswerDelta(transStream: PassThrough, content: string): void {
+    if (!content) return
+
+    if (!this.toolParser) {
       transStream.write(
         `data: ${JSON.stringify({
-          id: this.responseId || this.chatId,
-          model: this.model,
-          object: 'chat.completion.chunk',
-          choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }],
-          usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-          created: this.created,
-        })}\n\n`
+          ...this.baseChunk(),
+          choices: [{ index: 0, delta: { content }, finish_reason: null }],
+        })}\n\n`,
       )
-      transStream.end('data: [DONE]\n\n')
-      if (this.onEnd && this.chatId) {
-        this.onEnd(this.chatId)
+      return
+    }
+
+    for (const chunk of this.toolParser.push(content, this.baseChunk(), false)) {
+      transStream.write(`data: ${JSON.stringify(chunk)}\n\n`)
+      const delta = chunk?.choices?.[0]?.delta
+      if (delta?.tool_calls) this.toolCallsSent = true
+    }
+  }
+
+  /** Flush anything the tool parser still holds and close the stream. */
+  private finishStream(transStream: PassThrough): void {
+    if (this.streamFinished) return
+    this.streamFinished = true
+    if (this.toolParser) {
+      for (const chunk of this.toolParser.flush(this.baseChunk())) {
+        transStream.write(`data: ${JSON.stringify(chunk)}\n\n`)
+        const delta = chunk?.choices?.[0]?.delta
+        if (delta?.tool_calls) this.toolCallsSent = true
       }
+    }
+
+    const finishReason = this.toolCallsSent ? 'tool_calls' : 'stop'
+    transStream.write(
+      `data: ${JSON.stringify({
+        ...this.baseChunk(),
+        choices: [{ index: 0, delta: {}, finish_reason: finishReason }],
+        ...(this.toolCallsSent
+          ? { usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } }
+          : {}),
+      })}\n\n`,
+    )
+    transStream.end('data: [DONE]\n\n')
+
+    if (this.onEnd && this.chatId) {
+      this.onEnd(this.chatId)
     }
   }
 
@@ -560,61 +663,21 @@ export class QwenAiStreamHandler {
                 sendInitialChunk()
               }
               console.log('[QwenAI] Entering answer branch, content:', content)
-              
+
               // Accumulate content for tool call detection
               this.content += content
-              
-              if (content) {
-                console.log('[QwenAI] Sending content chunk:', content)
-                const chunk = {
-                  id: this.responseId || this.chatId,
-                  model: this.model,
-                  object: 'chat.completion.chunk',
-                  choices: [{ index: 0, delta: { content }, finish_reason: null }],
-                  created: this.created,
-                }
-                transStream.write(`data: ${JSON.stringify(chunk)}\n\n`)
-                console.log('[QwenAI] Content chunk written')
-              }
+              this.emitAnswerDelta(transStream, content)
             } else if (phase === null && content) {
               if (!initialChunkSent) {
                 sendInitialChunk()
               }
               // Accumulate content for tool call detection
               this.content += content
-              
-              const chunk = {
-                id: this.responseId || this.chatId,
-                model: this.model,
-                object: 'chat.completion.chunk',
-                choices: [{ index: 0, delta: { content }, finish_reason: null }],
-                created: this.created,
-              }
-              transStream.write(`data: ${JSON.stringify(chunk)}\n\n`)
+              this.emitAnswerDelta(transStream, content)
             }
 
             if (status === 'finished' && (phase === 'answer' || phase === null)) {
-              // Check for tool calls before sending stop
-              if (hasToolUse(this.content)) {
-                console.log('[QwenAI] Found tool_use in stream, sending tool_calls')
-                this.sendToolCalls(transStream)
-                return
-              }
-              
-              const finishReason = delta.finish_reason || 'stop'
-              const finalChunk = {
-                id: this.responseId || this.chatId,
-                model: this.model,
-                object: 'chat.completion.chunk',
-                choices: [{ index: 0, delta: {}, finish_reason: finishReason }],
-                created: this.created,
-              }
-              transStream.write(`data: ${JSON.stringify(finalChunk)}\n\n`)
-              transStream.end('data: [DONE]\n\n')
-
-              if (this.onEnd && this.chatId) {
-                this.onEnd(this.chatId)
-              }
+              this.finishStream(transStream)
             }
           }
         } catch (err) {
@@ -630,11 +693,13 @@ export class QwenAiStreamHandler {
     })
     stream.once('error', (err: Error) => {
       console.error('[QwenAI] Stream error:', err)
-      transStream.end('data: [DONE]\n\n')
+      this.finishStream(transStream)
     })
     stream.once('close', () => {
       console.log('[QwenAI] Stream closed')
-      transStream.end('data: [DONE]\n\n')
+      // Upstream closed without a terminal status - still close cleanly so
+      // OpenAI-compatible clients do not hang or see a truncated stream.
+      this.finishStream(transStream)
     })
 
     return transStream

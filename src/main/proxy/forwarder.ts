@@ -841,7 +841,7 @@ export class RequestForwarder {
         }
       }
 
-      const handler = new QwenAiStreamHandler(actualModel)
+      const handler = new QwenAiStreamHandler(actualModel, undefined, transformed.plan)
       handler.setChatId(chatId)
 
       if (request.stream) {
@@ -942,7 +942,7 @@ export class RequestForwarder {
           }
         : undefined
 
-      const handler = new ZaiStreamHandler(actualModel, deleteChatCallback)
+      const handler = new ZaiStreamHandler(actualModel, deleteChatCallback, transformed.plan)
       handler.setChatId(chatId)
       
       if (request.stream === true) {

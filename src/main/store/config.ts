@@ -61,6 +61,12 @@ export class ConfigManager {
    * Get proxy port
    */
   static getProxyPort(): number {
+    // Debug override: allows running a second instance on a side port without
+    // touching the user's real configuration.
+    if (process.env.C2A_DEBUG_PORT) {
+      const p = Number(process.env.C2A_DEBUG_PORT)
+      if (p > 0 && p < 65536) return p
+    }
     const config = this.get()
     return config.proxyPort
   }

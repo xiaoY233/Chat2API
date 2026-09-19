@@ -297,6 +297,20 @@ export function RequestLogDetail({ log, onClose }: RequestLogDetailProps) {
 
             {/* Response Tab */}
             <TabsContent value="response" className="mt-0">
+              {log.responsePreview && (
+                <div className="mb-5">
+                  <SectionHeader
+                    title={t('logs.responsePreview')}
+                    icon={<FileJson className="h-4 w-4" />}
+                    copyText={log.responsePreview}
+                  />
+                  <div className="p-4 bg-muted/30 rounded-lg border border-border/50">
+                    <pre className="text-sm whitespace-pre-wrap break-all font-sans leading-relaxed">
+                      {log.responsePreview}
+                    </pre>
+                  </div>
+                </div>
+              )}
               <SectionHeader
                 title={t('logs.responseBody')}
                 icon={<FileJson className="h-4 w-4" />}

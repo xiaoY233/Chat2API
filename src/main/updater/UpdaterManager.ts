@@ -48,7 +48,11 @@ export class UpdaterManager extends EventEmitter {
 
   private constructor() {
     super()
-    this.setupAutoUpdater()
+    // Skip updater wiring when running a side debug instance (electron-updater
+    // needs a packaged app; it crashes on app.getVersion() otherwise).
+    if (!process.env.C2A_DEBUG_PORT) {
+      this.setupAutoUpdater()
+    }
   }
 
   public static getInstance(): UpdaterManager {

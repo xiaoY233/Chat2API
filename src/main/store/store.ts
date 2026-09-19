@@ -207,6 +207,20 @@ class StoreManager {
 
   private async initializeRequestLogManager(storagePath: string): Promise<void> {
     const config = this.normalizeConfig(this.store?.get('config') || DEFAULT_CONFIG)
+
+    // 一次性迁移：旧版本默认不记录请求/响应体，日志里只有状态码看不到内容。
+    // 升级后默认打开（用户之后仍可在「设置 → 数据管理」里关掉，不会被再次改回）。
+    if (config.requestLogBodiesMigrated !== true) {
+      const migratedConfig = {
+        ...config,
+        requestLogBodiesMigrated: true,
+        requestLogConfig: { ...config.requestLogConfig, includeBodies: true },
+      }
+      this.store?.set('config', migratedConfig)
+      config.requestLogBodiesMigrated = true
+      config.requestLogConfig = { ...config.requestLogConfig, includeBodies: true }
+    }
+
     this.requestLogManager = new RequestLogManager({
       storageDir: join(storagePath, 'request-logs'),
       config: config.requestLogConfig,

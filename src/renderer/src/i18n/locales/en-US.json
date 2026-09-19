@@ -612,6 +612,7 @@
     "tabError": "Error",
     "tabResponse": "Response",
     "responseBody": "Response Body",
+    "responsePreview": "Response Summary",
     "webSearch": "Web Search",
     "reasoningEffort": "Reasoning Effort",
     "logDetails": "Log Details",
