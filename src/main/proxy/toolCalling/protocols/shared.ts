@@ -85,18 +85,25 @@ export function normalizeArguments(args: unknown): string {
 }
 
 export function parseJsonValue(value: string): unknown {
-  const trimmed = unwrapCdata(value).trim()
-  if (!trimmed) return ''
+  const unwrapped = unwrapCdata(value).trim()
+  if (!unwrapped) return ''
+
+  const cleaned = unwrapped.replace(/<\|?[^>]+>/g, '').trim()
 
   try {
-    return JSON.parse(trimmed)
+    return JSON.parse(unwrapped)
   } catch {
-    return decodeXml(trimmed)
+    try {
+      if (cleaned && cleaned !== unwrapped) {
+        return JSON.parse(cleaned)
+      }
+    } catch {}
+    return decodeXml(unwrapped)
   }
 }
 
 export function unwrapCdata(value: string): string {
-  const cdata = value.match(/^\s*<!\[CDATA\[([\s\S]*?)\]\]>\s*$/)
+  const cdata = value.match(/<!\[CDATA\[([\s\S]*?)\]\]>/)
   return cdata ? cdata[1] : value
 }
 

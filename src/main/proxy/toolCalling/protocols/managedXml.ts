@@ -16,6 +16,18 @@ const CHAT2API_START = '<|CHAT2API|tool_calls>'
 const CHAT2API_END = '</|CHAT2API|tool_calls>'
 const XML_START = '<tool_calls>'
 
+const DSML_MARKERS = [
+  '<｜｜DSML',
+  '<｜DSML',
+  '<|DSML',
+  '< | DSML',
+  '<||DSML',
+  '< |DSML',
+  '<｜ DSML',
+]
+
+const DSML_STRIP_REGEX = /<\/[|\s｜]*DSML[|\s｜]*(?:calls|tool_calls|invoke|parameter)>|<[|\s｜]*DSML[|\s｜]*(?:calls|tool_calls)>/gi
+
 export const managedXmlProtocol: ToolProtocolAdapter = {
   id: 'managed_xml',
 
@@ -36,7 +48,10 @@ Tool results will be provided as Chat2API XML result blocks:
   },
 
   detectStart(buffer) {
-    return detectMarkers(buffer, [CHAT2API_START, XML_START])
+    if (/^[|\s｜]*<[|\s｜]*DSML/i.test(buffer)) {
+      return { matched: true, partial: false, markerStart: 0 }
+    }
+    return detectMarkers(buffer, [CHAT2API_START, XML_START, ...DSML_MARKERS])
   },
 
   parse(content: string, context: ToolParseContext) {
@@ -45,6 +60,16 @@ Tool results will be provided as Chat2API XML result blocks:
     const rawMatches: string[] = []
     const invalidToolNames: string[] = []
     const toolCalls = []
+
+    parseBlocks(parseable, {
+      blockPattern: /<[|\s｜]*DSML[|\s｜]*(?:calls|tool_calls)>([\s\S]*?)<\/[|\s｜]*DSML[|\s｜]*(?:calls|tool_calls)>/gi,
+      invokePattern: /<[|\s｜]*DSML[|\s｜]*invoke\s+name="([^"]+)"\s*>([\s\S]*?)<\/[|\s｜]*DSML[|\s｜]*invoke>/gi,
+      parameterPattern: /<[|\s｜]*DSML[|\s｜]*parameter\s+name="([^"]+)"(?:\s+[^>]*)?>([\s\S]*?)<\/[|\s｜]*DSML[|\s｜]*parameter>/gi,
+      rawMatches,
+      invalidToolNames,
+      allowedNames,
+      toolCalls,
+    })
 
     parseBlocks(parseable, {
       blockPattern: /<\|CHAT2API\|tool_calls>([\s\S]*?)<\/\|CHAT2API\|tool_calls>/g,
@@ -66,9 +91,42 @@ Tool results will be provided as Chat2API XML result blocks:
       toolCalls,
     })
 
+    const standalonePattern = /<[|\s｜]*DSML[|\s｜]*invoke\s+name="([^"]+)"\s*>([\s\S]*?)<\/[|\s｜]*DSML[|\s｜]*invoke>/gi
+    let standaloneMatch: RegExpExecArray | null
+    while ((standaloneMatch = standalonePattern.exec(parseable)) !== null) {
+      if (rawMatches.some((raw) => raw.includes(standaloneMatch![0]))) continue
+      rawMatches.push(standaloneMatch[0])
+      let name = standaloneMatch[1].trim()
+      if (allowedNames.size > 0 && !allowedNames.has(name)) {
+        if (name === 'shell' && allowedNames.has('bash')) {
+          name = 'bash'
+        } else if (name === 'bash' && allowedNames.has('shell')) {
+          name = 'shell'
+        } else {
+          const found = Array.from(allowedNames).find((n) => n.toLowerCase() === name.toLowerCase())
+          if (found) {
+            name = found
+          } else {
+            invalidToolNames.push(name)
+            continue
+          }
+        }
+      }
+      const args: Record<string, unknown> = {}
+      const paramPattern = /<[|\s｜]*DSML[|\s｜]*parameter\s+name="([^"]+)"(?:\s+[^>]*)?>([\s\S]*?)<\/[|\s｜]*DSML[|\s｜]*parameter>/gi
+      let parameterMatch: RegExpExecArray | null
+      while ((parameterMatch = paramPattern.exec(standaloneMatch[2])) !== null) {
+        addParameter(args, parameterMatch[1].trim(), parseJsonValue(parameterMatch[2]))
+      }
+      toolCalls.push(
+        buildToolCall(`call_${toolCalls.length}`, toolCalls.length, name, JSON.stringify(args), standaloneMatch[0]),
+      )
+    }
+
     if (toolCalls.length === 0) {
+      const strippedContent = content.replace(DSML_STRIP_REGEX, '').trim()
       return createParseResult({
-        content,
+        content: strippedContent,
         toolCalls,
         protocol: rawMatches.length > 0 ? 'managed_xml' : 'unknown',
         rawMatches,
@@ -76,7 +134,11 @@ Tool results will be provided as Chat2API XML result blocks:
       })
     }
 
-    const cleanContent = rawMatches.reduce((acc, raw) => acc.replace(raw, ''), parseable).trim()
+    const cleanContent = rawMatches
+      .reduce((acc, raw) => acc.replace(raw, ''), parseable)
+      .replace(DSML_STRIP_REGEX, '')
+      .trim()
+
     return createParseResult({
       content: cleanContent,
       toolCalls,
@@ -123,10 +185,23 @@ function parseBlocks(content: string, options: ParseBlockOptions): void {
     let invokeMatch: RegExpExecArray | null
 
     while ((invokeMatch = options.invokePattern.exec(blockMatch[1])) !== null) {
-      const name = invokeMatch[1].trim()
-      if (!options.allowedNames.has(name)) {
-        options.invalidToolNames.push(name)
-        continue
+      let name = invokeMatch[1].trim()
+      if (options.allowedNames.size > 0 && !options.allowedNames.has(name)) {
+        if (name === 'shell' && options.allowedNames.has('bash')) {
+          name = 'bash'
+        } else if (name === 'bash' && options.allowedNames.has('shell')) {
+          name = 'shell'
+        } else {
+          const found = Array.from(options.allowedNames).find(
+            (n) => n.toLowerCase() === name.toLowerCase(),
+          )
+          if (found) {
+            name = found
+          } else {
+            options.invalidToolNames.push(name)
+            continue
+          }
+        }
       }
 
       const args: Record<string, unknown> = {}

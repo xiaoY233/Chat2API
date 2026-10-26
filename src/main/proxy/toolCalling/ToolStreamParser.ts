@@ -86,10 +86,10 @@ export class ToolStreamParser {
     }
 
     const shouldReleaseText = !this.emittedToolCall
-    const text = this.buffer
+    const text = this.buffer.replace(/<\/[|\s｜]*DSML[|\s｜]*(?:calls|tool_calls|invoke|parameter)>|<[|\s｜]*DSML[|\s｜]*(?:calls|tool_calls)>/gi, '')
     this.buffer = ''
     this.isBufferingToolCall = false
-    return shouldReleaseText ? [createContentChunk(baseChunk, text, false)] : []
+    return shouldReleaseText && text ? [createContentChunk(baseChunk, text, false)] : []
   }
 
   hasEmittedToolCall(): boolean {
