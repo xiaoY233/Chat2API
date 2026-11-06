@@ -49,14 +49,14 @@
 
 | Provider         | Auth Type     | OAuth | Models                                                                                                                                                                                                                                          |
 | ---------------- | ------------- | ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| DeepSeek         | User Token    | Yes   | deepseek-v4-flash, deepseek-v4-pro                                                                                                                                                                                                              |
-| GLM              | Refresh Token | Yes   | GLM-5.1                                                                                                                                                                                                                                         |
-| Kimi             | JWT Token     | Yes   | Kimi-K2.6                                                                                                                                                                                                                                       |
-| MiniMax          | JWT Token     | Yes   | MiniMax-M2.7                                                                                                                                                                                                                                    |
-| Mimo             | Cookie        | Yes   | MiMo-V2.5-Pro, MiMo-V2.5, MiMo-V2-Flash                                                                                                                                                                                                         |
-| Perplexity       | Cookie        | Yes   | Auto                                                                                                                                                                                                                                           |
-| Qwen (CN)        | SSO Ticket    | Yes   | Qwen3.6, Qwen3.7-Max, Qwen3.5-Flash, Qwen3-Max, Qwen3-Max-Thinking-Preview, Qwen3-Coder                                                                                                                                                         |
-| Qwen AI (Global) | JWT Token     | Yes   | Qwen3.7-Max, Qwen3.6-Plus, Qwen3.6-35B-A3B, Qwen3.6-27B, Qwen3-Coder                                                                                                                                                                           |
+| DeepSeek         | User Token    | Yes   | deepseek-v4.1-flash, deepseek-v4-pro |
+| GLM              | Refresh Token | Yes   | GLM-5.3, GLM-5.3-flash |
+| Kimi             | JWT Token     | Yes   | Kimi-K3.1-Pro, Kimi-K3, Kimi-K2.8-Preview, Kimi-K2.6 |
+| MiniMax          | JWT Token     | Yes   | MiniMax-M3.1-Flash, MiniMax-M3, MiniMax-M2.7 |
+| Mimo             | Cookie        | Yes   | MiMo-V2.6-Pro, MiMo-V2.6-Flash, MiMo-V2.6-Pro-UltraSpeed |
+| Perplexity       | Cookie        | Yes   | Auto |
+| Qwen (CN)        | SSO Ticket    | Yes   | Qwen3.8, Qwen3.8-Max, Qwen3.8-Flash, Qwen3.8-Omni-Flash, Qwen3-Coder |
+| Qwen AI (Global) | JWT Token     | Yes   | Qwen3.8-Max, Qwen3.8-Plus, Qwen3.8-Flash, Qwen3.8-Omni-Flash, Qwen3.8-27B, Qwen3-Coder |
 | Z.ai             | JWT Token     | Yes   | Temporarily unavailable due to frontend captcha risk control                                                                                                                                                                                    |
 
 Provider adaptation notes and manual model-addition guides are in [docs/providers](docs/providers/README.md).
@@ -148,7 +148,7 @@ client = OpenAI(
 )
 
 response = client.chat.completions.create(
-    model="deepseek-v4-flash",
+    model="deepseek-v4.1-flash",
     messages=[
         {"role": "user", "content": "Hello, who are you?"}
     ]

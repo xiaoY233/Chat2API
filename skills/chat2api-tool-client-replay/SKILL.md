@@ -20,7 +20,7 @@ CHAT2API_API_KEY=sk_xxx \
 node skills/chat2api-tool-client-replay/scripts/replay-client-fixture.mjs \
   --fixture backup/har/cherry-studio-fixture.json \
   --profile cherry-studio \
-  --model deepseek-v4-flash
+  --model deepseek-v4.1-flash
 ```
 
 Use `--dry-run` to check profile, model, and fixture selection without live requests. If the fixture file exists, dry-run parses the fixture schema and reports `fixtureExists` plus `scenarioCount`; if it is missing, dry-run still exits successfully with `fixtureExists: false`.

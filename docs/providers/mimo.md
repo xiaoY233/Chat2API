@@ -12,9 +12,9 @@
 
 | 显示名称 | 实际模型 ID |
 | --- | --- |
-| MiMo-V2.5-Pro | mimo-v2.5-pro |
-| MiMo-V2.5 | mimo-v2.5 |
-| MiMo-V2-Flash | mimo-v2-flash |
+| MiMo-V2.6-Pro | mimo-v2.6-pro |
+| MiMo-V2.6-Flash | mimo-v2.6-flash |
+| MiMo-V2.6-Pro-UltraSpeed | mimo-v2.6-pro-ultraspeed-studio |
 
 ## 适配状态
 
@@ -27,4 +27,4 @@
 1. 登录 `aistudio.xiaomimimo.com`。
 2. 打开 DevTools -> Application -> Cookies，复制 `serviceToken`、`userId`、`xiaomichatbot_ph`。
 3. 在供应商管理中添加 Mimo 账号并填写三项凭据。
-4. 使用 `MiMo-V2.5-Pro` 作为首选验证模型。
+4. 使用 `MiMo-V2.6-Pro` 作为首选验证模型。

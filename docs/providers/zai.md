@@ -13,10 +13,11 @@
 
 | 显示名称 | 实际模型 ID |
 | --- | --- |
-| GLM-5.1 | GLM-5.1 |
+| GLM-5.3 | glm-5.3 |
+| GLM-5.3-flash | x-preview-l |
+| GLM-5.2 | glm-5.2 |
 | GLM-5-Turbo | GLM-5-Turbo |
 | GLM-5V-Turbo | GLM-5v-Turbo |
-| GLM-5 | glm-5 |
 | GLM-4.7 | glm-4.7 |
 
 ## 适配状态

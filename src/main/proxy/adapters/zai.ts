@@ -204,7 +204,7 @@ export class ZaiAdapter {
     return signature
   }
 
-  async createChat(model: string = 'glm-5', firstMessageContent: string = ''): Promise<{ chatId: string; messageId: string }> {
+  async createChat(model: string = 'GLM-5.3', firstMessageContent: string = ''): Promise<{ chatId: string; messageId: string }> {
     const token = await this.ensureToken()
     const timestamp = Math.floor(Date.now() / 1000)
     const messageId = uuid()
@@ -341,21 +341,24 @@ export class ZaiAdapter {
     console.log('[Z.ai] chatCompletion called with request.model:', request.model)
     
     // Z.ai API requires specific model name casing:
-    // - GLM-5.1 and GLM-5-Turbo keep uppercase
+    // - GLM-5.3, GLM-5.2 and GLM-5-Turbo keep uppercase
+    // - GLM-5.3-flash maps to the hidden x-preview-l alias
     // - GLM-5V-Turbo uses lowercase "v" in the request model id
-    // - GLM-5 and GLM-4.7 use lowercase request model ids
+    // - GLM-4.7 uses a lowercase request model id
     const modelMapping: Record<string, string> = {
-      'glm-5.1': 'GLM-5.1',
+      'glm-5.3': 'GLM-5.3',
+      'glm-5.3-flash': 'x-preview-l',
+      'glm-5.2': 'GLM-5.2',
       'glm-5-turbo': 'GLM-5-Turbo',
       'glm-5v-turbo': 'GLM-5v-Turbo',
-      'glm-5': 'glm-5',
       'glm-4.7': 'glm-4.7',
-      // Also handle uppercase input
-      'GLM-5.1': 'GLM-5.1',
+      // Also handle display-name input
+      'GLM-5.3': 'GLM-5.3',
+      'GLM-5.3-flash': 'x-preview-l',
+      'GLM-5.2': 'GLM-5.2',
       'GLM-5-Turbo': 'GLM-5-Turbo',
       'GLM-5V-Turbo': 'GLM-5v-Turbo',
       'GLM-5v-Turbo': 'GLM-5v-Turbo',
-      'GLM-5': 'glm-5',
       'GLM-4.7': 'glm-4.7',
     }
     const mappedModel = modelMapping[request.model] || modelMapping[request.model.toLowerCase()] || request.model

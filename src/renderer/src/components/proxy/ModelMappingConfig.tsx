@@ -59,19 +59,19 @@ const parseModelOptionValue = (value: string): { providerId: string; model: stri
 }
 
 const DEFAULT_MODEL_MAPPINGS: Record<string, ModelMapping> = {
-  'deepseek-v4-flash-think': {
-    requestModel: 'deepseek-v4-flash-think',
-    actualModel: 'deepseek-v4-flash',
+  'deepseek-v4.1-flash-think': {
+    requestModel: 'deepseek-v4.1-flash-think',
+    actualModel: 'deepseek-v4.1-flash',
     preferredProviderId: 'deepseek',
   },
-  'deepseek-v4-flash-search': {
-    requestModel: 'deepseek-v4-flash-search',
-    actualModel: 'deepseek-v4-flash',
+  'deepseek-v4.1-flash-search': {
+    requestModel: 'deepseek-v4.1-flash-search',
+    actualModel: 'deepseek-v4.1-flash',
     preferredProviderId: 'deepseek',
   },
-  'deepseek-v4-flash-think-search': {
-    requestModel: 'deepseek-v4-flash-think-search',
-    actualModel: 'deepseek-v4-flash',
+  'deepseek-v4.1-flash-think-search': {
+    requestModel: 'deepseek-v4.1-flash-think-search',
+    actualModel: 'deepseek-v4.1-flash',
     preferredProviderId: 'deepseek',
   },
   'deepseek-v4-pro-think': {

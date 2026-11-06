@@ -12,11 +12,10 @@
 
 | 显示名称 | 实际模型 ID |
 | --- | --- |
-| Qwen3.6 | Qwen |
-| Qwen3.7-Max | Qwen3.7-Max |
-| Qwen3.5-Flash | Qwen3.5-Flash |
-| Qwen3-Max | Qwen3-Max |
-| Qwen3-Max-Thinking-Preview | Qwen3-Max-Thinking-Preview |
+| Qwen3.8 | Qwen |
+| Qwen3.8-Max | Qwen3.8-Max |
+| Qwen3.8-Flash | Qwen3.8-Flash |
+| Qwen3.8-Omni-Flash | Qwen3.8-Omni-Flash |
 | Qwen3-Coder | Qwen3-Coder |
 
 ## 适配状态

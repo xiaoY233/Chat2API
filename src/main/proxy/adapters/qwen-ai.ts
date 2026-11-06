@@ -33,12 +33,14 @@ const DEFAULT_HEADERS = {
 }
 
 const MODEL_ALIASES: Record<string, string> = {
-  qwen: 'qwen3.7-max',
-  qwen3: 'qwen3.7-max',
-  'qwen3.7': 'qwen3.7-max',
-  'qwen3.6': 'qwen3.6-plus',
-  'qwen3.6-35b': 'qwen3.6-35b-a3b',
-  'qwen3.6-27b': 'qwen3.6-27b',
+  qwen: 'qwen3.8-max',
+  qwen3: 'qwen3.8-max',
+  'qwen3.8': 'qwen3.8-max',
+  'qwen3.8-max': 'qwen3.8-max',
+  'qwen3.8-plus': 'qwen3.8-plus',
+  'qwen3.8-flash': 'qwen3.8-flash',
+  'qwen3.8-omni-flash': 'qwen3.8-omni-flash',
+  'qwen3.8-27b': 'qwen3.8-27b',
   'qwen3-coder': 'qwen3-coder-plus',
 }
 
@@ -248,7 +250,7 @@ export class QwenAiAdapter {
     } else if (modelForThinking.endsWith('-fast')) {
       forceThinking = false
     } else if (modelLower.includes('think') || modelLower.includes('r1')) {
-      // Auto-enable thinking based on model name keywords (e.g. "Qwen3.6-Plus-AI-Think-Search")
+      // Auto-enable thinking based on model name keywords (e.g. "Qwen3.8-Plus-AI-Think-Search")
       forceThinking = true
       console.log('[QwenAI] Thinking mode enabled (from model name keyword)')
     } else {

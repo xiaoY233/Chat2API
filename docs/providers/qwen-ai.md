@@ -10,14 +10,15 @@
 
 ## 默认模型
 
-内置默认模型只保留当前筛选后的稳定清单：排除 Qwen3.5 和更低版本，排除普通 Qwen3，保留 Qwen3-Coder，排除 Preview 版本。
+内置默认模型只保留当前筛选后的稳定清单：以 Qwen3.8 系列为主，保留 Qwen3-Coder，排除 Preview 版本。
 
 | 显示名称 | 实际模型 ID |
 | --- | --- |
-| Qwen3.7-Max | qwen3.7-max |
-| Qwen3.6-Plus | qwen3.6-plus |
-| Qwen3.6-35B-A3B | qwen3.6-35b-a3b |
-| Qwen3.6-27B | qwen3.6-27b |
+| Qwen3.8-Max | qwen3.8-max |
+| Qwen3.8-Plus | qwen3.8-plus |
+| Qwen3.8-Flash | qwen3.8-flash |
+| Qwen3.8-Omni-Flash | qwen3.8-omni-flash |
+| Qwen3.8-27B | qwen3.8-27b |
 | Qwen3-Coder | qwen3-coder-plus |
 
 ## 其他官网模型

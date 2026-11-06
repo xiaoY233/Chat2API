@@ -30,11 +30,10 @@ const QWEN_CHAT2_API_BASE = 'https://chat2-api.qianwen.com'
 const QWEN_CHAT_SIDE_API_BASE = 'https://chat-side.qianwen.com'
 
 const MODEL_MAP: Record<string, string> = {
-  'Qwen3.6': 'Qwen',
-  'Qwen3.7-Max': 'Qwen3.7-Max',
-  'Qwen3.5-Flash': 'Qwen3.5-Flash',
-  'Qwen3-Max': 'Qwen3-Max',
-  'Qwen3-Max-Thinking-Preview': 'Qwen3-Max-Thinking-Preview',
+  'Qwen3.8': 'Qwen',
+  'Qwen3.8-Max': 'Qwen3.8-Max',
+  'Qwen3.8-Flash': 'Qwen3.8-Flash',
+  'Qwen3.8-Omni-Flash': 'Qwen3.8-Omni-Flash',
   'Qwen3-Coder': 'Qwen3-Coder',
 }
 
@@ -321,15 +320,9 @@ export class QwenAdapter {
       console.log('[Qwen] Web search enabled (from model name)')
     }
 
-    // Map thinking mode to model
-    if (enableThinking) {
-      // Use thinking model if available
-      if (actualModel === 'Qwen3-Max') {
-        actualModel = 'Qwen3-Max-Thinking-Preview'
-        console.log('[Qwen] Using thinking model:', actualModel)
-      }
-    }
-    
+    // Qwen3.8 enables thinking through the deep_search request flag below,
+    // so the model id does not need to be swapped for a separate thinking model.
+
     console.log('[Qwen] Session info:', {
       sessionId,
       reqId,

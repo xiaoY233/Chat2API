@@ -49,14 +49,14 @@
 
 | 服务商           | 认证类型          | OAuth | 模型                                                                                                                                                                                                                                            |
 | ------------- | ------------- | ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| DeepSeek      | User Token    | 是     | deepseek-v4-flash, deepseek-v4-pro                                                                                                                                                                                                            |
-| GLM           | Refresh Token | 是     | GLM-5.1                                                                                                                                                                                                                                       |
-| Kimi          | JWT Token     | 是     | Kimi-K2.6                                                                                                                                                                                                                                     |
-| MiniMax       | JWT Token     | 是     | MiniMax-M2.7                                                                                                                                                                                                                                  |
-| Mimo          | Cookie        | 是     | MiMo-V2.5-Pro, MiMo-V2.5, MiMo-V2-Flash                                                                                                                                                                                                       |
+| DeepSeek      | User Token    | 是     | deepseek-v4.1-flash, deepseek-v4-pro |
+| GLM           | Refresh Token | 是     | GLM-5.3, GLM-5.3-flash |
+| Kimi          | JWT Token     | 是     | Kimi-K3.1-Pro, Kimi-K3, Kimi-K2.8-Preview, Kimi-K2.6 |
+| MiniMax       | JWT Token     | 是     | MiniMax-M3.1-Flash, MiniMax-M3, MiniMax-M2.7 |
+| Mimo          | Cookie        | 是     | MiMo-V2.6-Pro, MiMo-V2.6-Flash, MiMo-V2.6-Pro-UltraSpeed |
 | Perplexity    | Cookie        | 是     | Auto                                                                                                                                                                                                                                         |
-| Qwen (国内版)    | SSO Ticket    | 是     | Qwen3.6, Qwen3.7-Max, Qwen3.5-Flash, Qwen3-Max, Qwen3-Max-Thinking-Preview, Qwen3-Coder                                                                                                                                                       |
-| Qwen AI (国际版) | JWT Token     | 是     | Qwen3.7-Max, Qwen3.6-Plus, Qwen3.6-35B-A3B, Qwen3.6-27B, Qwen3-Coder                                                                                                                                                                         |
+| Qwen (国内版)    | SSO Ticket    | 是     | Qwen3.8, Qwen3.8-Max, Qwen3.8-Flash, Qwen3.8-Omni-Flash, Qwen3-Coder |
+| Qwen AI (国际版) | JWT Token     | 是     | Qwen3.8-Max, Qwen3.8-Plus, Qwen3.8-Flash, Qwen3.8-Omni-Flash, Qwen3.8-27B, Qwen3-Coder |
 | Z.ai          | JWT Token     | 是     | 受前端验证码风控限制，暂不可用                                                                                                                                                                                                                              |
 
 供应商适配说明和手动添加模型教程见 [docs/providers](docs/providers/README.md)。
@@ -148,7 +148,7 @@ client = OpenAI(
 )
 
 response = client.chat.completions.create(
-    model="deepseek-v4-flash",
+    model="deepseek-v4.1-flash",
     messages=[
         {"role": "user", "content": "你好，你是谁？"}
     ]
