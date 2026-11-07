@@ -265,16 +265,12 @@ test('domestic Qwen models match the web chat model ids captured from HAR', () =
     'Qwen3.8-Max',
     'Qwen3.8-Flash',
     'Qwen3.8-Omni-Flash',
-    'Qwen-Image-3.0',
-    'Wan3.0-Video',
   ]
   const expectedMappings = {
     'Qwen3.8': 'Qwen',
     'Qwen3.8-Max': 'Qwen3.8-Max',
     'Qwen3.8-Flash': 'Qwen3.8-Flash',
     'Qwen3.8-Omni-Flash': 'Qwen3.8-Omni-Flash',
-    'Qwen-Image-3.0': 'Qwen-Image-3.0',
-    'Wan3.0-Video': 'Wan3.0-Video',
   }
 
   assert.deepEqual(qwenConfig.supportedModels, expectedModels)
@@ -285,8 +281,8 @@ test('domestic Qwen models match the web chat model ids captured from HAR', () =
   const en = JSON.parse(readFileSync(join(root, 'src/renderer/src/i18n/locales/en-US.json'), 'utf8'))
 
   assert.match(qwenAdapterSource, /'Qwen3\.8': 'Qwen'/)
-  assert.match(qwenAdapterSource, /'Qwen-Image-3\.0': 'Qwen-Image-3\.0'/)
-  assert.match(qwenAdapterSource, /'Wan3\.0-Video': 'Wan3\.0-Video'/)
+  assert.doesNotMatch(qwenAdapterSource, /'Qwen-Image-3\.0': 'Qwen-Image-3\.0'/)
+  assert.doesNotMatch(qwenAdapterSource, /'Wan3\.0-Video': 'Wan3\.0-Video'/)
   assert.doesNotMatch(qwenAdapterSource, /'Qwen3-Coder': 'Qwen3-Coder'/)
   assert.doesNotMatch(qwenAdapterSource, /qwen3-coder-plus|tongyi-qwen3-max-model-agent|tongyi-qwen-plus-agent/)
   assert.deepEqual(zh.qwen.models, expectedMappings)

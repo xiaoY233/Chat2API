@@ -9,6 +9,15 @@ import { PassThrough } from 'stream'
 import { createParser } from 'eventsource-parser'
 import { Account, Provider } from '../../store/types'
 import { hasToolUse, parseToolUse, ToolCall } from '../promptToolUse'
+import {
+  QWEN_MEDIA_CHAT_MODEL,
+  buildQwenAiMediaPayload,
+  extractQwenMediaTaskId,
+  extractQwenMediaUrl,
+  mediaChatType,
+  parseQwenAiMediaResponse,
+  type QwenMediaKind,
+} from './qwen-ai-media'
 
 const QWEN_AI_BASE = 'https://chat.qwen.ai'
 
@@ -150,13 +159,17 @@ export class QwenAiAdapter {
     return model
   }
 
-  async createChat(modelId: string, title: string = 'New Chat'): Promise<string> {
+  async createChat(
+    modelId: string,
+    title: string = 'New Chat',
+    chatType: 't2t' | 't2i' | 't2v' = 't2t'
+  ): Promise<string> {
     const url = `${QWEN_AI_BASE}/api/v2/chats/new`
     const payload = {
       title,
       models: [modelId],
       chat_mode: 'normal',
-      chat_type: 't2t',
+      chat_type: chatType,
       timestamp: Date.now(),
       project_id: '',
     }
@@ -363,9 +376,157 @@ export class QwenAiAdapter {
     }
   }
 
+  /**
+   * Generates an image or video through the Qwen AI chat media pipeline.
+   * Video generation may block while the upstream task is polled.
+   */
+  async mediaCompletion(request: {
+    model: string
+    prompt: string
+    kind: QwenMediaKind
+    size?: string
+    timeoutMs?: number
+  }): Promise<{
+    chatId: string
+    url?: string
+    taskId?: string
+    width?: number
+    height?: number
+  }> {
+    const token = this.getToken()
+    if (!token) {
+      throw new Error('Qwen AI token not configured, please add token in account settings')
+    }
+    if (!request.prompt.trim()) {
+      throw new Error('A non-empty prompt is required for media generation')
+    }
+
+    const generationModel = this.mapModel(request.model)
+    const chatModel = QWEN_MEDIA_CHAT_MODEL
+    const chatType = mediaChatType(request.kind)
+    const title = request.kind === 'image' ? 'Image Generation' : 'Video Generation'
+    const chatId = await this.createChat(chatModel, title, chatType)
+
+    const payload = buildQwenAiMediaPayload({
+      chatId,
+      prompt: request.prompt,
+      kind: request.kind,
+      size: request.size,
+      generationModel,
+      chatModel,
+    })
+
+    const url = `${QWEN_AI_BASE}/api/v2/chat/completions?chat_id=${encodeURIComponent(chatId)}`
+    const timeout = request.timeoutMs ?? (request.kind === 'video' ? 300000 : 180000)
+
+    console.log(`[QwenAI] Sending ${request.kind} generation request...`)
+    const response = await this.axiosInstance.post(url, payload, {
+      headers: {
+        ...this.getHeaders(chatId),
+        'x-accel-buffering': 'no',
+      },
+      responseType: 'text',
+      timeout,
+      transformResponse: [(data) => data],
+      validateStatus: () => true,
+    })
+
+    const raw = typeof response.data === 'string'
+      ? response.data
+      : JSON.stringify(response.data)
+
+    if (response.status >= 400) {
+      throw new Error(
+        `Qwen ${request.kind} generation failed: HTTP ${response.status} ${raw.slice(0, 300)}`
+      )
+    }
+
+    const parsed = parseQwenAiMediaResponse(raw, request.kind)
+
+    if (parsed.url) {
+      return {
+        chatId,
+        url: parsed.url,
+        taskId: parsed.taskId,
+        width: parsed.width,
+        height: parsed.height,
+      }
+    }
+
+    if (request.kind === 'video') {
+      const taskId =
+        parsed.taskId ||
+        extractQwenMediaTaskId(safeJsonParse(raw))
+      if (taskId) {
+        const status = await this.pollVideoTask(taskId)
+        return { chatId, url: status.url, taskId }
+      }
+    }
+
+    throw new Error(
+      `No ${request.kind} URL or task id found in Qwen response: ${raw.slice(0, 300)}`
+    )
+  }
+
+  private async pollVideoTask(taskId: string): Promise<{ url: string }> {
+    const deadline = Date.now() + 300000
+    const pollUrl = `${QWEN_AI_BASE}/api/v1/tasks/status/${encodeURIComponent(taskId)}`
+
+    while (Date.now() < deadline) {
+      const response = await this.axiosInstance.get(pollUrl, {
+        headers: this.getHeaders(),
+        timeout: 30000,
+        validateStatus: () => true,
+      })
+
+      const json = safeJsonParse(
+        typeof response.data === 'string' ? response.data : JSON.stringify(response.data)
+      ) as Record<string, any> | null
+      if (!json) {
+        await sleep(5000)
+        continue
+      }
+
+      const status = String(json.task_status || json.status || 'running').toLowerCase()
+      const url =
+        json.video_url ||
+        json.data?.video_url ||
+        json.output?.video_url ||
+        extractQwenMediaUrl(json, 'video') ||
+        undefined
+
+      if (status === 'completed' || status === 'success') {
+        if (!url) {
+          throw new Error('Qwen video task completed without a video URL')
+        }
+        return { url }
+      }
+      if (status === 'failed' || status === 'error') {
+        const error = json.error || json.data?.error || 'unknown error'
+        throw new Error(`Qwen video task failed: ${error}`)
+      }
+
+      await sleep(5000)
+    }
+
+    throw new Error(`Qwen video task did not finish within 5 minutes: ${taskId}`)
+  }
+
   static isQwenAiProvider(provider: Provider): boolean {
     return provider.id === 'qwen-ai' || provider.apiEndpoint.includes('chat.qwen.ai')
   }
+}
+
+function safeJsonParse(raw: string): unknown {
+  try {
+    return JSON.parse(raw)
+  } catch {
+    return null
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 export class QwenAiStreamHandler {

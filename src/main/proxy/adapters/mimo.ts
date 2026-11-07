@@ -13,6 +13,12 @@ import type { ToolCallingPlan } from '../toolCalling/types.ts'
 import { getProviderToolProfile } from '../toolCalling/providerProfiles.ts'
 
 const MIMO_API_BASE = 'https://aistudio.xiaomimimo.com'
+const MIMO_OPENAI_API_BASE = 'https://api.xiaomimimo.com/v1'
+const MIMO_TTS_MODELS = new Set([
+  'mimo-v2.5-tts',
+  'mimo-v2.5-tts-voicedesign',
+  'mimo-v2.5-tts-voiceclone',
+])
 
 function uuid(separator: boolean = true): string {
   const id = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
@@ -25,12 +31,74 @@ function uuid(separator: boolean = true): string {
 
 type MimoMessage = ChatMessage
 
+function messageText(content: unknown): string {
+  if (typeof content === 'string') return content
+  if (!Array.isArray(content)) return ''
+  return content
+    .map((item: any) => {
+      if (typeof item === 'string') return item
+      if (item?.type === 'text') return item.text || ''
+      return ''
+    })
+    .filter(Boolean)
+    .join('\n')
+}
+
+/**
+ * MiMo TTS requires the text to synthesize in an assistant message.
+ * When the client only sends user messages, the last one is used as the
+ * target text and any earlier messages become style instructions.
+ */
+export function buildTtsMessages(
+  messages: MimoMessage[]
+): Array<{ role: string; content: string }> {
+  const normalized = messages
+    .map((message) => ({
+      // The TTS API accepts user/assistant only; system prompts act as style
+      // instructions in the user role.
+      role: message.role === 'assistant' ? 'assistant' : 'user',
+      content: messageText((message as any).content),
+    }))
+    .filter(
+      (message) =>
+        message.content.trim() &&
+        (message.role === 'system' || message.role === 'user' || message.role === 'assistant')
+    )
+
+  if (normalized.some((message) => message.role === 'assistant')) {
+    return normalized
+  }
+
+  let targetIndex = -1
+  for (let i = normalized.length - 1; i >= 0; i--) {
+    if (normalized[i].role === 'user') {
+      targetIndex = i
+      break
+    }
+  }
+  if (targetIndex === -1) {
+    throw new Error('MiMo TTS requires a user message containing the text to synthesize')
+  }
+
+  const instructions = normalized.slice(0, targetIndex).map((message) => ({
+    role: 'user',
+    content: message.content,
+  }))
+  return [...instructions, { role: 'assistant', content: normalized[targetIndex].content }]
+}
+
 interface ChatCompletionRequest {
   model: string
   originalModel?: string
   messages: MimoMessage[]
   stream?: boolean
   temperature?: number
+  audio?: {
+    format?: string
+    voice?: string
+    optimize_text_preview?: boolean
+    [key: string]: unknown
+  }
 }
 
 interface MimoUsage {
@@ -323,17 +391,28 @@ export class MimoAdapter {
     this.account = account
   }
 
-  private getCredentials(): { serviceToken: string; userId: string; phToken: string } {
+  private getCredentials(): {
+    serviceToken: string
+    userId: string
+    phToken: string
+    apiKey: string
+  } {
     const credentials = this.account.credentials
     return {
       serviceToken: credentials.service_token || '',
       userId: credentials.user_id || '',
       phToken: credentials.ph_token || '',
+      apiKey: credentials.api_key || '',
     }
   }
 
   static isMimoProvider(provider: Provider): boolean {
     return provider.id === 'mimo' || provider.name?.toLowerCase().includes('mimo')
+  }
+
+  static isTtsModel(model?: string | null): boolean {
+    if (!model) return false
+    return MIMO_TTS_MODELS.has(model.trim().toLowerCase())
   }
 
   private buildUrl(path: string, phToken: string): string {
@@ -462,6 +541,63 @@ export class MimoAdapter {
     })
 
     return { response, conversationId, query }
+  }
+
+  /**
+   * Speech synthesis through the MiMo Open Platform OpenAI-compatible API.
+   * TTS models are not available on the cookie-authenticated web endpoint, so
+   * an API key is required for these models.
+   */
+  async ttsCompletion(request: ChatCompletionRequest): Promise<{
+    response: AxiosResponse
+    body?: any
+  }> {
+    const { apiKey } = this.getCredentials()
+    if (!apiKey) {
+      throw new Error(
+        'MiMo TTS requires an API key. Add one to this account (platform.xiaomimimo.com) or use a chat model.'
+      )
+    }
+
+    const model = request.model.trim().toLowerCase()
+    const isVoiceDesign = model === 'mimo-v2.5-tts-voicedesign'
+
+    const audio: Record<string, unknown> = {
+      format: 'wav',
+      ...(request.audio || {}),
+    }
+    if (isVoiceDesign) {
+      delete audio.voice
+    } else if (!audio.voice) {
+      audio.voice = 'mimo_default'
+    }
+
+    const payload = {
+      model,
+      messages: buildTtsMessages(request.messages),
+      audio,
+      stream: request.stream === true,
+    }
+
+    const response = await axios.post(
+      `${MIMO_OPENAI_API_BASE}/chat/completions`,
+      payload,
+      {
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+          Accept: request.stream === true ? 'text/event-stream' : 'application/json',
+        },
+        responseType: request.stream === true ? 'stream' : 'json',
+        timeout: 300000,
+        validateStatus: () => true,
+      }
+    )
+
+    return {
+      response,
+      body: request.stream === true ? undefined : response.data,
+    }
   }
 
   private async getConversationList(pageNum: number = 1, pageSize: number = 100): Promise<{

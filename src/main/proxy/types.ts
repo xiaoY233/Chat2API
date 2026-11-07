@@ -96,6 +96,15 @@ export interface ChatCompletionRequest {
   reasoningEffort?: 'low' | 'medium' | 'high'
   /** Enable deep research mode (GLM specific) */
   deep_research?: boolean
+  /** Image/video generation size or aspect ratio (e.g. "1024x1024" or "16:9") */
+  size?: string
+  /** Audio output options for speech synthesis models */
+  audio?: {
+    format?: string
+    voice?: string
+    optimize_text_preview?: boolean
+    [key: string]: unknown
+  }
   /** Tools for function calling */
   tools?: ChatCompletionTool[]
   /** Tool choice strategy */

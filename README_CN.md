@@ -55,11 +55,11 @@
 | MiniMax       | JWT Token     | 是     | MiniMax-M3.1-Flash, MiniMax-M3, MiniMax-M2.7 |
 | Mimo          | Cookie        | 是     | MiMo-V2.6-Pro, MiMo-V2.6-Flash, MiMo-V2.5-TTS, MiMo-V2.5-TTS-VoiceDesign, MiMo-V2.5-TTS-VoiceClone |
 | Perplexity    | Cookie        | 是     | Auto                                                                                                                                                                                                                                         |
-| Qwen (国内版)    | SSO Ticket    | 是     | Qwen3.8, Qwen3.8-Max, Qwen3.8-Flash, Qwen3.8-Omni-Flash, Qwen-Image-3.0, Wan3.0-Video |
+| Qwen (国内版)    | SSO Ticket    | 是     | Qwen3.8, Qwen3.8-Max, Qwen3.8-Flash, Qwen3.8-Omni-Flash |
 | Qwen AI (国际版) | JWT Token     | 是     | Qwen3.8-Max, Qwen3.8-Plus, Qwen3.8-Flash, Qwen3.8-Omni-Flash, Qwen-Image-3.0, Wan3.0-Video |
 | Z.ai          | JWT Token     | 是     | 受前端验证码风控限制，暂不可用                                                                                                                                                                                                                              |
 
-供应商适配说明和手动添加模型教程见 [docs/providers](docs/providers/README.md)。
+供应商适配说明和手动添加模型教程见 [docs/providers](docs/providers/README.md)。MiMo TTS 模型需在账号中额外填写可选 `api_key` 凭据；Qwen 图像/视频生成请使用 Qwen AI (国际版)。
 
 ## 📥 安装
 

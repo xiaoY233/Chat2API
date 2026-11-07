@@ -7,7 +7,7 @@ import axios, { AxiosRequestConfig, AxiosResponse, AxiosError } from 'axios'
 import http2 from 'http2'
 import { PassThrough } from 'stream'
 import { Account, Provider } from '../store/types'
-import { ForwardResult, ChatCompletionRequest, ProxyContext } from './types'
+import { ForwardResult, ChatCompletionRequest, ChatCompletionResponse, ProxyContext } from './types'
 import { proxyStatusManager } from './status'
 import { storeManager } from '../store/store'
 import { DeepSeekAdapter } from './adapters/deepseek'
@@ -17,6 +17,12 @@ import { KimiAdapter, KimiStreamHandler } from './adapters/kimi'
 import { MimoAdapter, MimoStreamHandler } from './adapters/mimo'
 import { QwenAdapter, QwenStreamHandler } from './adapters/qwen'
 import { QwenAiAdapter, QwenAiStreamHandler } from './adapters/qwen-ai'
+import {
+  buildQwenMediaContent,
+  extractMediaPrompt,
+  qwenAiMediaKind,
+  type QwenMediaKind,
+} from './adapters/qwen-ai-media'
 import { ZaiAdapter, ZaiStreamHandler } from './adapters/zai'
 import { MiniMaxAdapter, MiniMaxStreamHandler } from './adapters/minimax'
 import { PerplexityAdapter } from './adapters/perplexity'
@@ -816,6 +822,11 @@ export class RequestForwarder {
     actualModel: string,
     startTime: number
   ): Promise<ForwardResult> {
+    const mediaKind = qwenAiMediaKind(actualModel)
+    if (mediaKind) {
+      return this.forwardQwenAiMedia(request, account, provider, actualModel, mediaKind, startTime)
+    }
+
     try {
       const transformed = this.transformRequestForPromptToolUse(request, provider)
       
@@ -890,6 +901,111 @@ export class RequestForwarder {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error',
         latency,
+      }
+    }
+  }
+
+  /**
+   * Qwen AI image/video generation.
+   * Returns the generated media URL as OpenAI chat completion content so any
+   * chat client can display it without a separate media endpoint.
+   */
+  private async forwardQwenAiMedia(
+    request: ChatCompletionRequest,
+    account: Account,
+    provider: Provider,
+    actualModel: string,
+    kind: QwenMediaKind,
+    startTime: number
+  ): Promise<ForwardResult> {
+    try {
+      const prompt = extractMediaPrompt(request.messages as any)
+      if (!prompt) {
+        return {
+          success: false,
+          status: 400,
+          error: 'A non-empty user message is required for image/video generation',
+          latency: Date.now() - startTime,
+        }
+      }
+
+      const adapter = new QwenAiAdapter(provider, account)
+      const media = await adapter.mediaCompletion({
+        model: actualModel,
+        prompt,
+        kind,
+        size: (request as any).size,
+      })
+
+      const latency = Date.now() - startTime
+      if (!media.url) {
+        return {
+          success: false,
+          status: 502,
+          error: `Qwen ${kind} generation returned no media URL`,
+          latency,
+        }
+      }
+
+      const id = `chatcmpl-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+      const created = Math.floor(Date.now() / 1000)
+      const content = buildQwenMediaContent(kind, media.url)
+
+      if (request.stream) {
+        const transStream = new PassThrough()
+        const chunk = (delta: any, finishReason: string | null = null) =>
+          `data: ${JSON.stringify({
+            id,
+            model: request.model,
+            object: 'chat.completion.chunk',
+            choices: [{ index: 0, delta, finish_reason: finishReason }],
+            created,
+          })}\n\n`
+
+        transStream.write(chunk({ role: 'assistant', content: '' }))
+        transStream.write(chunk({ content }))
+        transStream.write(chunk({}, 'stop'))
+        transStream.end('data: [DONE]\n\n')
+
+        return {
+          success: true,
+          status: 200,
+          headers: { 'Content-Type': 'text/event-stream' },
+          stream: transStream,
+          skipTransform: true,
+          latency,
+          providerSessionId: media.chatId,
+        }
+      }
+
+      const body: ChatCompletionResponse = {
+        id,
+        object: 'chat.completion',
+        created,
+        model: request.model,
+        choices: [
+          {
+            index: 0,
+            message: { role: 'assistant', content },
+            finish_reason: 'stop',
+          },
+        ],
+        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+      }
+
+      return {
+        success: true,
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+        body,
+        latency,
+        providerSessionId: media.chatId,
+      }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+        latency: Date.now() - startTime,
       }
     }
   }
@@ -1092,6 +1208,58 @@ export class RequestForwarder {
    * Mimo Dedicated Forward
    * Uses Mimo adapter for Xiaomi AI Studio
    */
+  /**
+   * MiMo TTS via the OpenAI-compatible MiMo Open Platform API.
+   * The upstream response is already OpenAI-compatible (including audio data),
+   * so it is relayed as-is.
+   */
+  private async forwardMimoTts(
+    request: ChatCompletionRequest,
+    account: Account,
+    provider: Provider,
+    actualModel: string,
+    startTime: number
+  ): Promise<ForwardResult> {
+    try {
+      const adapter = new MimoAdapter(provider, account)
+      const { response, body } = await adapter.ttsCompletion({
+        model: actualModel,
+        originalModel: request.originalModel,
+        messages: request.messages as any,
+        stream: request.stream,
+        audio: request.audio,
+      })
+
+      const latency = Date.now() - startTime
+
+      if (response.status >= 400) {
+        const detail = body ? JSON.stringify(body).slice(0, 500) : ''
+        return {
+          success: false,
+          status: response.status,
+          error: `HTTP ${response.status}${detail ? `: ${detail}` : ''}`,
+          latency,
+        }
+      }
+
+      return {
+        success: true,
+        status: response.status,
+        headers: this.extractHeaders(response.headers),
+        ...(request.stream
+          ? { stream: response.data, skipTransform: true }
+          : { body, skipTransform: true }),
+        latency,
+      }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+        latency: Date.now() - startTime,
+      }
+    }
+  }
+
   private async forwardMimo(
     request: ChatCompletionRequest,
     account: Account,
@@ -1099,6 +1267,10 @@ export class RequestForwarder {
     actualModel: string,
     startTime: number
   ): Promise<ForwardResult> {
+    if (MimoAdapter.isTtsModel(actualModel)) {
+      return this.forwardMimoTts(request, account, provider, actualModel, startTime)
+    }
+
     try {
       const transformed = this.transformRequestForPromptToolUse(request, provider)
       const transformedRequest = {

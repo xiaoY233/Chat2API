@@ -34,8 +34,6 @@ const MODEL_MAP: Record<string, string> = {
   'Qwen3.8-Max': 'Qwen3.8-Max',
   'Qwen3.8-Flash': 'Qwen3.8-Flash',
   'Qwen3.8-Omni-Flash': 'Qwen3.8-Omni-Flash',
-  'Qwen-Image-3.0': 'Qwen-Image-3.0',
-  'Wan3.0-Video': 'Wan3.0-Video',
 }
 
 const DEFAULT_HEADERS = {

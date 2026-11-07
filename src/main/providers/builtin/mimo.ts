@@ -25,7 +25,7 @@ export const mimoConfig: BuiltinProviderConfig = {
     'X-Timezone': 'Asia/Shanghai',
   },
   enabled: true,
-  description: 'XiaomiMIMO - Xiaomi General Intelligence Foundation Model, includes V2.6 chat and V2.5 TTS models',
+  description: 'XiaomiMIMO - Xiaomi General Intelligence Foundation Model, includes V2.6 chat and V2.5 TTS models (TTS requires an API key)',
   supportedModels: [
     'MiMo-V2.6-Pro',
     'MiMo-V2.6-Flash',
@@ -64,6 +64,14 @@ export const mimoConfig: BuiltinProviderConfig = {
       required: true,
       placeholder: 'Enter xiaomichatbot_ph from Cookie',
       helpText: 'Found in browser DevTools -> Application -> Cookies -> xiaomichatbot_ph',
+    },
+    {
+      name: 'api_key',
+      label: 'API Key (for TTS)',
+      type: 'password',
+      required: false,
+      placeholder: 'Enter a MiMo Open Platform API key (sk-...)',
+      helpText: 'Required for MiMo-V2.5-TTS models. Create one at platform.xiaomimimo.com; chat models keep using the cookies above.',
     },
   ],
 }
