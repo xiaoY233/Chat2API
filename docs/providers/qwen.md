@@ -16,7 +16,6 @@
 | Qwen3.8-Max | Qwen3.8-Max |
 | Qwen3.8-Flash | Qwen3.8-Flash |
 | Qwen3.8-Omni-Flash | Qwen3.8-Omni-Flash |
-| Qwen3-Coder | Qwen3-Coder |
 
 ## 适配状态
 

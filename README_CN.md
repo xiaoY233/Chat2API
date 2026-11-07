@@ -51,12 +51,12 @@
 | ------------- | ------------- | ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | DeepSeek      | User Token    | 是     | deepseek-v4.1-flash, deepseek-v4-pro |
 | GLM           | Refresh Token | 是     | GLM-5.3, GLM-5.3-flash |
-| Kimi          | JWT Token     | 是     | Kimi-K3.1-Pro, Kimi-K3, Kimi-K2.8-Preview, Kimi-K2.6 |
+| Kimi          | JWT Token     | 是     | Kimi-K2.6 |
 | MiniMax       | JWT Token     | 是     | MiniMax-M3.1-Flash, MiniMax-M3, MiniMax-M2.7 |
-| Mimo          | Cookie        | 是     | MiMo-V2.6-Pro, MiMo-V2.6-Flash, MiMo-V2.6-Pro-UltraSpeed |
+| Mimo          | Cookie        | 是     | MiMo-V2.6-Pro |
 | Perplexity    | Cookie        | 是     | Auto                                                                                                                                                                                                                                         |
-| Qwen (国内版)    | SSO Ticket    | 是     | Qwen3.8, Qwen3.8-Max, Qwen3.8-Flash, Qwen3.8-Omni-Flash, Qwen3-Coder |
-| Qwen AI (国际版) | JWT Token     | 是     | Qwen3.8-Max, Qwen3.8-Plus, Qwen3.8-Flash, Qwen3.8-Omni-Flash, Qwen3.8-27B, Qwen3-Coder |
+| Qwen (国内版)    | SSO Ticket    | 是     | Qwen3.8, Qwen3.8-Max, Qwen3.8-Flash, Qwen3.8-Omni-Flash |
+| Qwen AI (国际版) | JWT Token     | 是     | Qwen3.8-Max, Qwen3.8-Plus, Qwen3.8-Flash, Qwen3.8-Omni-Flash |
 | Z.ai          | JWT Token     | 是     | 受前端验证码风控限制，暂不可用                                                                                                                                                                                                                              |
 
 供应商适配说明和手动添加模型教程见 [docs/providers](docs/providers/README.md)。

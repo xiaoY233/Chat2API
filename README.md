@@ -51,12 +51,12 @@
 | ---------------- | ------------- | ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | DeepSeek         | User Token    | Yes   | deepseek-v4.1-flash, deepseek-v4-pro |
 | GLM              | Refresh Token | Yes   | GLM-5.3, GLM-5.3-flash |
-| Kimi             | JWT Token     | Yes   | Kimi-K3.1-Pro, Kimi-K3, Kimi-K2.8-Preview, Kimi-K2.6 |
+| Kimi             | JWT Token     | Yes   | Kimi-K2.6 |
 | MiniMax          | JWT Token     | Yes   | MiniMax-M3.1-Flash, MiniMax-M3, MiniMax-M2.7 |
-| Mimo             | Cookie        | Yes   | MiMo-V2.6-Pro, MiMo-V2.6-Flash, MiMo-V2.6-Pro-UltraSpeed |
+| Mimo             | Cookie        | Yes   | MiMo-V2.6-Pro |
 | Perplexity       | Cookie        | Yes   | Auto |
-| Qwen (CN)        | SSO Ticket    | Yes   | Qwen3.8, Qwen3.8-Max, Qwen3.8-Flash, Qwen3.8-Omni-Flash, Qwen3-Coder |
-| Qwen AI (Global) | JWT Token     | Yes   | Qwen3.8-Max, Qwen3.8-Plus, Qwen3.8-Flash, Qwen3.8-Omni-Flash, Qwen3.8-27B, Qwen3-Coder |
+| Qwen (CN)        | SSO Ticket    | Yes   | Qwen3.8, Qwen3.8-Max, Qwen3.8-Flash, Qwen3.8-Omni-Flash |
+| Qwen AI (Global) | JWT Token     | Yes   | Qwen3.8-Max, Qwen3.8-Plus, Qwen3.8-Flash, Qwen3.8-Omni-Flash |
 | Z.ai             | JWT Token     | Yes   | Temporarily unavailable due to frontend captcha risk control                                                                                                                                                                                    |
 
 Provider adaptation notes and manual model-addition guides are in [docs/providers](docs/providers/README.md).

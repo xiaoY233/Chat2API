@@ -40,8 +40,6 @@ const MODEL_ALIASES: Record<string, string> = {
   'qwen3.8-plus': 'qwen3.8-plus',
   'qwen3.8-flash': 'qwen3.8-flash',
   'qwen3.8-omni-flash': 'qwen3.8-omni-flash',
-  'qwen3.8-27b': 'qwen3.8-27b',
-  'qwen3-coder': 'qwen3-coder-plus',
 }
 
 interface QwenAiMessage {

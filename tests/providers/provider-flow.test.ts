@@ -182,17 +182,12 @@ test('GLM, Kimi, and MiniMax built-in default models match current web providers
   assert.equal(glmConfig.modelMappings?.['GLM-5.3'], 'glm-5.3')
   assert.equal(glmConfig.modelMappings?.['GLM-5.3-flash'], 'glm-5.3-flash')
 
-  assert.deepEqual(kimiConfig.supportedModels, [
-    'Kimi-K3.1-Pro',
-    'Kimi-K3',
-    'Kimi-K2.8-Preview',
-    'Kimi-K2.6',
-  ])
-  assert.equal(kimiConfig.modelMappings?.['Kimi-K3.1-Pro'], 'kimi-k3.1-pro')
-  assert.equal(kimiConfig.modelMappings?.['Kimi-K3'], 'kimi-k3')
-  assert.equal(kimiConfig.modelMappings?.['Kimi-K2.8-Preview'], 'kimi-k28-preview')
+  assert.deepEqual(kimiConfig.supportedModels, ['Kimi-K2.6'])
   assert.equal(kimiConfig.modelMappings?.['Kimi-K2.6'], 'kimi-k2.6')
   assert.equal(kimiConfig.modelMappings?.['Kimi-K2.5'], undefined)
+  assert.equal(kimiConfig.modelMappings?.['Kimi-K3'], undefined)
+  assert.equal(kimiConfig.modelMappings?.['Kimi-K3.1-Pro'], undefined)
+  assert.equal(kimiConfig.modelMappings?.['Kimi-K2.8-Preview'], undefined)
 
   assert.deepEqual(minimaxConfig.supportedModels, [
     'MiniMax-M3.1-Flash',
@@ -214,36 +209,9 @@ test('GLM, Kimi, and MiniMax built-in default models match current web providers
   assert.doesNotMatch(minimaxAdapterSource, /MiniMax-M2\.5/)
 })
 
-test('Kimi K3.1 Pro, K3, K2.8 and K2.6 model mappings reach the web chat request payload', () => {
-  assert.equal(resolveKimiScenario('kimi-k3.1-pro'), 'SCENARIO_OK_COMPUTER')
-  assert.equal(resolveKimiScenario('kimi-k3'), 'SCENARIO_OK_COMPUTER')
-  assert.equal(resolveKimiScenario('kimi-k28-preview'), 'SCENARIO_OK_COMPUTER')
+test('Kimi K2.6 model mapping reaches the web chat request payload', () => {
   assert.equal(resolveKimiScenario('kimi-k2.6'), 'SCENARIO_K2D6')
   assert.equal(resolveKimiScenario('kimi-k2.5'), 'SCENARIO_CHAT')
-
-  const k3Payload = createKimiChatPayload({
-    model: 'kimi-k3.1-pro',
-    content: 'hello',
-    enableWebSearch: true,
-    enableThinking: true,
-  })
-
-  assert.equal(k3Payload.scenario, 'SCENARIO_OK_COMPUTER')
-  assert.equal(k3Payload.message.scenario, 'SCENARIO_OK_COMPUTER')
-  assert.equal(k3Payload.kimiplusId, 'ok-computer')
-  assert.equal(k3Payload.options.model, 'k3-agent')
-  assert.deepEqual(k3Payload.tools, [{ type: 'TOOL_TYPE_SEARCH', search: {} }])
-  assert.equal(k3Payload.options.thinking, true)
-
-  const k28Payload = createKimiChatPayload({
-    model: 'kimi-k28-preview',
-    content: 'hello',
-    enableWebSearch: false,
-    enableThinking: false,
-  })
-  assert.equal(k28Payload.scenario, 'SCENARIO_OK_COMPUTER')
-  assert.equal(k28Payload.kimiplusId, 'ok-computer')
-  assert.equal(k28Payload.options.model, 'k28-agent-preview')
 
   const payload = createKimiChatPayload({
     model: 'kimi-k2.6',
@@ -297,14 +265,12 @@ test('domestic Qwen models match the web chat model ids captured from HAR', () =
     'Qwen3.8-Max',
     'Qwen3.8-Flash',
     'Qwen3.8-Omni-Flash',
-    'Qwen3-Coder',
   ]
   const expectedMappings = {
     'Qwen3.8': 'Qwen',
     'Qwen3.8-Max': 'Qwen3.8-Max',
     'Qwen3.8-Flash': 'Qwen3.8-Flash',
     'Qwen3.8-Omni-Flash': 'Qwen3.8-Omni-Flash',
-    'Qwen3-Coder': 'Qwen3-Coder',
   }
 
   assert.deepEqual(qwenConfig.supportedModels, expectedModels)
@@ -315,7 +281,7 @@ test('domestic Qwen models match the web chat model ids captured from HAR', () =
   const en = JSON.parse(readFileSync(join(root, 'src/renderer/src/i18n/locales/en-US.json'), 'utf8'))
 
   assert.match(qwenAdapterSource, /'Qwen3\.8': 'Qwen'/)
-  assert.match(qwenAdapterSource, /'Qwen3-Coder': 'Qwen3-Coder'/)
+  assert.doesNotMatch(qwenAdapterSource, /'Qwen3-Coder': 'Qwen3-Coder'/)
   assert.doesNotMatch(qwenAdapterSource, /qwen3-coder-plus|tongyi-qwen3-max-model-agent|tongyi-qwen-plus-agent/)
   assert.deepEqual(zh.qwen.models, expectedMappings)
   assert.deepEqual(en.qwen.models, expectedMappings)
@@ -327,16 +293,12 @@ test('Qwen AI defaults keep only the filtered current web model set', () => {
     'Qwen3.8-Plus',
     'Qwen3.8-Flash',
     'Qwen3.8-Omni-Flash',
-    'Qwen3.8-27B',
-    'Qwen3-Coder',
   ]
   const expectedMappings = {
     'Qwen3.8-Max': 'qwen3.8-max',
     'Qwen3.8-Plus': 'qwen3.8-plus',
     'Qwen3.8-Flash': 'qwen3.8-flash',
     'Qwen3.8-Omni-Flash': 'qwen3.8-omni-flash',
-    'Qwen3.8-27B': 'qwen3.8-27b',
-    'Qwen3-Coder': 'qwen3-coder-plus',
   }
 
   assert.deepEqual(qwenAiConfig.supportedModels, expectedModels)
@@ -350,6 +312,8 @@ test('Qwen AI defaults keep only the filtered current web model set', () => {
     'Qwen3.6-Plus-Preview',
     'Qwen3.5-Plus',
     'Qwen3-Max',
+    'Qwen3.8-27B',
+    'Qwen3-Coder',
     'Qwen3-235B-A22B-2507',
     'Qwen3-VL-235B-A22B',
     'Qwen3-Omni-Flash',
@@ -363,7 +327,7 @@ test('Qwen AI defaults keep only the filtered current web model set', () => {
   assert.match(qwenAiAdapterSource, /qwen3:\s*'qwen3\.8-max'/)
   assert.match(qwenAiAdapterSource, /'qwen3\.8':\s*'qwen3\.8-max'/)
   assert.match(qwenAiAdapterSource, /'qwen3\.8-plus':\s*'qwen3\.8-plus'/)
-  assert.match(qwenAiAdapterSource, /'qwen3-coder':\s*'qwen3-coder-plus'/)
+  assert.doesNotMatch(qwenAiAdapterSource, /'qwen3-coder':\s*'qwen3-coder-plus'/)
   assert.doesNotMatch(qwenAiAdapterSource, /'qwen3\.5':/)
   assert.doesNotMatch(qwenAiAdapterSource, /'qwen3-vl':/)
   assert.doesNotMatch(qwenAiAdapterSource, /'qwen3-omni':/)
@@ -375,31 +339,26 @@ test('Z.ai default models match the latest chat.z.ai HAR model ids', () => {
     'GLM-5.3',
     'GLM-5.3-flash',
     'GLM-5.2',
-    'GLM-5-Turbo',
-    'GLM-5V-Turbo',
-    'GLM-4.7',
   ]
   const expectedMappings = {
     'GLM-5.3': 'glm-5.3',
     'GLM-5.3-flash': 'x-preview-l',
     'GLM-5.2': 'glm-5.2',
-    'GLM-5-Turbo': 'GLM-5-Turbo',
-    'GLM-5V-Turbo': 'GLM-5v-Turbo',
-    'GLM-4.7': 'glm-4.7',
   }
 
   assert.deepEqual(zaiConfig.supportedModels, expectedModels)
   assert.deepEqual(zaiConfig.modelMappings, expectedMappings)
 
-  for (const removedModel of ['glm-4.6v', 'glm-4.6', 'glm-4.5v', 'glm-4.5-air']) {
+  for (const removedModel of ['glm-5-turbo', 'glm-5v-turbo', 'glm-4.7', 'glm-4.6v', 'glm-4.6', 'glm-4.5v', 'glm-4.5-air']) {
     assert.equal(zaiConfig.modelMappings?.[removedModel], undefined, removedModel)
   }
 
   const zaiAdapterSource = readFileSync(join(root, 'src/main/proxy/adapters/zai.ts'), 'utf8')
   assert.match(zaiAdapterSource, /'glm-5\.3': 'GLM-5\.3'/)
   assert.match(zaiAdapterSource, /'glm-5\.3-flash': 'x-preview-l'/)
-  assert.match(zaiAdapterSource, /'glm-5v-turbo': 'GLM-5v-Turbo'/)
-  assert.match(zaiAdapterSource, /'GLM-5V-Turbo': 'GLM-5v-Turbo'/)
+  assert.doesNotMatch(zaiAdapterSource, /'glm-5-turbo': 'GLM-5-Turbo'/)
+  assert.doesNotMatch(zaiAdapterSource, /'glm-5v-turbo': 'GLM-5v-Turbo'/)
+  assert.doesNotMatch(zaiAdapterSource, /'glm-4\.7': 'glm-4\.7'/)
   assert.match(zaiAdapterSource, /const X_FE_VERSION = 'prod-fe-1\.1\.37'/)
   assert.match(zaiAdapterSource, /'X-Region': 'domestic'/)
   assert.match(zaiAdapterSource, /captcha_verify_param/)
@@ -512,14 +471,10 @@ test('README Supported Providers model lists mirror current defaults with Perple
 })
 
 test('Mimo model names and conversation flow match Xiaomi AI Studio web requests', () => {
-  assert.deepEqual(mimoConfig.supportedModels, [
-    'MiMo-V2.6-Pro',
-    'MiMo-V2.6-Flash',
-    'MiMo-V2.6-Pro-UltraSpeed',
-  ])
+  assert.deepEqual(mimoConfig.supportedModels, ['MiMo-V2.6-Pro'])
   assert.equal(mimoConfig.modelMappings?.['MiMo-V2.6-Pro'], 'mimo-v2.6-pro')
-  assert.equal(mimoConfig.modelMappings?.['MiMo-V2.6-Flash'], 'mimo-v2.6-flash')
-  assert.equal(mimoConfig.modelMappings?.['MiMo-V2.6-Pro-UltraSpeed'], 'mimo-v2.6-pro-ultraspeed-studio')
+  assert.equal(mimoConfig.modelMappings?.['MiMo-V2.6-Flash'], undefined)
+  assert.equal(mimoConfig.modelMappings?.['MiMo-V2.6-Pro-UltraSpeed'], undefined)
 
   const forwarderSource = readFileSync(
     join(root, 'src/main/proxy/forwarder.ts'),

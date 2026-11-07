@@ -624,10 +624,10 @@ The `initializeDefaultProviders()` method in `store.ts` syncs configuration from
 Example: When updating Z.ai model list:
 ```typescript
 // 1. src/main/providers/builtin/zai.ts
-supportedModels: ['GLM-5-Turbo', 'GLM-5', 'GLM-4.7', ...]
+supportedModels: ['GLM-5.3', 'GLM-5.3-flash', 'GLM-5.2', ...]
 
 // 2. src/main/store/types.ts (BUILTIN_PROVIDERS array)
-supportedModels: ['GLM-5-Turbo', 'GLM-5', 'GLM-4.7', ...]
+supportedModels: ['GLM-5.3', 'GLM-5.3-flash', 'GLM-5.2', ...]
 ```
 
 **Important**: Users must restart the app after configuration updates to see the changes.

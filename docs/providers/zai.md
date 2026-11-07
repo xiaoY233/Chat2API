@@ -16,9 +16,6 @@
 | GLM-5.3 | glm-5.3 |
 | GLM-5.3-flash | x-preview-l |
 | GLM-5.2 | glm-5.2 |
-| GLM-5-Turbo | GLM-5-Turbo |
-| GLM-5V-Turbo | GLM-5v-Turbo |
-| GLM-4.7 | glm-4.7 |
 
 ## 适配状态
 
