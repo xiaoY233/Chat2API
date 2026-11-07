@@ -22,6 +22,7 @@ import glmIcon from '@/assets/providers/glm.svg'
 import kimiIcon from '@/assets/providers/kimi.svg'
 import mimoIcon from '@/assets/providers/mimo.svg'
 import minimaxIcon from '@/assets/providers/minimax.svg'
+import longcatIcon from '@/assets/providers/longcat.svg'
 import perplexityIcon from '@/assets/providers/perplexity.svg'
 import qwenIcon from '@/assets/providers/qwen.svg'
 import zaiIcon from '@/assets/providers/zai.svg'
@@ -50,6 +51,7 @@ const providerIcons: Record<string, string> = {
   kimi: kimiIcon,
   mimo: mimoIcon,
   minimax: minimaxIcon,
+  longcat: longcatIcon,
   perplexity: perplexityIcon,
   qwen: qwenIcon,
   'qwen-ai': qwenIcon,
@@ -498,6 +500,13 @@ export function AddProviderDialog({
                   label: t('perplexity.sessionToken'),
                   placeholder: t('perplexity.sessionTokenPlaceholder'),
                   helpText: t('perplexity.sessionTokenHelp'),
+                },
+              },
+              longcat: {
+                passport_token_key: {
+                  label: t('longcat.passportTokenKey'),
+                  placeholder: t('longcat.passportTokenKeyPlaceholder'),
+                  helpText: t('longcat.passportTokenKeyHelp'),
                 },
               },
             }

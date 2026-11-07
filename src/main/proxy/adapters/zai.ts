@@ -11,16 +11,19 @@ import FormData from 'form-data'
 import { Account, Provider } from '../../store/types'
 import { hasToolUse, parseToolUse, ToolCall } from '../promptToolUse'
 import { parseToolCallsFromText } from '../utils/toolParser'
-import { 
-  createToolCallState, 
-  processStreamContent, 
+import {
+  createToolCallState,
+  processStreamContent,
   flushToolCallBuffer,
   createBaseChunk,
-  ToolCallState 
+  ToolCallState
 } from '../utils/streamToolHandler'
+import { computeCaptchaParam } from './zai-captcha'
+import { zaiDeviceTokenSource } from './zai-device-tokens'
 
 const ZAI_API_BASE = 'https://chat.z.ai'
-const X_FE_VERSION = 'prod-fe-1.1.37'
+const X_FE_VERSION = 'prod-fe-1.1.128'
+const FE_VERSION_CACHE_MS = 60 * 60 * 1000
 const ZAI_USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36'
 
 const FAKE_HEADERS = {
@@ -37,7 +40,93 @@ const FAKE_HEADERS = {
   'Sec-Fetch-Mode': 'cors',
   'Sec-Fetch-Site': 'same-origin',
   'User-Agent': ZAI_USER_AGENT,
-  'X-Region': 'domestic',
+  'X-FE-Version': X_FE_VERSION,
+  'X-Region': 'overseas',
+}
+
+let feVersionCache: { version: string; fetchedAt: number } = {
+  version: X_FE_VERSION,
+  fetchedAt: 0,
+}
+let feVersionPromise: Promise<string> | null = null
+
+async function getZaiFeVersion(): Promise<string> {
+  if (Date.now() - feVersionCache.fetchedAt < FE_VERSION_CACHE_MS) {
+    return feVersionCache.version
+  }
+  if (!feVersionPromise) {
+    feVersionPromise = (async () => {
+      try {
+        const response = await axios.get(ZAI_API_BASE + '/', {
+          headers: { 'User-Agent': ZAI_USER_AGENT },
+          timeout: 15000,
+          responseType: 'text',
+          validateStatus: () => true,
+        })
+        const match = typeof response.data === 'string'
+          ? response.data.match(/prod-fe-\d+\.\d+\.\d+/)
+          : null
+        if (match) {
+          feVersionCache = { version: match[0], fetchedAt: Date.now() }
+          return match[0]
+        }
+      } catch (error) {
+        console.warn('[Z.ai] Failed to read frontend version:', error)
+      }
+      feVersionCache = { version: feVersionCache.version, fetchedAt: Date.now() }
+      return feVersionCache.version
+    })().finally(() => {
+      feVersionPromise = null
+    })
+  }
+  return feVersionPromise
+}
+
+/** Read the beginning of an SSE stream so captcha rejections can be retried. */
+function readStreamPrefix(stream: any, timeoutMs = 5000): Promise<Buffer> {
+  return new Promise((resolve) => {
+    const chunks: Buffer[] = []
+    let settled = false
+    const finish = () => {
+      if (settled) {
+        return
+      }
+      settled = true
+      clearTimeout(timer)
+      stream.removeListener('data', onData)
+      try {
+        stream.pause()
+      } catch {
+        // Ignore pause errors
+      }
+      resolve(Buffer.concat(chunks))
+    }
+    const onData = (chunk: Buffer) => {
+      chunks.push(Buffer.from(chunk))
+      const text = Buffer.concat(chunks).toString('utf8')
+      const size = chunks.reduce((total, part) => total + part.length, 0)
+      if (text.includes('\n\n') || text.includes('[DONE]') || size > 65536) {
+        finish()
+      }
+    }
+    const timer = setTimeout(finish, timeoutMs)
+    stream.on('data', onData)
+    stream.once('end', finish)
+    stream.once('error', finish)
+  })
+}
+
+function replayStreamPrefix(prefix: Buffer, stream: any): PassThrough {
+  const output = new PassThrough()
+  if (prefix.length > 0) {
+    output.write(prefix)
+  }
+  stream.pipe(output)
+  return output
+}
+
+function isCaptchaRejection(text: string): boolean {
+  return text.includes('FRONTEND_CAPTCHA_REQUIRED') || text.includes('captcha_error_type')
 }
 
 const SEARCH_CITATION_PATTERN = '【turn\\d+search\\d+】'
@@ -125,6 +214,23 @@ export class ZaiAdapter {
   private getCaptchaVerifyParam(): string | undefined {
     const credentials = this.account.credentials
     return credentials.captcha_verify_param || credentials.captchaVerifyParam || undefined
+  }
+
+  private async generateCaptchaVerifyParam(): Promise<string | undefined> {
+    const manual = this.getCaptchaVerifyParam()
+    if (manual) {
+      return manual
+    }
+    try {
+      const param = await computeCaptchaParam(zaiDeviceTokenSource)
+      if (!param) {
+        console.warn('[Z.ai] Automatic captcha verification did not produce a parameter')
+      }
+      return param || undefined
+    } catch (error) {
+      console.warn('[Z.ai] Automatic captcha verification failed:', error)
+      return undefined
+    }
   }
 
   private async ensureToken(): Promise<string> {
@@ -388,12 +494,21 @@ export class ZaiAdapter {
     
     const signaturePrompt = this.extractLastUserMessage(processedMessages)
     
-    // Always create a new chat (single-turn mode only)
-    const chatResult = await this.createChat(mappedModel, signaturePrompt)
-    const chatId = chatResult.chatId
-    const messageId = chatResult.messageId
+    // Always create a new chat (single-turn mode only). Z.ai accepts a
+    // client-generated chat id, so a failed create call is not fatal.
+    let chatId: string
+    let messageId: string
+    try {
+      const chatResult = await this.createChat(mappedModel, signaturePrompt)
+      chatId = chatResult.chatId
+      messageId = chatResult.messageId
+      console.log('[Z.ai] Created new chat:', chatId)
+    } catch (error) {
+      chatId = uuid()
+      messageId = uuid()
+      console.warn('[Z.ai] Chat creation failed, using a local chat id:', error)
+    }
     const parentMessageId = null
-    console.log('[Z.ai] Created new chat:', chatId)
     
     const requestId = uuid()
     const timestamp = Date.now()
@@ -460,11 +575,6 @@ export class ZaiAdapter {
       },
     }
 
-    const captchaVerifyParam = this.getCaptchaVerifyParam()
-    if (captchaVerifyParam) {
-      requestBody.captcha_verify_param = captchaVerifyParam
-    }
-
     console.log('[Z.ai] Sending chat request...')
     console.log('[Z.ai] Model:', request.model)
     console.log('[Z.ai] ChatId:', chatId)
@@ -511,25 +621,59 @@ export class ZaiAdapter {
       signature_timestamp: String(timestamp),
     })
 
-    const response = await axios.post(
-      `${ZAI_API_BASE}/api/v2/chat/completions?${queryParams.toString()}`,
-      requestBody,
-      {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-          ...FAKE_HEADERS,
-          'X-Signature': signature,
-          'X-FE-Version': X_FE_VERSION,
-          'Cookie': `token=${token}`,
-          Referer: `${ZAI_API_BASE}/c/${chatId}`,
-          Priority: 'u=1, i',
-        },
-        responseType: 'stream',
-        timeout: 120000,
-        validateStatus: () => true,
+    const manualCaptchaParam = this.getCaptchaVerifyParam()
+    const feVersion = await getZaiFeVersion()
+    let response: AxiosResponse | null = null
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const captchaVerifyParam = await this.generateCaptchaVerifyParam()
+      if (!captchaVerifyParam) {
+        throw new Error(
+          'Z.ai captcha verification could not be generated. Run Chat2API on a desktop session so the hidden captcha window can mint device tokens, or paste a captcha_verify_param in the account credentials.',
+        )
       }
-    )
+      requestBody.captcha_verify_param = captchaVerifyParam
+
+      response = await axios.post(
+        `${ZAI_API_BASE}/api/v2/chat/completions?${queryParams.toString()}`,
+        requestBody,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+            ...FAKE_HEADERS,
+            'X-Signature': signature,
+            'X-FE-Version': feVersion,
+            'Cookie': `token=${token}`,
+            Referer: `${ZAI_API_BASE}/c/${chatId}`,
+            Priority: 'u=1, i',
+          },
+          responseType: 'stream',
+          timeout: 120000,
+          validateStatus: () => true,
+        }
+      )
+
+      if (response.status === 200) {
+        const prefix = await readStreamPrefix(response.data)
+        if (isCaptchaRejection(prefix.toString('utf8'))) {
+          console.warn('[Z.ai] Server rejected captcha_verify_param, retrying with a fresh one')
+          try {
+            response.data.destroy()
+          } catch {
+            // Ignore stream teardown errors
+          }
+          if (attempt === 0 && !manualCaptchaParam) {
+            continue
+          }
+        }
+        response.data = replayStreamPrefix(prefix, response.data)
+      }
+      break
+    }
+
+    if (!response) {
+      throw new Error('Z.ai request was not sent')
+    }
 
     console.log('[Z.ai] Response status:', response.status)
     if (response.status !== 200) {

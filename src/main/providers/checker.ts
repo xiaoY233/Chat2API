@@ -147,6 +147,10 @@ export class ProviderChecker {
         return this.checkQwenAiToken(account.credentials.token)
       case 'perplexity':
         return this.checkPerplexityToken(account.credentials.sessionToken || account.credentials.token)
+      case 'longcat':
+        return this.checkLongCatToken(
+          account.credentials.passport_token_key || account.credentials.cookie || account.credentials.token || '',
+        )
       case 'mimo':
         return this.checkMimoToken(
           account.credentials.service_token,
@@ -592,6 +596,66 @@ export class ProviderChecker {
       userInfo: {
         name: 'Perplexity User',
       },
+    }
+  }
+
+  private static async checkLongCatToken(rawCookie: string): Promise<TokenCheckResult> {
+    if (!rawCookie) {
+      return { valid: false, error: 'passport_token_key cookie is required' }
+    }
+
+    const trimmed = rawCookie.trim()
+    const cookie = /passport_token_key\s*=/i.test(trimmed) || trimmed.includes(';')
+      ? trimmed
+      : `passport_token_key=${trimmed}`
+
+    try {
+      const response = await axios({
+        method: 'GET',
+        url: 'https://longcat.chat/api/v1/user-current',
+        headers: {
+          Accept: 'application/json',
+          Origin: 'https://longcat.chat',
+          Referer: 'https://longcat.chat/',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+          'X-Client-Language': 'en',
+          'X-Requested-With': 'XMLHttpRequest',
+          Cookie: cookie,
+        },
+        timeout: CHECK_TIMEOUT,
+        validateStatus: () => true,
+      })
+
+      if (response.status === 401 || response.status === 403) {
+        return { valid: false, error: 'Cookie expired or invalid, please log in again' }
+      }
+      if (response.status < 200 || response.status >= 300) {
+        return { valid: false, error: `Validation failed: HTTP ${response.status}` }
+      }
+
+      const payload = response.data?.data && typeof response.data.data === 'object'
+        ? response.data.data
+        : response.data
+      if (!payload || typeof payload !== 'object') {
+        return { valid: false, error: 'Unexpected response from LongCat' }
+      }
+
+      if (Number(payload.loginStatus) !== 1) {
+        return { valid: false, error: 'LongCat session is not logged in' }
+      }
+
+      return {
+        valid: true,
+        userInfo: {
+          name: payload.nickname || payload.userName || payload.user_name,
+          email: payload.email,
+        },
+      }
+    } catch (error) {
+      return {
+        valid: false,
+        error: error instanceof AxiosError ? error.message : 'Connection failed',
+      }
     }
   }
 

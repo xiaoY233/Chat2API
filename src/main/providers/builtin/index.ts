@@ -3,6 +3,7 @@ import glmConfig from './glm.ts'
 import kimiConfig from './kimi.ts'
 import minimaxConfig from './minimax.ts'
 import mimoConfig from './mimo.ts'
+import longcatConfig from './longcat.ts'
 import perplexityConfig from './perplexity.ts'
 import qwenConfig from './qwen.ts'
 import qwenAiConfig from './qwen-ai.ts'
@@ -15,6 +16,7 @@ export const builtinProviders: BuiltinProviderConfig[] = [
   kimiConfig,
   minimaxConfig,
   mimoConfig,
+  longcatConfig,
   perplexityConfig,
   qwenConfig,
   qwenAiConfig,
@@ -27,6 +29,7 @@ export const builtinProviderMap: Record<string, BuiltinProviderConfig> = {
   kimi: kimiConfig,
   minimax: minimaxConfig,
   mimo: mimoConfig,
+  longcat: longcatConfig,
   perplexity: perplexityConfig,
   qwen: qwenConfig,
   'qwen-ai': qwenAiConfig,
@@ -47,6 +50,7 @@ export {
   kimiConfig,
   minimaxConfig,
   mimoConfig,
+  longcatConfig,
   perplexityConfig,
   qwenConfig,
   qwenAiConfig,

@@ -23,7 +23,7 @@
 </p>
 
 <p align="center">
-  Chat2API enables zero-cost access to leading AI models by leveraging official web UIs. It supports providers such as DeepSeek, GLM, Kimi, MiniMax, Qwen, and Z.ai, and seamlessly integrates with tools like openlcaw, Cline, and Roo-Code — making any OpenAI-compatible client work out of the box.
+  Chat2API enables zero-cost access to leading AI models by leveraging official web UIs. It supports providers such as DeepSeek, GLM, Kimi, MiniMax, LongCat, Qwen, and Z.ai, and seamlessly integrates with tools like openlcaw, Cline, and Roo-Code — making any OpenAI-compatible client work out of the box.
 </p>
 
 ![Product Preview](docs/screenshots/preview.png)
@@ -31,7 +31,7 @@
 ## ✨ Features
 
 - OpenAI Compatible API: Provides standard OpenAI-compatible API endpoints for seamless integration
-- Multi-Provider Support: Connect DeepSeek, GLM, Kimi, MiniMax, Perplexity 🆕, Qwen, Z.ai and more
+- Multi-Provider Support: Connect DeepSeek, GLM, Kimi, MiniMax, LongCat 🆕, Perplexity 🆕, Qwen, Z.ai and more
 - 🆕 Context Management: Intelligent conversation context management with sliding window, token limit, and summary strategies
 - 🆕 Function Calling Support: Universal tool calling capability for all models via prompt engineering, compatible with Cherry Studio, Kilo Code, and other clients
 - 🆕 Model Mapping: Flexible model name mapping with wildcard support and preferred provider/account selection
@@ -54,12 +54,13 @@
 | Kimi             | JWT Token     | Yes   | Kimi-K2.6 |
 | MiniMax          | JWT Token     | Yes   | MiniMax-M3.1-Flash, MiniMax-M3, MiniMax-M2.7 |
 | Mimo             | Cookie        | Yes   | MiMo-V2.6-Pro, MiMo-V2.6-Flash, MiMo-V2.5-TTS, MiMo-V2.5-TTS-VoiceDesign, MiMo-V2.5-TTS-VoiceClone |
+| LongCat          | Cookie        | No    | LongCat, LongCat-Search |
 | Perplexity       | Cookie        | Yes   | Auto |
 | Qwen (CN)        | SSO Ticket    | Yes   | Qwen3.8, Qwen3.8-Max, Qwen3.8-Flash, Qwen3.8-Omni-Flash |
 | Qwen AI (Global) | JWT Token     | Yes   | Qwen3.8-Max, Qwen3.8-Plus, Qwen3.8-Flash, Qwen3.8-Omni-Flash, Qwen-Image-3.0, Wan3.0-Video |
-| Z.ai             | JWT Token     | Yes   | Temporarily unavailable due to frontend captcha risk control                                                                                                                                                                                    |
+| Z.ai             | JWT Token     | Yes   | GLM-5.3, GLM-5.3-flash, GLM-5.2 |
 
-Provider adaptation notes and manual model-addition guides are in [docs/providers](docs/providers/README.md). MiMo TTS models require an optional `api_key` account credential; Qwen image/video generation is available through Qwen AI (Global).
+Provider adaptation notes and manual model-addition guides are in [docs/providers](docs/providers/README.md). MiMo TTS models require an optional `api_key` account credential; Qwen image/video generation is available through Qwen AI (Global). Z.ai generates its captcha parameter automatically through a hidden captcha window.
 
 ## 📥 Installation
 

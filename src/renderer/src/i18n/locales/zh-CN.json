@@ -339,6 +339,13 @@
     "sessionTokenHelp": "请从浏览器开发者工具获取 __Secure-next-auth.session-token Cookie，或切换到 OAuth 登录标签页自动获取",
     "freeUserNotice": "官方免费用户仅限 Auto 模型，系统自动分配模型响应"
   },
+  "longcat": {
+    "name": "LongCat",
+    "description": "LongCat 网页版（美团）聊天，使用 passport_token_key Cookie，支持联网搜索",
+    "passportTokenKey": "passport_token_key Cookie",
+    "passportTokenKeyPlaceholder": "请输入 passport_token_key Cookie 值",
+    "passportTokenKeyHelp": "登录 longcat.chat 后，打开开发者工具 -> Application -> Cookies -> passport_token_key，粘贴 Cookie 值或完整 Cookie 字符串。"
+  },
   "proxy": {
     "title": "代理设置",
     "description": "配置 API 代理服务参数和管理策略",

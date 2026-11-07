@@ -9,6 +9,7 @@ import { glmConfig } from '../../src/main/providers/builtin/glm.ts'
 import { kimiConfig } from '../../src/main/providers/builtin/kimi.ts'
 import { minimaxConfig } from '../../src/main/providers/builtin/minimax.ts'
 import { mimoConfig } from '../../src/main/providers/builtin/mimo.ts'
+import { longcatConfig } from '../../src/main/providers/builtin/longcat.ts'
 import { perplexityConfig } from '../../src/main/providers/builtin/perplexity.ts'
 import { qwenConfig } from '../../src/main/providers/builtin/qwen.ts'
 import { qwenAiConfig } from '../../src/main/providers/builtin/qwen-ai.ts'
@@ -367,9 +368,10 @@ test('Z.ai default models match the latest chat.z.ai HAR model ids', () => {
   assert.doesNotMatch(zaiAdapterSource, /'glm-5-turbo': 'GLM-5-Turbo'/)
   assert.doesNotMatch(zaiAdapterSource, /'glm-5v-turbo': 'GLM-5v-Turbo'/)
   assert.doesNotMatch(zaiAdapterSource, /'glm-4\.7': 'glm-4\.7'/)
-  assert.match(zaiAdapterSource, /const X_FE_VERSION = 'prod-fe-1\.1\.37'/)
-  assert.match(zaiAdapterSource, /'X-Region': 'domestic'/)
+  assert.match(zaiAdapterSource, /const X_FE_VERSION = 'prod-fe-1\.1\.128'/)
+  assert.match(zaiAdapterSource, /'X-Region': 'overseas'/)
   assert.match(zaiAdapterSource, /captcha_verify_param/)
+  assert.match(zaiAdapterSource, /computeCaptchaParam/)
   assert.match(zaiAdapterSource, /new URLSearchParams\(\{[\s\S]*token,/)
   assert.match(zaiAdapterSource, /api\/v2\/chat\/completions\?\$\{queryParams\.toString\(\)\}/)
   assert.match(zaiAdapterSource, /Authorization: `Bearer \$\{token\}`/)
@@ -378,16 +380,43 @@ test('Z.ai default models match the latest chat.z.ai HAR model ids', () => {
   assert.doesNotMatch(zaiAdapterSource, /'glm-4\.5-air':/)
 })
 
-test('Z.ai docs mark provider temporarily unavailable due to captcha risk control', () => {
+test('Z.ai docs and README reflect automatic captcha support', () => {
   const readme = readFileSync(join(root, 'README.md'), 'utf8')
   const readmeCn = readFileSync(join(root, 'README_CN.md'), 'utf8')
   const doc = readFileSync(join(root, 'docs/providers/zai.md'), 'utf8')
 
-  assert.match(readme, /Z\.ai[^\n]*Temporarily unavailable due to frontend captcha risk control/)
-  assert.match(readmeCn, /Z\.ai[^\n]*受前端验证码风控限制，暂不可用/)
-  assert.match(doc, /当前状态 \| 受前端验证码风控限制，暂不可用/)
+  assert.match(readme, /Z\.ai[^\n]*GLM-5\.3, GLM-5\.3-flash, GLM-5\.2/)
+  assert.match(readmeCn, /Z\.ai[^\n]*GLM-5\.3, GLM-5\.3-flash, GLM-5\.2/)
+  assert.doesNotMatch(readme, /Temporarily unavailable due to frontend captcha risk control/)
+  assert.doesNotMatch(readmeCn, /暂不可用/)
+  assert.match(doc, /当前状态 \| 自动完成前端验证码/)
   assert.match(doc, /FRONTEND_CAPTCHA_REQUIRED/)
-  assert.match(doc, /captcha_verify_param.*调试字段/)
+  assert.match(doc, /captcha_verify_param/)
+  assert.match(doc, /隐藏的 `chat\.z\.ai` 窗口/)
+  assert.match(doc, /prod-fe-1\.1\.128/)
+})
+
+test('LongCat uses the passport_token_key cookie and web chat endpoints', () => {
+  assert.equal(longcatConfig.id, 'longcat')
+  assert.equal(longcatConfig.authType, 'cookie')
+  assert.deepEqual(longcatConfig.supportedModels, ['LongCat', 'LongCat-Search'])
+  assert.deepEqual(longcatConfig.modelMappings, {
+    LongCat: 'LongCat',
+    'LongCat-Search': 'LongCat-Search',
+  })
+  assert.equal(longcatConfig.credentialFields?.[0]?.name, 'passport_token_key')
+  assert.match(longcatConfig.apiEndpoint, /longcat\.chat/)
+
+  const longcatAdapterSource = readFileSync(join(root, 'src/main/proxy/adapters/longcat.ts'), 'utf8')
+  assert.match(longcatAdapterSource, /passport_token_key/)
+  assert.match(longcatAdapterSource, /\/api\/v1\/session-create/)
+  assert.match(longcatAdapterSource, /\/api\/v1\/chat-completion/)
+  assert.match(longcatAdapterSource, /\/api\/v1\/chat-completion-V2/)
+  assert.match(longcatAdapterSource, /\/api\/v1\/session-delete/)
+
+  const longcatDoc = readFileSync(join(root, 'docs/providers/longcat.md'), 'utf8')
+  assert.match(longcatDoc, /passport_token_key/)
+  assert.match(longcatDoc, /LongCat-Search/)
 })
 
 test('provider docs cover every built-in provider and Qwen AI manual model additions', () => {
@@ -395,6 +424,7 @@ test('provider docs cover every built-in provider and Qwen AI manual model addit
     'deepseek',
     'glm',
     'kimi',
+    'longcat',
     'minimax',
     'mimo',
     'perplexity',
@@ -454,6 +484,7 @@ test('README Supported Providers model lists mirror current defaults with Perple
     ['Kimi', kimiConfig.supportedModels?.join(', ')],
     ['MiniMax', minimaxConfig.supportedModels?.join(', ')],
     ['Mimo', mimoConfig.supportedModels?.join(', ')],
+    ['LongCat', longcatConfig.supportedModels?.join(', ')],
     ['Perplexity', 'Auto'],
     ['Qwen', qwenConfig.supportedModels?.join(', ')],
     ['Qwen AI', qwenAiConfig.supportedModels?.join(', ')],
@@ -467,8 +498,8 @@ test('README Supported Providers model lists mirror current defaults with Perple
     assert.match(readmeCn, new RegExp(`\\| ${provider.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[^\\n]*\\| ${models?.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\|`))
   }
 
-  assert.match(readme, /Z\.ai[^\n]*Temporarily unavailable due to frontend captcha risk control/)
-  assert.match(readmeCn, /Z\.ai[^\n]*受前端验证码风控限制，暂不可用/)
+  assert.match(readme, /Z\.ai[^\n]*GLM-5\.3, GLM-5\.3-flash, GLM-5\.2/)
+  assert.match(readmeCn, /Z\.ai[^\n]*GLM-5\.3, GLM-5\.3-flash, GLM-5\.2/)
 
   assert.doesNotMatch(readme, /Perplexity[^\n]*(Turbo|PPLX-Pro|GPT-5|Gemini-2\.5-Pro|Claude-Sonnet-4|Claude-Opus-4|Nemotron)/)
   assert.doesNotMatch(readmeCn, /Perplexity[^\n]*(Turbo|PPLX-Pro|GPT-5|Gemini-2\.5-Pro|Claude-Sonnet-4|Claude-Opus-4|Nemotron)/)
