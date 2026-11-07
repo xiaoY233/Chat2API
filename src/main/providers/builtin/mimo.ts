@@ -25,12 +25,20 @@ export const mimoConfig: BuiltinProviderConfig = {
     'X-Timezone': 'Asia/Shanghai',
   },
   enabled: true,
-  description: 'XiaomiMIMO - Xiaomi General Intelligence Foundation Model',
+  description: 'XiaomiMIMO - Xiaomi General Intelligence Foundation Model, includes V2.6 chat and V2.5 TTS models',
   supportedModels: [
     'MiMo-V2.6-Pro',
+    'MiMo-V2.6-Flash',
+    'MiMo-V2.5-TTS',
+    'MiMo-V2.5-TTS-VoiceDesign',
+    'MiMo-V2.5-TTS-VoiceClone',
   ],
   modelMappings: {
     'MiMo-V2.6-Pro': 'mimo-v2.6-pro',
+    'MiMo-V2.6-Flash': 'mimo-v2.6-flash',
+    'MiMo-V2.5-TTS': 'mimo-v2.5-tts',
+    'MiMo-V2.5-TTS-VoiceDesign': 'mimo-v2.5-tts-voicedesign',
+    'MiMo-V2.5-TTS-VoiceClone': 'mimo-v2.5-tts-voiceclone',
   },
   credentialFields: [
     {

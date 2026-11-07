@@ -53,10 +53,10 @@
 | GLM              | Refresh Token | Yes   | GLM-5.3, GLM-5.3-flash |
 | Kimi             | JWT Token     | Yes   | Kimi-K2.6 |
 | MiniMax          | JWT Token     | Yes   | MiniMax-M3.1-Flash, MiniMax-M3, MiniMax-M2.7 |
-| Mimo             | Cookie        | Yes   | MiMo-V2.6-Pro |
+| Mimo             | Cookie        | Yes   | MiMo-V2.6-Pro, MiMo-V2.6-Flash, MiMo-V2.5-TTS, MiMo-V2.5-TTS-VoiceDesign, MiMo-V2.5-TTS-VoiceClone |
 | Perplexity       | Cookie        | Yes   | Auto |
-| Qwen (CN)        | SSO Ticket    | Yes   | Qwen3.8, Qwen3.8-Max, Qwen3.8-Flash, Qwen3.8-Omni-Flash |
-| Qwen AI (Global) | JWT Token     | Yes   | Qwen3.8-Max, Qwen3.8-Plus, Qwen3.8-Flash, Qwen3.8-Omni-Flash |
+| Qwen (CN)        | SSO Ticket    | Yes   | Qwen3.8, Qwen3.8-Max, Qwen3.8-Flash, Qwen3.8-Omni-Flash, Qwen-Image-3.0, Wan3.0-Video |
+| Qwen AI (Global) | JWT Token     | Yes   | Qwen3.8-Max, Qwen3.8-Plus, Qwen3.8-Flash, Qwen3.8-Omni-Flash, Qwen-Image-3.0, Wan3.0-Video |
 | Z.ai             | JWT Token     | Yes   | Temporarily unavailable due to frontend captcha risk control                                                                                                                                                                                    |
 
 Provider adaptation notes and manual model-addition guides are in [docs/providers](docs/providers/README.md).

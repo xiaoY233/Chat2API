@@ -16,10 +16,14 @@
 | Qwen3.8-Max | Qwen3.8-Max |
 | Qwen3.8-Flash | Qwen3.8-Flash |
 | Qwen3.8-Omni-Flash | Qwen3.8-Omni-Flash |
+| Qwen-Image-3.0 | Qwen-Image-3.0 |
+| Wan3.0-Video | Wan3.0-Video |
 
 ## 适配状态
 
 已适配：国内版网页对话、流式对话、非流式对话、多轮会话、账号级批量清理对话记录、文件记录清理。
+
+说明：`Qwen-Image-3.0` 与 `Wan3.0-Video` 作为网页模型清单列出；当前代理仍以对话接口为主，独立的图像/视频生成端点不在本适配范围内。
 
 后续验证：官网模型名称、批量删除会话接口、附件/文件记录清理字段。
 

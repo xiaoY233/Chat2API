@@ -20,12 +20,16 @@ export const qwenConfig: BuiltinProviderConfig = {
     'Qwen3.8-Max',
     'Qwen3.8-Flash',
     'Qwen3.8-Omni-Flash',
+    'Qwen-Image-3.0',
+    'Wan3.0-Video',
   ],
   modelMappings: {
     'Qwen3.8': 'Qwen',
     'Qwen3.8-Max': 'Qwen3.8-Max',
     'Qwen3.8-Flash': 'Qwen3.8-Flash',
     'Qwen3.8-Omni-Flash': 'Qwen3.8-Omni-Flash',
+    'Qwen-Image-3.0': 'Qwen-Image-3.0',
+    'Wan3.0-Video': 'Wan3.0-Video',
   },
   credentialFields: [
     {

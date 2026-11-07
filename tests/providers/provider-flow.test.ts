@@ -265,12 +265,16 @@ test('domestic Qwen models match the web chat model ids captured from HAR', () =
     'Qwen3.8-Max',
     'Qwen3.8-Flash',
     'Qwen3.8-Omni-Flash',
+    'Qwen-Image-3.0',
+    'Wan3.0-Video',
   ]
   const expectedMappings = {
     'Qwen3.8': 'Qwen',
     'Qwen3.8-Max': 'Qwen3.8-Max',
     'Qwen3.8-Flash': 'Qwen3.8-Flash',
     'Qwen3.8-Omni-Flash': 'Qwen3.8-Omni-Flash',
+    'Qwen-Image-3.0': 'Qwen-Image-3.0',
+    'Wan3.0-Video': 'Wan3.0-Video',
   }
 
   assert.deepEqual(qwenConfig.supportedModels, expectedModels)
@@ -281,6 +285,8 @@ test('domestic Qwen models match the web chat model ids captured from HAR', () =
   const en = JSON.parse(readFileSync(join(root, 'src/renderer/src/i18n/locales/en-US.json'), 'utf8'))
 
   assert.match(qwenAdapterSource, /'Qwen3\.8': 'Qwen'/)
+  assert.match(qwenAdapterSource, /'Qwen-Image-3\.0': 'Qwen-Image-3\.0'/)
+  assert.match(qwenAdapterSource, /'Wan3\.0-Video': 'Wan3\.0-Video'/)
   assert.doesNotMatch(qwenAdapterSource, /'Qwen3-Coder': 'Qwen3-Coder'/)
   assert.doesNotMatch(qwenAdapterSource, /qwen3-coder-plus|tongyi-qwen3-max-model-agent|tongyi-qwen-plus-agent/)
   assert.deepEqual(zh.qwen.models, expectedMappings)
@@ -293,12 +299,16 @@ test('Qwen AI defaults keep only the filtered current web model set', () => {
     'Qwen3.8-Plus',
     'Qwen3.8-Flash',
     'Qwen3.8-Omni-Flash',
+    'Qwen-Image-3.0',
+    'Wan3.0-Video',
   ]
   const expectedMappings = {
     'Qwen3.8-Max': 'qwen3.8-max',
     'Qwen3.8-Plus': 'qwen3.8-plus',
     'Qwen3.8-Flash': 'qwen3.8-flash',
     'Qwen3.8-Omni-Flash': 'qwen3.8-omni-flash',
+    'Qwen-Image-3.0': 'qwen-image-3.0',
+    'Wan3.0-Video': 'wan3.0-video',
   }
 
   assert.deepEqual(qwenAiConfig.supportedModels, expectedModels)
@@ -327,6 +337,8 @@ test('Qwen AI defaults keep only the filtered current web model set', () => {
   assert.match(qwenAiAdapterSource, /qwen3:\s*'qwen3\.8-max'/)
   assert.match(qwenAiAdapterSource, /'qwen3\.8':\s*'qwen3\.8-max'/)
   assert.match(qwenAiAdapterSource, /'qwen3\.8-plus':\s*'qwen3\.8-plus'/)
+  assert.match(qwenAiAdapterSource, /'qwen-image-3\.0':\s*'qwen-image-3\.0'/)
+  assert.match(qwenAiAdapterSource, /'wan3\.0-video':\s*'wan3\.0-video'/)
   assert.doesNotMatch(qwenAiAdapterSource, /'qwen3-coder':\s*'qwen3-coder-plus'/)
   assert.doesNotMatch(qwenAiAdapterSource, /'qwen3\.5':/)
   assert.doesNotMatch(qwenAiAdapterSource, /'qwen3-vl':/)
@@ -471,9 +483,18 @@ test('README Supported Providers model lists mirror current defaults with Perple
 })
 
 test('Mimo model names and conversation flow match Xiaomi AI Studio web requests', () => {
-  assert.deepEqual(mimoConfig.supportedModels, ['MiMo-V2.6-Pro'])
+  assert.deepEqual(mimoConfig.supportedModels, [
+    'MiMo-V2.6-Pro',
+    'MiMo-V2.6-Flash',
+    'MiMo-V2.5-TTS',
+    'MiMo-V2.5-TTS-VoiceDesign',
+    'MiMo-V2.5-TTS-VoiceClone',
+  ])
   assert.equal(mimoConfig.modelMappings?.['MiMo-V2.6-Pro'], 'mimo-v2.6-pro')
-  assert.equal(mimoConfig.modelMappings?.['MiMo-V2.6-Flash'], undefined)
+  assert.equal(mimoConfig.modelMappings?.['MiMo-V2.6-Flash'], 'mimo-v2.6-flash')
+  assert.equal(mimoConfig.modelMappings?.['MiMo-V2.5-TTS'], 'mimo-v2.5-tts')
+  assert.equal(mimoConfig.modelMappings?.['MiMo-V2.5-TTS-VoiceDesign'], 'mimo-v2.5-tts-voicedesign')
+  assert.equal(mimoConfig.modelMappings?.['MiMo-V2.5-TTS-VoiceClone'], 'mimo-v2.5-tts-voiceclone')
   assert.equal(mimoConfig.modelMappings?.['MiMo-V2.6-Pro-UltraSpeed'], undefined)
 
   const forwarderSource = readFileSync(
