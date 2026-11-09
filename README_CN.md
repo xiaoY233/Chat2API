@@ -66,7 +66,7 @@
 
 ### 下载安装
 
-从 [GitHub Releases](https://github.com/xiaoY233/Chat2API/releases) 下载最新版本：
+从 [GitHub Releases](https://github.com/JustScriptzz/Chat2API/releases) 下载最新版本：
 
 | 平台                    | 下载文件                                   |
 | --------------------- | -------------------------------------- |
@@ -85,7 +85,7 @@
 
 ```bash
 # 克隆仓库
-git clone https://github.com/xiaoY233/Chat2API.git
+git clone https://github.com/JustScriptzz/Chat2API.git
 cd Chat2API
 
 # 安装依赖
@@ -243,7 +243,7 @@ sudo xattr -rd com.apple.quarantine "/Applications/Chat2API.app"
 
 ### 如何更新？
 
-在 **关于** 页面检查更新，或从 [GitHub Releases](https://github.com/xiaoY233/Chat2API/releases) 下载最新版本。
+在 **关于** 页面检查更新，或从 [GitHub Releases](https://github.com/JustScriptzz/Chat2API/releases) 下载最新版本。
 
 ## 🤝 贡献
 

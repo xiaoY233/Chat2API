@@ -66,7 +66,7 @@ Provider adaptation notes and manual model-addition guides are in [docs/provider
 
 ### Download
 
-Download the latest release from [GitHub Releases](https://github.com/xiaoY233/Chat2API/releases):
+Download the latest release from [GitHub Releases](https://github.com/JustScriptzz/Chat2API/releases):
 
 | Platform              | Download                                |
 | --------------------- | --------------------------------------- |
@@ -85,7 +85,7 @@ Download the latest release from [GitHub Releases](https://github.com/xiaoY233/C
 
 ```bash
 # Clone the repository
-git clone https://github.com/xiaoY233/Chat2API.git
+git clone https://github.com/JustScriptzz/Chat2API.git
 cd Chat2API
 
 # Install dependencies
@@ -243,7 +243,7 @@ sudo xattr -rd com.apple.quarantine "/Applications/Chat2API.app"
 
 ### How to update?
 
-Check for updates in the **About** page, or download the latest version from [GitHub Releases](https://github.com/xiaoY233/Chat2API/releases).
+Check for updates in the **About** page, or download the latest version from [GitHub Releases](https://github.com/JustScriptzz/Chat2API/releases).
 
 ## 🤝 Contributing
 
