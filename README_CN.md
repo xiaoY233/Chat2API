@@ -245,6 +245,15 @@ sudo xattr -rd com.apple.quarantine "/Applications/Chat2API.app"
 
 在 **关于** 页面检查更新，或从 [GitHub Releases](https://github.com/JustScriptzz/Chat2API/releases) 下载最新版本。
 
+### Linux 提示 `glxQueryExtensionsString returned NULL` / `Initialization of all EGL display types failed`
+
+Chromium 启动时会通过 GLX/EGL 初始化 ANGLE。出现这些错误说明没有可用的 GL 驱动，常见于 Xvfb、WSL、虚拟机和远程 X 会话。应用会自动检测并切换到软件渲染（SwiftShader），因此这些日志本身无害。也可以手动指定：
+
+```bash
+CHAT2API_DISABLE_GPU=1 ./Chat2API   # 始终使用软件渲染
+CHAT2API_DISABLE_GPU=0 ./Chat2API   # 始终尝试硬件 GL
+```
+
 ## 🤝 贡献
 
 1. Fork 本项目

@@ -245,6 +245,15 @@ sudo xattr -rd com.apple.quarantine "/Applications/Chat2API.app"
 
 Check for updates in the **About** page, or download the latest version from [GitHub Releases](https://github.com/JustScriptzz/Chat2API/releases).
 
+### Linux: `glxQueryExtensionsString returned NULL` / `Initialization of all EGL display types failed`
+
+Chromium tries to initialize ANGLE through GLX/EGL at startup. Those errors mean there is no usable GL driver — common under Xvfb, WSL, VMs, or remote X sessions. The app detects this and switches to software rendering (SwiftShader) automatically, so the messages are harmless. To force a mode yourself:
+
+```bash
+CHAT2API_DISABLE_GPU=1 ./Chat2API   # always software rendering
+CHAT2API_DISABLE_GPU=0 ./Chat2API   # always try hardware GL
+```
+
 ## 🤝 Contributing
 
 1. Fork the project

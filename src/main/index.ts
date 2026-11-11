@@ -1,6 +1,7 @@
 import { app, BrowserWindow } from 'electron'
 import { join } from 'path'
 import { createWindow, getMainWindow, loadUrl, loadFile, openDevTools } from './window/manager'
+import { applySoftwareRenderingSwitches, shouldUseSoftwareRendering } from './window/gpu'
 import { createTrayManager, TrayManager } from './tray/TrayManager'
 import { registerIpcHandlers } from './ipc/handlers'
 import { UpdaterManager } from './updater'
@@ -26,6 +27,14 @@ if (process.platform === 'darwin' && process.arch === 'arm64') {
 // Automatically add --no-sandbox flag when running as root user
 if (process.getuid && process.getuid() === 0) {
   console.log('Detected running as root user, sandbox settings have been automatically handled')
+}
+
+// Headless containers, Xvfb and remote X sessions have no usable GL driver, so
+// Chromium's ANGLE probe fails noisily before falling back to software anyway.
+// Choose software rendering up front instead of waiting for that failure.
+if (shouldUseSoftwareRendering()) {
+  console.log('No hardware GPU detected, using software rendering (SwiftShader)')
+  applySoftwareRenderingSwitches(app)
 }
 
 declare module 'electron' {
