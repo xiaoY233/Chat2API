@@ -44,6 +44,10 @@ const DEFAULT_HEADERS = {
 const MODEL_ALIASES: Record<string, string> = {
   qwen: 'qwen3.8-max',
   qwen3: 'qwen3.8-max',
+  qwen4: 'qwen4.0-max-preview',
+  'qwen4-max': 'qwen4.0-max-preview',
+  'qwen4.0': 'qwen4.0-max-preview',
+  'qwen4.0-max-preview': 'qwen4.0-max-preview',
   'qwen3.8': 'qwen3.8-max',
   'qwen3.8-max': 'qwen3.8-max',
   'qwen3.8-plus': 'qwen3.8-plus',
@@ -266,6 +270,11 @@ export class QwenAiAdapter {
       // Auto-enable thinking based on model name keywords (e.g. "Qwen3.8-Plus-AI-Think-Search")
       forceThinking = true
       console.log('[QwenAI] Thinking mode enabled (from model name keyword)')
+    } else if (modelLower.includes('qwen4')) {
+      // chat.qwen.ai reports auto_thinking with think_skip disabled for Qwen4,
+      // so thinking is part of the model's normal behavior.
+      forceThinking = true
+      console.log('[QwenAI] Thinking mode enabled (Qwen4 auto thinking)')
     } else {
       // Use the forceThinking from mapModel if no originalModel-specific detection
       forceThinking = (this as any)._forceThinking

@@ -57,7 +57,7 @@
 | LongCat          | Cookie        | No    | LongCat, LongCat-Search |
 | Perplexity       | Cookie        | Yes   | Auto |
 | Qwen (CN)        | SSO Ticket    | Yes   | Qwen3.8, Qwen3.8-Max, Qwen3.8-Flash, Qwen3.8-Omni-Flash |
-| Qwen AI (Global) | JWT Token     | Yes   | Qwen3.8-Max, Qwen3.8-Plus, Qwen3.8-Flash, Qwen3.8-Omni-Flash, Qwen-Image-3.0, Wan3.0-Video |
+| Qwen AI (Global) | JWT Token     | Yes   | Qwen4-Max-Preview, Qwen3.8-Max, Qwen3.8-Plus, Qwen3.8-Flash, Qwen3.8-Omni-Flash, Qwen-Image-3.0, Wan3.0-Video |
 | Z.ai             | JWT Token     | Yes   | GLM-5.3, GLM-5.3-flash, GLM-5.2 |
 
 Provider adaptation notes and manual model-addition guides are in [docs/providers](docs/providers/README.md). MiMo TTS models require an optional `api_key` account credential; Qwen image/video generation is available through Qwen AI (Global). Z.ai generates its captcha parameter automatically through a hidden captcha window.

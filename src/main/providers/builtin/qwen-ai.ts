@@ -22,6 +22,7 @@ export const qwenAiConfig: BuiltinProviderConfig = {
     Version: '0.2.35',
   },
   supportedModels: [
+    'Qwen4-Max-Preview',
     'Qwen3.8-Max',
     'Qwen3.8-Plus',
     'Qwen3.8-Flash',
@@ -30,6 +31,7 @@ export const qwenAiConfig: BuiltinProviderConfig = {
     'Wan3.0-Video',
   ],
   modelMappings: {
+    'Qwen4-Max-Preview': 'qwen4.0-max-preview',
     'Qwen3.8-Max': 'qwen3.8-max',
     'Qwen3.8-Plus': 'qwen3.8-plus',
     'Qwen3.8-Flash': 'qwen3.8-flash',

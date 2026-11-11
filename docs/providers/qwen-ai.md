@@ -10,10 +10,11 @@
 
 ## 默认模型
 
-内置默认模型只保留当前筛选后的稳定清单：以 Qwen3.8 系列为主，排除 Preview 版本，并补充 Qwen 图像与视频生成模型。
+内置默认模型只保留当前筛选后的稳定清单：以 Qwen4 与 Qwen3.8 系列为主，并补充 Qwen 图像与视频生成模型。
 
 | 显示名称 | 实际模型 ID |
 | --- | --- |
+| Qwen4-Max-Preview | qwen4.0-max-preview |
 | Qwen3.8-Max | qwen3.8-max |
 | Qwen3.8-Plus | qwen3.8-plus |
 | Qwen3.8-Flash | qwen3.8-flash |
@@ -51,6 +52,8 @@
 已适配：国际版网页对话、流式对话、非流式对话、多轮会话、账号级清理对话记录、思考模式后缀、模型别名。
 
 说明：`Qwen-Image-3.0` 与 `Wan3.0-Video` 通过官网对话接口的 `t2i` / `t2v` 会话生成：创建媒体会话后在 `messages[0].extra.meta.model` 传入生成模型，图像直接从流式响应提取 URL，视频从响应提取 `task_id` 并轮询 `/api/v1/tasks/status/{taskId}`。结果以 Markdown 图片/视频链接返回在 `choices[0].message.content` 中，可用请求体 `size` 传入 `1024x1024`、`16:9` 等尺寸或比例。
+
+说明：`Qwen4-Max-Preview` 的模型 ID 为 `qwen4.0-max-preview`，来自 `chat.qwen.ai` 的 `/api/models` 接口（`is_visitor_active: false`，需要登录账号）。该模型默认开启思考与联网能力，上下文 1M。
 
 后续验证：官网反爬请求头、模型接口版本、Preview 邀请模型是否仍可用、图片/多模态模型字段。
 
