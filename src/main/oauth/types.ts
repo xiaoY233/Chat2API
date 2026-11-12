@@ -208,4 +208,14 @@ export const MANUAL_TOKEN_CONFIGS: Record<ProviderType, ManualTokenConfig[]> = {
       helpUrl: 'https://www.perplexity.ai',
     },
   ],
+  longcat: [
+    {
+      providerType: 'longcat',
+      tokenType: 'cookie',
+      label: 'passport_token_key Cookie',
+      placeholder: 'Enter passport_token_key or the full Cookie header',
+      description: 'Log in to longcat.ai, then copy the passport_token_key cookie (or use the OAuth Login tab)',
+      helpUrl: 'https://longcat.ai/chat',
+    },
+  ],
 }

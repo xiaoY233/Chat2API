@@ -1,5 +1,6 @@
 import axios, { AxiosError } from 'axios'
 import { getBuiltinProvider } from './builtin'
+import { LONGCAT_API_BASE, buildLongCatCookieHeader, longCatHeaders } from './longcatCookie'
 import type { Provider, ProviderCheckResult, Account } from '../../shared/types'
 import type { BuiltinProviderConfig } from '../store/types'
 
@@ -148,9 +149,7 @@ export class ProviderChecker {
       case 'perplexity':
         return this.checkPerplexityToken(account.credentials.sessionToken || account.credentials.token)
       case 'longcat':
-        return this.checkLongCatToken(
-          account.credentials.passport_token_key || account.credentials.cookie || account.credentials.token || '',
-        )
+        return this.checkLongCatToken(account.credentials)
       case 'mimo':
         return this.checkMimoToken(
           account.credentials.service_token,
@@ -599,29 +598,18 @@ export class ProviderChecker {
     }
   }
 
-  private static async checkLongCatToken(rawCookie: string): Promise<TokenCheckResult> {
-    if (!rawCookie) {
+  private static async checkLongCatToken(credentials: Record<string, string>): Promise<TokenCheckResult> {
+    const cookie = buildLongCatCookieHeader(credentials)
+    if (!cookie) {
       return { valid: false, error: 'passport_token_key cookie is required' }
     }
-
-    const trimmed = rawCookie.trim()
-    const cookie = /passport_token_key\s*=/i.test(trimmed) || trimmed.includes(';')
-      ? trimmed
-      : `passport_token_key=${trimmed}`
 
     try {
       const response = await axios({
         method: 'GET',
-        url: 'https://longcat.chat/api/v1/user-current',
-        headers: {
-          Accept: 'application/json',
-          Origin: 'https://longcat.chat',
-          Referer: 'https://longcat.chat/',
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
-          'X-Client-Language': 'en',
-          'X-Requested-With': 'XMLHttpRequest',
-          Cookie: cookie,
-        },
+        url: `${LONGCAT_API_BASE}/api/v1/user-current`,
+        params: { t: Date.now() },
+        headers: longCatHeaders(cookie),
         timeout: CHECK_TIMEOUT,
         validateStatus: () => true,
       })

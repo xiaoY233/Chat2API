@@ -1,8 +1,9 @@
 /**
  * LongCat Adapter
  *
- * Drives the LongCat web chat (https://longcat.chat) with the
- * `passport_token_key` cookie. No official API key is involved.
+ * Drives the LongCat web chat (https://longcat.ai) with the
+ * `passport_token_key` cookie (or the full captured cookie jar).
+ * No official API key is involved.
  *
  * Flow:
  *   POST /api/v1/session-create   -> conversationId
@@ -17,10 +18,13 @@ import { Account, Provider } from '../../store/types'
 import { createBaseChunk } from '../utils/streamToolHandler'
 import { ToolStreamParser } from '../toolCalling/ToolStreamParser'
 import type { ToolCallingPlan } from '../toolCalling/types'
+import {
+  LONGCAT_API_BASE,
+  LONGCAT_USER_AGENT,
+  buildLongCatCookieHeader,
+} from '../../providers/longcatCookie'
 
-const LONGCAT_API_BASE = 'https://longcat.chat'
-const LONGCAT_USER_AGENT =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36'
+export { normalizeLongCatCookie } from '../../providers/longcatCookie'
 
 const LONGCAT_HEADERS: Record<string, string> = {
   'Accept': 'text/event-stream,application/json',
@@ -92,20 +96,6 @@ export function flattenLongCatMessages(messages: LongCatMessage[]): string {
     })
     .filter((value): value is string => Boolean(value))
     .join(';')
-}
-
-export function normalizeLongCatCookie(value: string): string {
-  const trimmed = (value || '').trim()
-  if (!trimmed) {
-    return ''
-  }
-  if (/passport_token_key\s*=/i.test(trimmed)) {
-    return trimmed
-  }
-  if (trimmed.includes('=') && trimmed.includes(';')) {
-    return trimmed
-  }
-  return `passport_token_key=${trimmed}`
 }
 
 export function resolveLongCatOptions(request: LongCatChatRequest): {
@@ -214,19 +204,14 @@ export class LongCatAdapter {
   static isLongCatProvider(provider: Provider): boolean {
     return (
       provider.id === 'longcat' ||
+      provider.apiEndpoint.includes('longcat.ai') ||
       provider.apiEndpoint.includes('longcat.chat')
     )
   }
 
   private getCookie(): string {
     const credentials = this.account.credentials || {}
-    const raw =
-      credentials.passport_token_key ||
-      credentials.cookie ||
-      credentials.sessionToken ||
-      credentials.token ||
-      ''
-    const cookie = normalizeLongCatCookie(raw)
+    const cookie = buildLongCatCookieHeader(credentials)
     if (!cookie) {
       throw new Error('LongCat passport_token_key cookie is not configured')
     }

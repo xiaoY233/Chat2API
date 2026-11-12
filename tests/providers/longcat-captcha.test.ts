@@ -15,6 +15,11 @@ import {
   normalizeLongCatCookie,
   resolveLongCatOptions,
 } from '../../src/main/proxy/adapters/longcat.ts'
+import {
+  buildLongCatCookieHeader,
+  normalizeLongCatCookie as normalizeLongCatCookieFromHelper,
+} from '../../src/main/providers/longcatCookie.ts'
+import { getTokenExtractionConfig } from '../../src/main/oauth/tokenExtractionConfig.ts'
 
 test('Z.ai captcha helpers generate deterministic Aliyun signatures and payloads', () => {
   const params = {
@@ -58,7 +63,51 @@ test('LongCat flattens messages and normalizes cookie input', () => {
     'passport_token_key=abc',
   )
   assert.equal(normalizeLongCatCookie('a=1; b=2'), 'a=1; b=2')
+  assert.equal(normalizeLongCatCookie('_lxsdk_cuid=xyz'), '_lxsdk_cuid=xyz')
+  assert.equal(
+    normalizeLongCatCookie('SME5/AEwvmtjSu4XO18SYg=='),
+    'passport_token_key=SME5/AEwvmtjSu4XO18SYg==',
+  )
   assert.equal(normalizeLongCatCookie(''), '')
+  assert.equal(normalizeLongCatCookieFromHelper('token-value'), 'passport_token_key=token-value')
+})
+
+test('LongCat cookie helper prefers the captured jar and keeps passport_token_key', () => {
+  assert.equal(
+    buildLongCatCookieHeader({ passport_token_key: 'token-value' }),
+    'passport_token_key=token-value',
+  )
+  assert.equal(
+    buildLongCatCookieHeader({ cookie: 'passport_token_key=abc; _lxsdk_cuid=xyz' }),
+    'passport_token_key=abc; _lxsdk_cuid=xyz',
+  )
+  assert.equal(
+    buildLongCatCookieHeader({ cookie: '_lxsdk_cuid=xyz', passport_token_key: 'abc' }),
+    '_lxsdk_cuid=xyz; passport_token_key=abc',
+  )
+  assert.equal(
+    buildLongCatCookieHeader({
+      cookie: 'passport_token_key=old; _lxsdk_cuid=xyz',
+      passport_token_key: 'new',
+    }),
+    'passport_token_key=new; _lxsdk_cuid=xyz',
+  )
+  assert.equal(buildLongCatCookieHeader({}), '')
+})
+
+test('LongCat OAuth config logs in at longcat.ai and captures the cookie jar', () => {
+  const config = getTokenExtractionConfig('longcat')
+  assert.ok(config)
+  assert.equal(config!.loginUrl, 'https://longcat.ai/chat')
+  assert.match(config!.windowTitle || '', /LongCat/)
+
+  const jarSource = config!.tokenSources.find((source) => source.type === 'cookieJar')
+  assert.ok(jarSource)
+  assert.equal(jarSource!.key, 'cookieJar')
+  assert.deepEqual(jarSource!.cookieDomains, ['longcat.ai', '.longcat.ai'])
+  assert.equal(jarSource!.probeUrl, 'https://longcat.ai/api/v1/user-current')
+  assert.equal(jarSource!.probeLoginStatusPath, 'data.loginStatus')
+  assert.match(config!.loginUrl, /longcat\.ai\/chat$/)
 })
 
 test('LongCat model selection toggles search and reasoning flags', () => {

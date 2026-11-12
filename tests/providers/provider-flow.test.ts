@@ -400,7 +400,7 @@ test('Z.ai docs and README reflect automatic captcha support', () => {
   assert.match(doc, /prod-fe-1\.1\.128/)
 })
 
-test('LongCat uses the passport_token_key cookie and web chat endpoints', () => {
+test('LongCat uses longcat.ai with the passport_token_key cookie and OAuth login', () => {
   assert.equal(longcatConfig.id, 'longcat')
   assert.equal(longcatConfig.authType, 'cookie')
   assert.deepEqual(longcatConfig.supportedModels, ['LongCat', 'LongCat-Search'])
@@ -409,7 +409,8 @@ test('LongCat uses the passport_token_key cookie and web chat endpoints', () => 
     'LongCat-Search': 'LongCat-Search',
   })
   assert.equal(longcatConfig.credentialFields?.[0]?.name, 'passport_token_key')
-  assert.match(longcatConfig.apiEndpoint, /longcat\.chat/)
+  assert.match(longcatConfig.apiEndpoint, /longcat\.ai/)
+  assert.doesNotMatch(longcatConfig.apiEndpoint, /longcat\.chat/)
 
   const longcatAdapterSource = readFileSync(join(root, 'src/main/proxy/adapters/longcat.ts'), 'utf8')
   assert.match(longcatAdapterSource, /passport_token_key/)
@@ -418,8 +419,18 @@ test('LongCat uses the passport_token_key cookie and web chat endpoints', () => 
   assert.match(longcatAdapterSource, /\/api\/v1\/chat-completion-V2/)
   assert.match(longcatAdapterSource, /\/api\/v1\/session-delete/)
 
+  const oauthAdapterSource = readFileSync(join(root, 'src/main/oauth/adapters/longcat.ts'), 'utf8')
+  assert.match(oauthAdapterSource, /longcat\.ai/)
+  assert.match(oauthAdapterSource, /\/api\/v1\/user-current/)
+
+  const tokenConfigSource = readFileSync(join(root, 'src/main/oauth/tokenExtractionConfig.ts'), 'utf8')
+  assert.match(tokenConfigSource, /loginUrl: 'https:\/\/longcat\.ai\/chat'/)
+  assert.match(tokenConfigSource, /type: 'cookieJar'/)
+
   const longcatDoc = readFileSync(join(root, 'docs/providers/longcat.md'), 'utf8')
   assert.match(longcatDoc, /passport_token_key/)
+  assert.match(longcatDoc, /longcat\.ai/)
+  assert.match(longcatDoc, /OAuth/)
   assert.match(longcatDoc, /LongCat-Search/)
 })
 

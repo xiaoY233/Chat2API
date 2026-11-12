@@ -142,13 +142,14 @@ export function LoginGuideDialog({
       ],
     },
     longcat: {
-      loginUrl: 'https://longcat.chat',
+      loginUrl: 'https://longcat.ai/chat',
       steps: [
         t('loginGuide.openWebsite', { provider: t('longcat.name') }),
+        'Or use the OAuth Login tab to sign in inside the app',
         t('oauth.step1'),
         t('oauth.step2'),
         t('oauth.step3'),
-        'In Cookies → longcat.chat',
+        'In Cookies → longcat.ai',
         'Find passport_token_key and copy its value',
         t('loginGuide.paste'),
       ],

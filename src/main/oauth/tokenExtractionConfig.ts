@@ -5,13 +5,19 @@
 
 import { ProviderType } from './types'
 
-export type TokenSourceType = 'networkHeader' | 'localStorage' | 'cookie'
+export type TokenSourceType = 'networkHeader' | 'localStorage' | 'cookie' | 'cookieJar'
 
 export interface TokenSource {
   type: TokenSourceType
   key: string
   urlPattern?: string
   extractPattern?: string
+  /** cookieJar: cookie domains to collect (e.g. ['longcat.ai']) */
+  cookieDomains?: string[]
+  /** cookieJar: endpoint used to confirm the session before emitting */
+  probeUrl?: string
+  /** cookieJar: dot path in the JSON response that must equal 1 */
+  probeLoginStatusPath?: string
 }
 
 export interface TokenExtractionConfig {
@@ -20,6 +26,8 @@ export interface TokenExtractionConfig {
   targetDomains: string[]
   successUrlPatterns?: RegExp[]
   windowTitle?: string
+  windowWidth?: number
+  windowHeight?: number
 }
 
 export const TOKEN_EXTRACTION_CONFIGS: Record<ProviderType, TokenExtractionConfig> = {
@@ -145,6 +153,25 @@ export const TOKEN_EXTRACTION_CONFIGS: Record<ProviderType, TokenExtractionConfi
     targetDomains: ['.qwen.ai', 'qwen.ai', 'chat.qwen.ai'],
     successUrlPatterns: [/chat\.qwen\.ai/i, /qwen\.ai/i],
     windowTitle: 'Qwen AI Login',
+  },
+  longcat: {
+    loginUrl: 'https://longcat.ai/chat',
+    tokenSources: [
+      {
+        // Capture the whole longcat.ai cookie jar after login, since the
+        // session needs passport_token_key plus optional _lxsdk_* cookies.
+        type: 'cookieJar',
+        key: 'cookieJar',
+        cookieDomains: ['longcat.ai', '.longcat.ai'],
+        probeUrl: 'https://longcat.ai/api/v1/user-current',
+        probeLoginStatusPath: 'data.loginStatus',
+      },
+    ],
+    targetDomains: ['.longcat.ai', 'longcat.ai', '.meituan.com', 'meituan.com', '.mykeeta.com', 'mykeeta.com'],
+    successUrlPatterns: [/longcat\.ai/i],
+    windowTitle: 'LongCat Login',
+    windowWidth: 1000,
+    windowHeight: 760,
   },
   perplexity: {
     loginUrl: 'https://www.perplexity.ai',

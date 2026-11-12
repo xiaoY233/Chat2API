@@ -113,6 +113,19 @@ function mapOAuthCredentials(providerId: string | undefined, credentials: Record
     return { sessionToken: credentials['next-auth.session-token'] }
   }
 
+  if (providerId === 'longcat') {
+    const result: Record<string, string> = {}
+    const cookie = credentials.cookie || credentials.cookieJar || ''
+    const passport = credentials.passport_token_key || ''
+    if (cookie) {
+      result.cookie = cookie
+    }
+    if (passport || cookie) {
+      result.passport_token_key = passport || cookie
+    }
+    return result
+  }
+
   if (providerId === 'mimo') {
     console.log('[mapOAuthCredentials] Processing Mimo credentials')
     const result: Record<string, string> = {}
@@ -220,7 +233,7 @@ export function AddProviderDialog({
     ? providers.find((p) => p.id === selectedProvider) 
     : null
 
-  const supportsOAuth = selectedProviderData && ['deepseek', 'glm', 'kimi', 'mimo', 'minimax', 'qwen', 'qwen-ai', 'zai', 'perplexity'].includes(selectedProviderData.id)
+  const supportsOAuth = selectedProviderData && ['deepseek', 'glm', 'kimi', 'mimo', 'minimax', 'qwen', 'qwen-ai', 'zai', 'perplexity', 'longcat'].includes(selectedProviderData.id)
 
   const toggleModelExpansion = (providerId: string) => {
     setExpandedModels(prev => {

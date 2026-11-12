@@ -482,6 +482,28 @@ export class OAuthManager extends EventEmitter {
               ph_token: phToken,
             }
             console.log('[OAuthManager] Mimo: Final credentials prepared:', Object.keys(finalCredentials))
+          } else if (providerType === 'longcat') {
+            const cookieJar = collectedTokens.cookieJar || collectedTokens.cookie || ''
+            const allCookies = (collectedTokens.cookies as unknown as Record<string, string>) || {}
+            const passport = collectedTokens.passport_token_key || allCookies['passport_token_key'] || ''
+            const cookieHeader = cookieJar || (passport ? `passport_token_key=${passport}` : '')
+
+            if (!cookieHeader) {
+              console.log('[OAuthManager] LongCat: missing cookie jar, waiting for login...')
+              this.sendProgressToRenderer({
+                status: 'pending',
+                message: 'Waiting for LongCat login...',
+              })
+              isValidating = false
+              return
+            }
+
+            validationCredentials = { cookie: cookieHeader }
+            finalCredentials = {
+              passport_token_key: passport || cookieHeader,
+              cookie: cookieHeader,
+            }
+            console.log('[OAuthManager] LongCat: final credentials prepared:', Object.keys(finalCredentials))
           } else {
             validationCredentials = { ...collectedTokens }
             finalCredentials = { ...collectedTokens }

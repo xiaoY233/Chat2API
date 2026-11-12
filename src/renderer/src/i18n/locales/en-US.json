@@ -341,10 +341,10 @@
   },
   "longcat": {
     "name": "LongCat",
-    "description": "LongCat web chat (Meituan) using the passport_token_key cookie, with optional web search",
+    "description": "LongCat web chat (Meituan) on longcat.ai using the web session cookie, with optional web search",
     "passportTokenKey": "passport_token_key Cookie",
-    "passportTokenKeyPlaceholder": "Enter the passport_token_key cookie value",
-    "passportTokenKeyHelp": "Log in at longcat.chat, then open DevTools -> Application -> Cookies -> passport_token_key. Paste the cookie value, or the full Cookie header."
+    "passportTokenKeyPlaceholder": "Enter the passport_token_key cookie value or full Cookie header",
+    "passportTokenKeyHelp": "Use the OAuth Login tab to sign in to longcat.ai automatically. Manual fallback: DevTools -> Application -> Cookies -> longcat.ai -> passport_token_key. You can paste the cookie value or the full Cookie header."
   },
   "proxy": {
     "title": "Proxy Settings",

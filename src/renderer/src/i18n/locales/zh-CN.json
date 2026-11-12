@@ -341,10 +341,10 @@
   },
   "longcat": {
     "name": "LongCat",
-    "description": "LongCat 网页版（美团）聊天，使用 passport_token_key Cookie，支持联网搜索",
+    "description": "LongCat 网页版（美团）聊天，使用 longcat.ai 网页会话 Cookie，支持联网搜索",
     "passportTokenKey": "passport_token_key Cookie",
-    "passportTokenKeyPlaceholder": "请输入 passport_token_key Cookie 值",
-    "passportTokenKeyHelp": "登录 longcat.chat 后，打开开发者工具 -> Application -> Cookies -> passport_token_key，粘贴 Cookie 值或完整 Cookie 字符串。"
+    "passportTokenKeyPlaceholder": "请输入 passport_token_key Cookie 值或完整 Cookie 字符串",
+    "passportTokenKeyHelp": "可切换到 OAuth 登录标签页，在应用内登录 longcat.ai 自动获取。手动方式：登录 longcat.ai 后打开开发者工具 -> Application -> Cookies -> longcat.ai -> passport_token_key，粘贴 Cookie 值或完整 Cookie 字符串。"
   },
   "proxy": {
     "title": "代理设置",

@@ -54,7 +54,7 @@
 | Kimi             | JWT Token     | Yes   | Kimi-K2.6 |
 | MiniMax          | JWT Token     | Yes   | MiniMax-M3.1-Flash, MiniMax-M3, MiniMax-M2.7 |
 | Mimo             | Cookie        | Yes   | MiMo-V2.6-Pro, MiMo-V2.6-Flash, MiMo-V2.5-TTS, MiMo-V2.5-TTS-VoiceDesign, MiMo-V2.5-TTS-VoiceClone |
-| LongCat          | Cookie        | No    | LongCat, LongCat-Search |
+| LongCat          | Cookie        | Yes   | LongCat, LongCat-Search |
 | Perplexity       | Cookie        | Yes   | Auto |
 | Qwen (CN)        | SSO Ticket    | Yes   | Qwen3.8, Qwen3.8-Max, Qwen3.8-Flash, Qwen3.8-Omni-Flash |
 | Qwen AI (Global) | JWT Token     | Yes   | Qwen4-Max-Preview, Qwen3.8-Max, Qwen3.8-Plus, Qwen3.8-Flash, Qwen3.8-Omni-Flash, Qwen-Image-3.0, Wan3.0-Video |
