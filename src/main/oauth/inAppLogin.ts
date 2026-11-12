@@ -26,6 +26,10 @@ export interface InAppLoginOptions {
   providerType: ProviderType
   timeout?: number
   proxyMode?: 'system' | 'none'
+  /** Open the window hidden (used for silent credential re-acquisition). */
+  silent?: boolean
+  /** Override the persistent session partition (defaults to a per-provider one). */
+  partition?: string
 }
 
 const DEFAULT_TIMEOUT = 300000 // 5 minutes
@@ -100,7 +104,9 @@ export class InAppLoginManager extends EventEmitter {
   private createLoginWindow(): void {
     if (!this.config) return
 
-    const partition = `persist:oauth-${Date.now()}`
+    // A deterministic partition per provider keeps the login session on disk so
+    // expired tokens can later be re-acquired silently without another login.
+    const partition = this.options?.partition || `persist:oauth-${this.options?.providerType}`
     this.loginSession = session.fromPartition(partition)
 
     if (this.options?.proxyMode === 'none') {
@@ -124,10 +130,12 @@ export class InAppLoginManager extends EventEmitter {
       autoHideMenuBar: true,
     })
 
-    this.loginWindow.once('ready-to-show', () => {
-      this.loginWindow?.show()
-      this.emit('status', { status: 'ready', message: 'Login window ready - please log in' })
-    })
+    if (!this.options?.silent) {
+      this.loginWindow.once('ready-to-show', () => {
+        this.loginWindow?.show()
+        this.emit('status', { status: 'ready', message: 'Login window ready - please log in' })
+      })
+    }
 
     this.loginWindow.on('closed', () => {
       if (!this.isCompleted) {

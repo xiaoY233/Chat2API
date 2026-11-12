@@ -2,6 +2,7 @@ import axios, { AxiosError } from 'axios'
 import { getBuiltinProvider } from './builtin'
 import { LONGCAT_API_BASE, buildLongCatCookieHeader, longCatHeaders } from './longcatCookie'
 import { buildInceptionCookieHeader, fetchInceptionSessionToken, getInceptionClearance } from './inception'
+import { getQwenBaxiaSession, isQwenWafResponse } from '../proxy/adapters/qwen-baxia'
 import type { Provider, ProviderCheckResult, Account } from '../../shared/types'
 import type { BuiltinProviderConfig } from '../store/types'
 
@@ -146,7 +147,10 @@ export class ProviderChecker {
       case 'qwen':
         return this.checkQwenToken(account.credentials.ticket)
       case 'qwen-ai':
-        return this.checkQwenAiToken(account.credentials.token)
+        return this.checkQwenAiToken(
+          account.credentials.token,
+          account.credentials.cookies || account.credentials.cookie
+        )
       case 'perplexity':
         return this.checkPerplexityToken(account.credentials.sessionToken || account.credentials.token)
       case 'longcat':
@@ -219,7 +223,7 @@ export class ProviderChecker {
       }
       
       if (response.status === 401 || response.data?.code === 40003 || response.data?.data?.biz_code === 40003) {
-        return { valid: false, error: 'Token expired or invalid' }
+        return { valid: false, error: response.data?.msg || 'Token expired or invalid, please log in again' }
       }
       
       return { valid: false, error: `Validation failed: ${response.data?.msg || response.data?.message || JSON.stringify(response.data)}` }
@@ -362,8 +366,12 @@ export class ProviderChecker {
           },
         }
       }
-      
-      return { valid: false, error: 'Token expired or invalid' }
+
+      const detail =
+        response.data?.message ||
+        response.data?.error_type ||
+        response.data?.msg
+      return { valid: false, error: detail || 'Token expired or invalid, please log in again' }
     } catch (error) {
       console.error('[Kimi] Validation error:', error)
       return {
@@ -543,8 +551,16 @@ export class ProviderChecker {
     }
   }
 
-  private static async checkQwenAiToken(token: string): Promise<TokenCheckResult> {
+  private static async checkQwenAiToken(
+    token: string,
+    cookies?: string
+  ): Promise<TokenCheckResult> {
     try {
+      const baxia = await getQwenBaxiaSession()
+      const cookieHeader = [baxia?.cookies, cookies]
+        .filter((value): value is string => !!value)
+        .join('; ')
+
       const response = await axios.get(
         'https://chat.qwen.ai/api/v2/user',
         {
@@ -552,28 +568,47 @@ export class ProviderChecker {
             Authorization: `Bearer ${token}`,
             'Content-Type': 'application/json',
             Accept: 'application/json',
+            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
             source: 'web',
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36',
+            Origin: 'https://chat.qwen.ai',
+            ...(baxia
+              ? { 'bx-ua': baxia.bxUa, 'bx-umidtoken': baxia.bxUmidToken, 'bx-v': baxia.bxV }
+              : {}),
+            ...(cookieHeader ? { Cookie: cookieHeader } : {}),
           },
           timeout: CHECK_TIMEOUT,
           validateStatus: () => true,
+          transformResponse: [(data) => data],
         }
       )
 
-      if (response.status === 200 && response.data?.data) {
+      const contentType = String(response.headers?.['content-type'] || '')
+      if (isQwenWafResponse(contentType, typeof response.data === 'string' ? response.data : undefined)) {
+        return {
+          valid: false,
+          error: 'Qwen AI anti-bot (WAF) challenge could not be solved. Run Chat2API with a display and retry.',
+        }
+      }
+
+      const data = typeof response.data === 'string' ? JSON.parse(response.data) : response.data
+
+      if (response.status === 200 && data?.data) {
         return {
           valid: true,
           userInfo: {
-            name: response.data.data.name || response.data.data.email,
-            email: response.data.data.email,
+            name: data.data.name || data.data.email,
+            email: data.data.email,
           },
         }
       }
 
-      if (response.status === 401) {
+      if (response.status === 401 || data?.data?.code === 'unauthorized') {
         return { valid: false, error: 'Token expired or invalid' }
       }
 
-      return { valid: false, error: `Validation failed: HTTP ${response.status}` }
+      const detail = data?.data?.details || data?.data?.message || data?.msg
+      return { valid: false, error: `Validation failed: ${detail || `HTTP ${response.status}`}` }
     } catch (error) {
       return {
         valid: false,

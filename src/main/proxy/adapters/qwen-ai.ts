@@ -18,12 +18,17 @@ import {
   parseQwenAiMediaResponse,
   type QwenMediaKind,
 } from './qwen-ai-media'
+import {
+  getQwenBaxiaSession,
+  isQwenWafResponse,
+  type QwenBaxiaSession,
+} from './qwen-baxia'
 
 const QWEN_AI_BASE = 'https://chat.qwen.ai'
 
 const DEFAULT_HEADERS = {
   Accept: 'application/json',
-  'Accept-Language': 'zh-CN,zh;q=0.9',
+  'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
   'Content-Type': 'application/json',
   source: 'web',
   'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36',
@@ -33,12 +38,31 @@ const DEFAULT_HEADERS = {
   'Sec-Fetch-Dest': 'empty',
   'Sec-Fetch-Mode': 'cors',
   'Sec-Fetch-Site': 'same-origin',
-  'bx-v': '2.5.36',
-  'bx-umidtoken': 'T2gAr9z8byN8sNOmfQ3X9j61MNTNmSqDO5L1rs2jMcQCVhOKgZICcBN-UdTuJGig-NM=',
-  'bx-ua': '231!lWD36kmUe5E+joKDK5gBZ48FEl2ZWfPwIPF92lBLek2KxVW/XJ2EwruCiDOX5Px4EXNhmh6EfS9eDwQGRwijIK64A4nPqeLysJcDjUACje/H3J4ZgGZpicG6K8AkiGGaEKC830+QSiSUsLRlL/EyhXTmLcJc/5iDkMuOpUhNz0e0Q/nTqjVJ3ko00Q/oyE+jauHhUHfb1GxGHkE+++3+qCS4+ItkaA6tiItCo+romzElfLFD6RIj7oHt9vffs98nLwpHnaqKjufnLFMejSlAUGiQvTofIiGhIvftAMcoFV4mrUHsqyQ/ncQihmJHkbxXjvM57FCb6b9dEIRZl7jgj0+QLNLRs0NZ4azdZ6rzbGTSO8KA5I3Aq/3gBr87X16Mj0oJtaPKmFGaP2zghfOVhxQht8YjRd50lJa+Ue4PAuPSdu2O69DKLH8VOhrsB+psaBIRxnRi5POUQ6w8s8qlb9vxvExjHNOAKWXV1by1Nz+6FPWdyTeAgcmonjCcV0dCtPj/KyeVDkeSrDkKZjnDzHEqeCdfmJ65kve+Vy3YS0vagzyHfVEnzN0ULUZtkGfJXFNm6+bIa55wmGBhUeXbHL0EdlQXMu1YXxmcwBgTaq7tlQcfv7AefanbfjGE8R1IFnNyg2/jXLbnLg5Z6l1oKqgnxZQg0DE9BJuw6s0XjGwTdSxybWxp+WFD/RsXt76uwvCBk7z+YmSFLtFj2UlTsoq+vl0DTmsVItDKf9SZ94NcuJ7mxJYI02S/2kQBfbbHG0d4hXevDrEC0cb86EvzN2ud+v6bAunNRGNFz/RH0KLusoBVeo+puCFKeeIJWEo0t1UicX5YxJwMAoV7+g0gK93y4W9sMQtso8/wY5wsBzis9dwfLvIwXpaAM1g0MZp/YIRq8T/Qc+U/8x99tam4er0IWizvrkjqhIzCWBKpJ4Y4gj3bOmiS3VCMEaoVfKCwUWENwYKuP3H5VI0n+O2vVVRrekUrwvkm6URRhVhN4eEFTCjB9nSQu++qKyDH8HPpkS3YfwF8/OQtrZo7hQXxvNmP2HcH/K7zcweD00BaoOLiYUtXRItGYbl06sVSbm04soRf1Jqpyo3XiRqBWD9rmJfr4w8NOEGVGUCKXLDLsXy+8JC4Iqf0FsIjWxjMVdraTUtCbwXRbYUownQVm6bt7LYD1SNPoWNPqUJgsLMwP33ugrb1UbHCs24roOch6Go5QHIPA8E15SZE9pkr1SkmqrNs/+KRomFJ9HyFnWUYhZIV9MRLqlOAt6XBBTash3WJnCjhx/PZGhXVvdn2jX4+0Pm55LsiNugA8vaAUJQBxD/8a1u/RvTgbj35+b7I7m8tG0hMhClNZF+tpsOmZZhUGuXH9uVbkJMlMuAmMVCHwn3O31GlLeXXzzep2WS3xN2U+p5J0I7GySnuZUkuGs1ZTVqGUvR2g4q+7ljU55Ak78yPZiQXeUeqS74azszvZvCqWxXn2eePj+gcpliOjrYKpglUP19rQrMt8PqLt8L0ghIqVCmMwl3Hgr/VUcqDpXdpPTR=',
   Timezone: 'Mon Feb 23 2026 22:06:02 GMT+0800',
-  Version: '0.2.7',
+  Version: '0.3.41',
   Origin: 'https://chat.qwen.ai',
+}
+
+const WAF_ERROR_MESSAGE =
+  'Qwen AI refused the request with an Aliyun anti-bot (WAF) challenge. ' +
+  'Chat2API could not mint a fresh browser signature for this account. ' +
+  'Make sure Chat2API runs with a display, or retry in a moment.'
+
+function mergeCookieHeader(...parts: Array<string | undefined>): string {
+  const seen = new Set<string>()
+  const pairs: string[] = []
+  for (const part of parts) {
+    if (!part) continue
+    for (const pair of part.split(';')) {
+      const trimmed = pair.trim()
+      if (!trimmed) continue
+      const name = trimmed.split('=')[0]
+      if (seen.has(name)) continue
+      seen.add(name)
+      pairs.push(trimmed)
+    }
+  }
+  return pairs.join('; ')
 }
 
 const MODEL_ALIASES: Record<string, string> = {
@@ -110,26 +134,37 @@ export class QwenAiAdapter {
     return credentials.cookies || credentials.cookie || ''
   }
 
-  private getHeaders(chatId?: string): Record<string, string> {
+  private async buildHeaders(chatId?: string, session?: QwenBaxiaSession | null): Promise<Record<string, string>> {
+    const baxia = session === undefined ? await getQwenBaxiaSession() : session
     const headers: Record<string, string> = {
       ...DEFAULT_HEADERS,
       Authorization: `Bearer ${this.getToken()}`,
       'X-Request-Id': uuid(),
     }
 
+    if (baxia) {
+      headers['bx-ua'] = baxia.bxUa
+      headers['bx-umidtoken'] = baxia.bxUmidToken
+      headers['bx-v'] = baxia.bxV
+    }
+
     if (chatId) {
       headers['Referer'] = `https://chat.qwen.ai/c/${chatId}`
     }
 
-    const cookies = this.getCookies()
+    const cookies = mergeCookieHeader(baxia?.cookies, this.getCookies())
     if (cookies) {
       headers['Cookie'] = cookies
     } else {
-      console.warn('[QwenAI] Warning: No cookies provided. This may cause Bad_Request error.')
-      console.warn('[QwenAI] Required cookies: cnaui, aui, sca, xlly_s, cna, token, _bl_uid, x-ap')
+      console.warn('[QwenAI] Warning: No cookies available. Requests may be rejected by the anti-bot layer.')
     }
 
     return headers
+  }
+
+  private isWafResponse(response: AxiosResponse): boolean {
+    const contentType = response.headers?.['content-type'] as string | undefined
+    return isQwenWafResponse(contentType, typeof response.data === 'string' ? response.data : undefined)
   }
 
   mapModel(openaiModel: string): string {
@@ -178,23 +213,46 @@ export class QwenAiAdapter {
       project_id: '',
     }
 
-    try {
-      const response = await this.axiosInstance.post(url, payload, {
-        headers: this.getHeaders(),
-      })
+    let session = await getQwenBaxiaSession()
 
-      console.log('[QwenAI] Create chat response:', JSON.stringify(response.data, null, 2))
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const response = await this.axiosInstance.post(url, payload, {
+          headers: await this.buildHeaders(undefined, session),
+          validateStatus: () => true,
+        })
 
-      if (response.data?.data?.id) {
-        console.log('[QwenAI] Created chat:', response.data.data.id)
-        return response.data.data.id
+        if (this.isWafResponse(response)) {
+          if (attempt === 0) {
+            console.warn('[QwenAI] Create chat hit the Aliyun WAF, refreshing baxia session...')
+            session = await getQwenBaxiaSession(true)
+            continue
+          }
+          throw new Error(WAF_ERROR_MESSAGE)
+        }
+
+        if (response.data?.data?.id) {
+          console.log('[QwenAI] Created chat:', response.data.data.id)
+          return response.data.data.id
+        }
+
+        const detail =
+          response.data?.data?.details ||
+          response.data?.data?.message ||
+          response.data?.msg ||
+          response.data?.message ||
+          response.data?.data?.code
+        const status = response.status && response.status !== 200 ? `HTTP ${response.status}: ` : ''
+        throw new Error(
+          `Failed to create chat: ${status}${detail || 'no chat ID returned'}`
+        )
+      } catch (error) {
+        console.error('[QwenAI] Failed to create chat:', error)
+        throw error
       }
-
-      throw new Error('Failed to create chat: no chat ID returned')
-    } catch (error) {
-      console.error('[QwenAI] Failed to create chat:', error)
-      throw error
     }
+
+    throw new Error(WAF_ERROR_MESSAGE)
   }
 
   async deleteChat(chatId: string): Promise<boolean> {
@@ -202,7 +260,7 @@ export class QwenAiAdapter {
 
     try {
       const response = await this.axiosInstance.delete(url, {
-        headers: this.getHeaders(),
+        headers: await this.buildHeaders(),
       })
 
       if (response.data?.success) {
@@ -229,7 +287,7 @@ export class QwenAiAdapter {
       console.log('[QwenAI] Deleting all chats for account')
       
       const response = await this.axiosInstance.delete(url, {
-        headers: this.getHeaders(),
+        headers: await this.buildHeaders(),
       })
 
       if (response.data?.success) {
@@ -364,16 +422,22 @@ export class QwenAiAdapter {
     console.log('[QwenAI] Sending request to /api/v2/chat/completions...')
     console.log('[QwenAI] Request URL:', url)
     console.log('[QwenAI] Request payload:', JSON.stringify(payload, null, 2))
-    console.log('[QwenAI] Request headers:', JSON.stringify(this.getHeaders(chatId), null, 2))
 
+    const session = await getQwenBaxiaSession()
     const response = await this.axiosInstance.post(url, payload, {
       headers: {
-        ...this.getHeaders(chatId),
+        ...(await this.buildHeaders(chatId, session)),
         'x-accel-buffering': 'no',
       },
       responseType: 'stream',
       timeout: 120000,
+      validateStatus: () => true,
     })
+
+    if (this.isWafResponse(response)) {
+      try { (response.data as any)?.destroy?.() } catch { /* ignore */ }
+      throw new Error(WAF_ERROR_MESSAGE)
+    }
 
     console.log('[QwenAI] Response status:', response.status)
     console.log('[QwenAI] Response headers:', JSON.stringify(response.headers, null, 2))
@@ -431,7 +495,7 @@ export class QwenAiAdapter {
     console.log(`[QwenAI] Sending ${request.kind} generation request...`)
     const response = await this.axiosInstance.post(url, payload, {
       headers: {
-        ...this.getHeaders(chatId),
+        ...(await this.buildHeaders(chatId)),
         'x-accel-buffering': 'no',
       },
       responseType: 'text',
@@ -443,6 +507,10 @@ export class QwenAiAdapter {
     const raw = typeof response.data === 'string'
       ? response.data
       : JSON.stringify(response.data)
+
+    if (this.isWafResponse(response)) {
+      throw new Error(WAF_ERROR_MESSAGE)
+    }
 
     if (response.status >= 400) {
       throw new Error(
@@ -483,7 +551,7 @@ export class QwenAiAdapter {
 
     while (Date.now() < deadline) {
       const response = await this.axiosInstance.get(pollUrl, {
-        headers: this.getHeaders(),
+        headers: await this.buildHeaders(),
         timeout: 30000,
         validateStatus: () => true,
       })

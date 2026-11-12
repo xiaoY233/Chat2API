@@ -277,7 +277,8 @@ export class OAuthManager extends EventEmitter {
     providerId: string,
     providerType: ProviderType,
     timeout?: number,
-    proxyMode?: 'system' | 'none'
+    proxyMode?: 'system' | 'none',
+    options?: { silent?: boolean; partition?: string }
   ): Promise<OAuthResult> {
     this.emit('statusChange', 'pending')
     this.sendProgressToRenderer({
@@ -543,10 +544,18 @@ export class OAuthManager extends EventEmitter {
         providerType,
         timeout: timeout || DEFAULT_TIMEOUT,
         proxyMode,
+        silent: options?.silent,
+        partition: options?.partition,
       }).then((result) => {
         if (!result.success) {
           completeHandler(result)
         }
+      }).catch((error) => {
+        console.error('[OAuthManager] In-app login failed to start:', error)
+        completeHandler({
+          success: false,
+          error: error instanceof Error ? error.message : 'Login failed to start',
+        })
       })
     })
   }
@@ -556,6 +565,51 @@ export class OAuthManager extends EventEmitter {
    */
   cancelInAppLogin(): void {
     inAppLoginManager.cancel()
+  }
+
+  /**
+   * Silently re-acquire provider credentials using the retained login session.
+   *
+   * When a token captured at login time expires server-side, the browser
+   * session stored in the provider's partition is often still valid. Reloading
+   * the provider page in a hidden window lets the extractor capture a freshly
+   * minted token. Returns null when the session is no longer logged in.
+   */
+  async reacquireCredentials(
+    providerId: string,
+    providerType: ProviderType,
+    timeout = 30000
+  ): Promise<Record<string, string> | null> {
+    if (inAppLoginManager.isWindowOpen()) {
+      return null
+    }
+    try {
+      const reacquire = this.startInAppLogin(
+        providerId,
+        providerType,
+        timeout,
+        undefined,
+        { silent: true, partition: `persist:oauth-${providerType}` }
+      )
+      const result = await Promise.race([
+        reacquire,
+        new Promise<OAuthResult>((resolve) =>
+          setTimeout(
+            () => resolve({ success: false, providerId, providerType, error: 'Re-acquisition timed out' }),
+            timeout + 5000
+          )
+        ),
+      ])
+      if (result.success && result.credentials) {
+        console.log('[OAuthManager] Re-acquired credentials for', providerType)
+        return result.credentials
+      }
+      console.log('[OAuthManager] Silent re-acquisition failed:', result.error)
+      return null
+    } catch (error) {
+      console.error('[OAuthManager] Silent re-acquisition error:', error)
+      return null
+    }
   }
 
   /**

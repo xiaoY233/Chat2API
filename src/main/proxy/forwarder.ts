@@ -32,6 +32,7 @@ import { PerplexityStreamHandler } from './adapters/perplexity-stream'
 import { ToolCallingEngine } from './toolCalling/ToolCallingEngine'
 import type { ToolCallingTransformResult } from './toolCalling/types'
 import { sessionManager } from './sessionManager'
+import { isAuthFailure, renewAccountCredentials } from './accountRenewal'
 import {
   createContextManagementService,
   SummaryGenerator,
@@ -423,7 +424,8 @@ export class RequestForwarder {
     account: Account,
     provider: Provider,
     actualModel: string,
-    startTime: number
+    startTime: number,
+    retried = false
   ): Promise<ForwardResult> {
     try {
       const transformed = this.transformRequestForPromptToolUse(request, provider)
@@ -520,9 +522,17 @@ export class RequestForwarder {
       }
     } catch (error) {
       const latency = Date.now() - startTime
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      if (!retried && isAuthFailure(message)) {
+        const renewed = await renewAccountCredentials(account, provider)
+        if (renewed) {
+          console.log('[Forwarder] DeepSeek credentials renewed, retrying request')
+          return this.forwardDeepSeek(request, renewed, provider, actualModel, startTime, true)
+        }
+      }
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Unknown error',
+        error: message,
         latency,
       }
     }
@@ -645,7 +655,8 @@ export class RequestForwarder {
     account: Account,
     provider: Provider,
     actualModel: string,
-    startTime: number
+    startTime: number,
+    retried = false
   ): Promise<ForwardResult> {
     try {
       const transformed = this.transformRequestForPromptToolUse(request, provider)
@@ -724,9 +735,17 @@ export class RequestForwarder {
       }
     } catch (error) {
       const latency = Date.now() - startTime
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      if (!retried && isAuthFailure(message)) {
+        const renewed = await renewAccountCredentials(account, provider)
+        if (renewed) {
+          console.log('[Forwarder] Kimi credentials renewed, retrying request')
+          return this.forwardKimi(request, renewed, provider, actualModel, startTime, true)
+        }
+      }
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Unknown error',
+        error: message,
         latency,
       }
     }
