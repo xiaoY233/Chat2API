@@ -218,4 +218,14 @@ export const MANUAL_TOKEN_CONFIGS: Record<ProviderType, ManualTokenConfig[]> = {
       helpUrl: 'https://longcat.ai/chat',
     },
   ],
+  inception: [
+    {
+      providerType: 'inception',
+      tokenType: 'cookie',
+      label: 'Vercel clearance cookie (_vcrcs)',
+      placeholder: 'Optional: enter the _vcrcs cookie value or a full Cookie header',
+      description: 'Open chat.inceptionlabs.ai (or use the OAuth Login tab) and copy the _vcrcs cookie. Empty is also fine: the app solves the Vercel checkpoint itself.',
+      helpUrl: 'https://chat.inceptionlabs.ai/',
+    },
+  ],
 }

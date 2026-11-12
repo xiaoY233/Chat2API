@@ -102,6 +102,17 @@ function mapOAuthCredentials(providerId: string | undefined, credentials: Record
     return result
   }
 
+  // Inception stores the captured Vercel clearance cookie jar.
+  if (providerId === 'inception') {
+    const result: Record<string, string> = {}
+    const cookie = credentials.cookie || credentials.cookieJar || ''
+    const vcrcs = credentials['_vcrcs'] || credentials.vcrcs || ''
+    if (cookie) result.cookie = cookie
+    if (vcrcs) result['_vcrcs'] = vcrcs
+    if (cookie && !vcrcs) result['_vcrcs'] = cookie
+    return result
+  }
+
   // For Mimo, map all three tokens
   if (providerId === 'mimo') {
     const result: Record<string, string> = {}
@@ -184,7 +195,7 @@ export function AddAccountDialog({
   const isEditing = !!editingAccount
   const builtinProvider = provider as BuiltinProviderConfig | null
   const credentialFields: CredentialField[] = builtinProvider?.credentialFields || getDefaultCredentialFields(provider?.authType, t)
-  const supportsOAuth = provider && ['deepseek', 'glm', 'kimi', 'mimo', 'minimax', 'qwen', 'qwen-ai', 'zai', 'perplexity', 'longcat'].includes(provider.id)
+  const supportsOAuth = provider && ['deepseek', 'glm', 'kimi', 'mimo', 'minimax', 'qwen', 'qwen-ai', 'zai', 'perplexity', 'longcat', 'inception'].includes(provider.id)
 
   useEffect(() => {
     if (open) {

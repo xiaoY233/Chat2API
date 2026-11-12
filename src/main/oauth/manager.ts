@@ -504,6 +504,28 @@ export class OAuthManager extends EventEmitter {
               cookie: cookieHeader,
             }
             console.log('[OAuthManager] LongCat: final credentials prepared:', Object.keys(finalCredentials))
+          } else if (providerType === 'inception') {
+            const cookieHeader = collectedTokens.cookie || collectedTokens.cookieJar || ''
+            const allCookies = (collectedTokens.cookies as unknown as Record<string, string>) || {}
+            const vcrcs = collectedTokens['_vcrcs'] || allCookies['_vcrcs'] || ''
+            const full = cookieHeader || (vcrcs ? `_vcrcs=${vcrcs}` : '')
+
+            if (!full) {
+              console.log('[OAuthManager] Inception: missing clearance cookie, waiting for login...')
+              this.sendProgressToRenderer({
+                status: 'pending',
+                message: 'Waiting for Inception login...',
+              })
+              isValidating = false
+              return
+            }
+
+            validationCredentials = { cookie: full }
+            finalCredentials = {
+              cookie: full,
+              _vcrcs: vcrcs || full,
+            }
+            console.log('[OAuthManager] Inception: final credentials prepared:', Object.keys(finalCredentials))
           } else {
             validationCredentials = { ...collectedTokens }
             finalCredentials = { ...collectedTokens }

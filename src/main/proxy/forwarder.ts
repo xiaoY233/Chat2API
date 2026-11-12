@@ -26,6 +26,7 @@ import {
 import { ZaiAdapter, ZaiStreamHandler } from './adapters/zai'
 import { MiniMaxAdapter, MiniMaxStreamHandler } from './adapters/minimax'
 import { LongCatAdapter, LongCatStreamHandler } from './adapters/longcat'
+import { InceptionAdapter, InceptionStreamHandler } from './adapters/inception'
 import { PerplexityAdapter } from './adapters/perplexity'
 import { PerplexityStreamHandler } from './adapters/perplexity-stream'
 import { ToolCallingEngine } from './toolCalling/ToolCallingEngine'
@@ -117,6 +118,12 @@ export class RequestForwarder {
       matches: LongCatAdapter.isLongCatProvider,
       forward: (request, account, provider, actualModel, startTime) =>
         this.forwardLongCat(request, account, provider, actualModel, startTime),
+    },
+    {
+      name: 'inception',
+      matches: InceptionAdapter.isInceptionProvider,
+      forward: (request, account, provider, actualModel, startTime) =>
+        this.forwardInception(request, account, provider, actualModel, startTime),
     },
     {
       name: 'perplexity',
@@ -1485,6 +1492,89 @@ export class RequestForwarder {
       }
     } catch (error) {
       const latency = Date.now() - startTime
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+        latency,
+      }
+    }
+  }
+
+  /**
+   * Inception (Mercury) Dedicated Forward
+   */
+  private async forwardInception(
+    request: ChatCompletionRequest,
+    account: Account,
+    provider: Provider,
+    actualModel: string,
+    startTime: number
+  ): Promise<ForwardResult> {
+    console.log('[forwardInception] actualModel:', actualModel)
+    try {
+      const transformed = this.transformRequestForPromptToolUse(request, provider)
+
+      const adapter = new InceptionAdapter(provider, account)
+      const { response } = await adapter.chatCompletion({
+        model: actualModel,
+        originalModel: request.model,
+        messages: transformed.messages as any,
+        stream: request.stream,
+        web_search: request.web_search,
+        reasoning_effort: request.reasoning_effort,
+      })
+
+      const latency = Date.now() - startTime
+
+      if (response.status >= 400) {
+        let errorMessage = `HTTP ${response.status}`
+        const body = response.data
+        if (body && typeof body.on === 'function') {
+          try {
+            body.destroy()
+          } catch {
+            // Ignore teardown errors
+          }
+        } else if (body && typeof body === 'object') {
+          errorMessage = body.message || body.error || errorMessage
+        }
+        return {
+          success: false,
+          status: response.status,
+          error: errorMessage,
+          latency,
+        }
+      }
+
+      const handler = new InceptionStreamHandler(actualModel, transformed.plan)
+
+      if (request.stream === true) {
+        const transformedStream = await handler.handleStream(response.data)
+
+        return {
+          success: true,
+          status: response.status,
+          headers: this.extractHeaders(response.headers),
+          stream: transformedStream,
+          skipTransform: true,
+          latency,
+        }
+      }
+
+      const result = await handler.handleNonStream(response.data)
+
+      this.applyToolCallsToResponse(result, transformed)
+
+      return {
+        success: true,
+        status: response.status,
+        headers: this.extractHeaders(response.headers),
+        body: result,
+        latency,
+      }
+    } catch (error) {
+      const latency = Date.now() - startTime
+      console.error('[Inception] Forward error:', error)
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error',

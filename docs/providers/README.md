@@ -6,6 +6,7 @@
 | --- | --- |
 | deepseek | [DeepSeek](deepseek.md) |
 | glm | [GLM](glm.md) |
+| inception | [Inception (Mercury)](inception.md) |
 | kimi | [Kimi](kimi.md) |
 | longcat | [LongCat](longcat.md) |
 | minimax | [MiniMax](minimax.md) |

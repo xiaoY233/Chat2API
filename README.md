@@ -31,7 +31,7 @@
 ## ✨ Features
 
 - OpenAI Compatible API: Provides standard OpenAI-compatible API endpoints for seamless integration
-- Multi-Provider Support: Connect DeepSeek, GLM, Kimi, MiniMax, LongCat 🆕, Perplexity 🆕, Qwen, Z.ai and more
+- Multi-Provider Support: Connect DeepSeek, GLM, Inception (Mercury), Kimi, MiniMax, LongCat, Perplexity, Qwen, Z.ai and more
 - 🆕 Context Management: Intelligent conversation context management with sliding window, token limit, and summary strategies
 - 🆕 Function Calling Support: Universal tool calling capability for all models via prompt engineering, compatible with Cherry Studio, Kilo Code, and other clients
 - 🆕 Model Mapping: Flexible model name mapping with wildcard support and preferred provider/account selection
@@ -55,6 +55,7 @@
 | MiniMax          | JWT Token     | Yes   | MiniMax-M3.1-Flash, MiniMax-M3, MiniMax-M2.7 |
 | Mimo             | Cookie        | Yes   | MiMo-V2.6-Pro, MiMo-V2.6-Flash, MiMo-V2.5-TTS, MiMo-V2.5-TTS-VoiceDesign, MiMo-V2.5-TTS-VoiceClone |
 | LongCat          | Cookie        | Yes   | LongCat, LongCat-Search |
+| Inception        | Cookie        | Yes   | mercury-3 |
 | Perplexity       | Cookie        | Yes   | Auto |
 | Qwen (CN)        | SSO Ticket    | Yes   | Qwen3.8, Qwen3.8-Max, Qwen3.8-Flash, Qwen3.8-Omni-Flash |
 | Qwen AI (Global) | JWT Token     | Yes   | Qwen4-Max-Preview, Qwen3.8-Max, Qwen3.8-Plus, Qwen3.8-Flash, Qwen3.8-Omni-Flash, Qwen-Image-3.0, Wan3.0-Video |

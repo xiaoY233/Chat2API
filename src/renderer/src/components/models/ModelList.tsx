@@ -31,6 +31,7 @@ import kimiIcon from '@/assets/providers/kimi.svg'
 import minimaxIcon from '@/assets/providers/minimax.svg'
 import mimoIcon from '@/assets/providers/mimo.svg'
 import longcatIcon from '@/assets/providers/longcat.svg'
+import inceptionIcon from '@/assets/providers/inception.svg'
 import perplexityIcon from '@/assets/providers/perplexity.svg'
 import qwenIcon from '@/assets/providers/qwen.svg'
 import zaiIcon from '@/assets/providers/zai.svg'
@@ -43,6 +44,7 @@ const providerIcons: Record<string, string> = {
   minimax: minimaxIcon,
   mimo: mimoIcon,
   longcat: longcatIcon,
+  inception: inceptionIcon,
   perplexity: perplexityIcon,
   qwen: qwenIcon,
   'qwen-ai': qwenIcon,

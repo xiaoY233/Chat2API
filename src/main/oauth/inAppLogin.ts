@@ -103,6 +103,12 @@ export class InAppLoginManager extends EventEmitter {
     const partition = `persist:oauth-${Date.now()}`
     this.loginSession = session.fromPartition(partition)
 
+    // Pin the UA when the provider's cookie is UA-bound (e.g. the Vercel
+    // clearance cookie), so the captured cookie stays valid for the adapter.
+    if (this.config.userAgent) {
+      this.loginSession.setUserAgent(this.config.userAgent)
+    }
+
     if (this.options?.proxyMode === 'none') {
       this.loginSession.setProxy({ mode: 'direct' }).catch((error) => {
         console.error('[InAppLogin] Failed to set direct proxy:', error)
@@ -574,7 +580,7 @@ export class InAppLoginManager extends EventEmitter {
       params: { t: Date.now() },
       headers: {
         Accept: 'application/json',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+        'User-Agent': this.config?.userAgent || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
         'X-Requested-With': 'XMLHttpRequest',
         Cookie: cookieHeader,
       },

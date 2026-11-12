@@ -31,7 +31,7 @@
 ## ✨ 功能特性
 
 - OpenAI 兼容 API：提供标准 OpenAI 兼容接口，无缝对接现有工具
-- 多服务商支持：支持 DeepSeek、GLM、Kimi、MiniMax、LongCat 🆕、Perplexity 🆕、Qwen、Z.ai 等
+- 多服务商支持：支持 DeepSeek、GLM、Inception (Mercury)、Kimi、MiniMax、LongCat、Perplexity、Qwen、Z.ai 等
 - 🆕 上下文管理：智能对话上下文管理，支持滑动窗口、Token 限制和总结压缩策略
 - 🆕 工具调用支持：通过提示词工程为所有模型提供通用工具调用能力，兼容 Cherry Studio、Kilo Code 等客户端
 - 🆕 模型映射：灵活的模型名称映射，支持通配符和首选服务商/账户选择
@@ -55,6 +55,7 @@
 | MiniMax       | JWT Token     | 是     | MiniMax-M3.1-Flash, MiniMax-M3, MiniMax-M2.7 |
 | Mimo          | Cookie        | 是     | MiMo-V2.6-Pro, MiMo-V2.6-Flash, MiMo-V2.5-TTS, MiMo-V2.5-TTS-VoiceDesign, MiMo-V2.5-TTS-VoiceClone |
 | LongCat       | Cookie        | 是     | LongCat, LongCat-Search |
+| Inception     | Cookie        | 是     | mercury-3 |
 | Perplexity    | Cookie        | 是     | Auto                                                                                                                                                                                                                                         |
 | Qwen (国内版)    | SSO Ticket    | 是     | Qwen3.8, Qwen3.8-Max, Qwen3.8-Flash, Qwen3.8-Omni-Flash |
 | Qwen AI (国际版) | JWT Token     | 是     | Qwen4-Max-Preview, Qwen3.8-Max, Qwen3.8-Plus, Qwen3.8-Flash, Qwen3.8-Omni-Flash, Qwen-Image-3.0, Wan3.0-Video |

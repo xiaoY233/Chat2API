@@ -1,6 +1,7 @@
 import axios, { AxiosError } from 'axios'
 import { getBuiltinProvider } from './builtin'
 import { LONGCAT_API_BASE, buildLongCatCookieHeader, longCatHeaders } from './longcatCookie'
+import { buildInceptionCookieHeader, fetchInceptionSessionToken, getInceptionClearance } from './inception'
 import type { Provider, ProviderCheckResult, Account } from '../../shared/types'
 import type { BuiltinProviderConfig } from '../store/types'
 
@@ -150,6 +151,8 @@ export class ProviderChecker {
         return this.checkPerplexityToken(account.credentials.sessionToken || account.credentials.token)
       case 'longcat':
         return this.checkLongCatToken(account.credentials)
+      case 'inception':
+        return this.checkInceptionToken(account.credentials)
       case 'mimo':
         return this.checkMimoToken(
           account.credentials.service_token,
@@ -638,6 +641,42 @@ export class ProviderChecker {
           name: payload.nickname || payload.userName || payload.user_name,
           email: payload.email,
         },
+      }
+    } catch (error) {
+      return {
+        valid: false,
+        error: error instanceof AxiosError ? error.message : 'Connection failed',
+      }
+    }
+  }
+
+  private static async checkInceptionToken(credentials: Record<string, string>): Promise<TokenCheckResult> {
+    try {
+      // Prefer the captured browser clearance cookie; fall back to solving a
+      // fresh Vercel checkpoint natively when it is missing or stale.
+      const stored = buildInceptionCookieHeader(credentials)
+      let token: string | null = null
+
+      if (stored) {
+        try {
+          token = await fetchInceptionSessionToken(stored)
+        } catch {
+          token = null
+        }
+      }
+
+      if (!token) {
+        const cookie = await getInceptionClearance()
+        token = await fetchInceptionSessionToken(cookie)
+      }
+
+      if (!token) {
+        return { valid: false, error: 'Inception session could not be created' }
+      }
+
+      return {
+        valid: true,
+        userInfo: { name: 'Inception Mercury' },
       }
     } catch (error) {
       return {

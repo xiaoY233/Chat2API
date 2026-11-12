@@ -10,6 +10,7 @@ import { kimiConfig } from '../../src/main/providers/builtin/kimi.ts'
 import { minimaxConfig } from '../../src/main/providers/builtin/minimax.ts'
 import { mimoConfig } from '../../src/main/providers/builtin/mimo.ts'
 import { longcatConfig } from '../../src/main/providers/builtin/longcat.ts'
+import { inceptionConfig } from '../../src/main/providers/builtin/inception.ts'
 import { perplexityConfig } from '../../src/main/providers/builtin/perplexity.ts'
 import { qwenConfig } from '../../src/main/providers/builtin/qwen.ts'
 import { qwenAiConfig } from '../../src/main/providers/builtin/qwen-ai.ts'
@@ -434,10 +435,44 @@ test('LongCat uses longcat.ai with the passport_token_key cookie and OAuth login
   assert.match(longcatDoc, /LongCat-Search/)
 })
 
+test('Inception uses chat.inceptionlabs.ai with the anonymous Vercel clearance cookie and OAuth login', () => {
+  assert.equal(inceptionConfig.id, 'inception')
+  assert.equal(inceptionConfig.authType, 'cookie')
+  assert.deepEqual(inceptionConfig.supportedModels, ['mercury-3'])
+  assert.deepEqual(inceptionConfig.modelMappings, { 'mercury-3': 'mercury-3' })
+  assert.equal(inceptionConfig.credentialFields?.[0]?.name, '_vcrcs')
+  assert.equal(inceptionConfig.apiEndpoint, 'https://chat.inceptionlabs.ai')
+
+  const adapterSource = readFileSync(join(root, 'src/main/proxy/adapters/inception.ts'), 'utf8')
+  assert.match(adapterSource, /x-session-token/)
+  assert.match(adapterSource, /\/api\/chat/)
+  assert.match(adapterSource, /getInceptionClearance/)
+
+  const providerSource = readFileSync(join(root, 'src/main/providers/inception.ts'), 'utf8')
+  assert.match(providerSource, /request-challenge/)
+  assert.match(providerSource, /solveVercelChallenge/)
+  assert.match(providerSource, /_vcrc/)
+
+  const oauthAdapterSource = readFileSync(join(root, 'src/main/oauth/adapters/inception.ts'), 'utf8')
+  assert.match(oauthAdapterSource, /chat\.inceptionlabs\.ai/)
+  assert.match(oauthAdapterSource, /fetchInceptionSessionToken/)
+
+  const tokenConfigSource = readFileSync(join(root, 'src/main/oauth/tokenExtractionConfig.ts'), 'utf8')
+  assert.match(tokenConfigSource, /probeUrl: 'https:\/\/chat\.inceptionlabs\.ai\/api\/session'/)
+  assert.match(tokenConfigSource, /type: 'cookieJar'/)
+
+  const inceptionDoc = readFileSync(join(root, 'docs/providers/inception.md'), 'utf8')
+  assert.match(inceptionDoc, /_vcrcs/)
+  assert.match(inceptionDoc, /chat\.inceptionlabs\.ai/)
+  assert.match(inceptionDoc, /OAuth/)
+  assert.match(inceptionDoc, /mercury-3/)
+})
+
 test('provider docs cover every built-in provider and Qwen AI manual model additions', () => {
   const providerDocs = [
     'deepseek',
     'glm',
+    'inception',
     'kimi',
     'longcat',
     'minimax',
@@ -500,6 +535,7 @@ test('README Supported Providers model lists mirror current defaults with Perple
     ['MiniMax', minimaxConfig.supportedModels?.join(', ')],
     ['Mimo', mimoConfig.supportedModels?.join(', ')],
     ['LongCat', longcatConfig.supportedModels?.join(', ')],
+    ['Inception', inceptionConfig.supportedModels?.join(', ')],
     ['Perplexity', 'Auto'],
     ['Qwen', qwenConfig.supportedModels?.join(', ')],
     ['Qwen AI', qwenAiConfig.supportedModels?.join(', ')],

@@ -346,6 +346,13 @@
     "passportTokenKeyPlaceholder": "Enter the passport_token_key cookie value or full Cookie header",
     "passportTokenKeyHelp": "Use the OAuth Login tab to sign in to longcat.ai automatically. Manual fallback: DevTools -> Application -> Cookies -> longcat.ai -> passport_token_key. You can paste the cookie value or the full Cookie header."
   },
+  "inception": {
+    "name": "Inception (Mercury)",
+    "description": "Inception Mercury web chat on chat.inceptionlabs.ai using the anonymous Vercel clearance cookie, with native web search",
+    "vcrcs": "Vercel clearance cookie (_vcrcs)",
+    "vcrcsPlaceholder": "Optional: paste the _vcrcs cookie value or a full Cookie header",
+    "vcrcsHelp": "Use the OAuth Login tab: the app opens chat.inceptionlabs.ai and captures the clearance cookie automatically. Leaving this empty also works: the app solves the Vercel checkpoint itself. Manual fallback: DevTools -> Application -> Cookies -> chat.inceptionlabs.ai -> _vcrcs."
+  },
   "proxy": {
     "title": "Proxy Settings",
     "description": "Configure API proxy service parameters and management policies",

@@ -23,6 +23,7 @@ import kimiIcon from '@/assets/providers/kimi.svg'
 import mimoIcon from '@/assets/providers/mimo.svg'
 import minimaxIcon from '@/assets/providers/minimax.svg'
 import longcatIcon from '@/assets/providers/longcat.svg'
+import inceptionIcon from '@/assets/providers/inception.svg'
 import perplexityIcon from '@/assets/providers/perplexity.svg'
 import qwenIcon from '@/assets/providers/qwen.svg'
 import zaiIcon from '@/assets/providers/zai.svg'
@@ -52,6 +53,7 @@ const providerIcons: Record<string, string> = {
   mimo: mimoIcon,
   minimax: minimaxIcon,
   longcat: longcatIcon,
+  inception: inceptionIcon,
   perplexity: perplexityIcon,
   qwen: qwenIcon,
   'qwen-ai': qwenIcon,
@@ -123,6 +125,16 @@ function mapOAuthCredentials(providerId: string | undefined, credentials: Record
     if (passport || cookie) {
       result.passport_token_key = passport || cookie
     }
+    return result
+  }
+
+  if (providerId === 'inception') {
+    const result: Record<string, string> = {}
+    const cookie = credentials.cookie || credentials.cookieJar || ''
+    const vcrcs = credentials['_vcrcs'] || credentials.vcrcs || ''
+    if (cookie) result.cookie = cookie
+    if (vcrcs) result['_vcrcs'] = vcrcs
+    if (cookie && !vcrcs) result['_vcrcs'] = cookie
     return result
   }
 
@@ -233,7 +245,7 @@ export function AddProviderDialog({
     ? providers.find((p) => p.id === selectedProvider) 
     : null
 
-  const supportsOAuth = selectedProviderData && ['deepseek', 'glm', 'kimi', 'mimo', 'minimax', 'qwen', 'qwen-ai', 'zai', 'perplexity', 'longcat'].includes(selectedProviderData.id)
+  const supportsOAuth = selectedProviderData && ['deepseek', 'glm', 'kimi', 'mimo', 'minimax', 'qwen', 'qwen-ai', 'zai', 'perplexity', 'longcat', 'inception'].includes(selectedProviderData.id)
 
   const toggleModelExpansion = (providerId: string) => {
     setExpandedModels(prev => {
@@ -520,6 +532,13 @@ export function AddProviderDialog({
                   label: t('longcat.passportTokenKey'),
                   placeholder: t('longcat.passportTokenKeyPlaceholder'),
                   helpText: t('longcat.passportTokenKeyHelp'),
+                },
+              },
+              inception: {
+                _vcrcs: {
+                  label: t('inception.vcrcs'),
+                  placeholder: t('inception.vcrcsPlaceholder'),
+                  helpText: t('inception.vcrcsHelp'),
                 },
               },
             }
