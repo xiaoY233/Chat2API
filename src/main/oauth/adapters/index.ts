@@ -78,7 +78,7 @@ export function getSupportedAuthMethods(providerType: ProviderType): string[] {
     case 'longcat':
       return ['manual', 'cookie']
     case 'inception':
-      return ['manual', 'cookie']
+      return ['manual']
     case 'mimo':
       return ['manual', 'cookie']
     case 'minimax':

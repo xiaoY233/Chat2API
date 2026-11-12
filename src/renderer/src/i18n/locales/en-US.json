@@ -348,10 +348,10 @@
   },
   "inception": {
     "name": "Inception (Mercury)",
-    "description": "Inception Mercury web chat on chat.inceptionlabs.ai using the anonymous Vercel clearance cookie, with native web search",
+    "description": "Inception Mercury web chat on chat.inceptionlabs.ai. Anonymous: no login needed, the app solves the Vercel challenge itself",
     "vcrcs": "Vercel clearance cookie (_vcrcs)",
     "vcrcsPlaceholder": "Optional: paste the _vcrcs cookie value or a full Cookie header",
-    "vcrcsHelp": "Use the OAuth Login tab: the app opens chat.inceptionlabs.ai and captures the clearance cookie automatically. Leaving this empty also works: the app solves the Vercel checkpoint itself. Manual fallback: DevTools -> Application -> Cookies -> chat.inceptionlabs.ai -> _vcrcs."
+    "vcrcsHelp": "No login is required. The app solves the Vercel checkpoint and creates a session automatically, so you can add this account with this field left empty. Advanced/manual fallback: DevTools -> Application -> Cookies -> chat.inceptionlabs.ai -> _vcrcs."
   },
   "proxy": {
     "title": "Proxy Settings",

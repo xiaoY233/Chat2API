@@ -55,7 +55,7 @@
 | MiniMax       | JWT Token     | 是     | MiniMax-M3.1-Flash, MiniMax-M3, MiniMax-M2.7 |
 | Mimo          | Cookie        | 是     | MiMo-V2.6-Pro, MiMo-V2.6-Flash, MiMo-V2.5-TTS, MiMo-V2.5-TTS-VoiceDesign, MiMo-V2.5-TTS-VoiceClone |
 | LongCat       | Cookie        | 是     | LongCat, LongCat-Search |
-| Inception     | Cookie        | 是     | mercury-3 |
+| Inception     | Cookie        | 否     | mercury-3 |
 | Perplexity    | Cookie        | 是     | Auto                                                                                                                                                                                                                                         |
 | Qwen (国内版)    | SSO Ticket    | 是     | Qwen3.8, Qwen3.8-Max, Qwen3.8-Flash, Qwen3.8-Omni-Flash |
 | Qwen AI (国际版) | JWT Token     | 是     | Qwen4-Max-Preview, Qwen3.8-Max, Qwen3.8-Plus, Qwen3.8-Flash, Qwen3.8-Omni-Flash, Qwen-Image-3.0, Wan3.0-Video |

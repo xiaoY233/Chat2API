@@ -435,12 +435,13 @@ test('LongCat uses longcat.ai with the passport_token_key cookie and OAuth login
   assert.match(longcatDoc, /LongCat-Search/)
 })
 
-test('Inception uses chat.inceptionlabs.ai with the anonymous Vercel clearance cookie and OAuth login', () => {
+test('Inception is a no-login anonymous provider on chat.inceptionlabs.ai', () => {
   assert.equal(inceptionConfig.id, 'inception')
   assert.equal(inceptionConfig.authType, 'cookie')
   assert.deepEqual(inceptionConfig.supportedModels, ['mercury-3'])
   assert.deepEqual(inceptionConfig.modelMappings, { 'mercury-3': 'mercury-3' })
   assert.equal(inceptionConfig.credentialFields?.[0]?.name, '_vcrcs')
+  assert.equal(inceptionConfig.credentialFields?.[0]?.required, false)
   assert.equal(inceptionConfig.apiEndpoint, 'https://chat.inceptionlabs.ai')
 
   const adapterSource = readFileSync(join(root, 'src/main/proxy/adapters/inception.ts'), 'utf8')
@@ -453,18 +454,20 @@ test('Inception uses chat.inceptionlabs.ai with the anonymous Vercel clearance c
   assert.match(providerSource, /solveVercelChallenge/)
   assert.match(providerSource, /_vcrc/)
 
-  const oauthAdapterSource = readFileSync(join(root, 'src/main/oauth/adapters/inception.ts'), 'utf8')
-  assert.match(oauthAdapterSource, /chat\.inceptionlabs\.ai/)
-  assert.match(oauthAdapterSource, /fetchInceptionSessionToken/)
-
+  // No in-app login: the token extraction config must not carry inception.
   const tokenConfigSource = readFileSync(join(root, 'src/main/oauth/tokenExtractionConfig.ts'), 'utf8')
-  assert.match(tokenConfigSource, /probeUrl: 'https:\/\/chat\.inceptionlabs\.ai\/api\/session'/)
-  assert.match(tokenConfigSource, /type: 'cookieJar'/)
+  assert.doesNotMatch(tokenConfigSource, /inception: \{/)
+  assert.doesNotMatch(tokenConfigSource, /chat\.inceptionlabs\.ai\/api\/session/)
+
+  // The OAuth adapter exists for manual validation only.
+  const oauthAdapterSource = readFileSync(join(root, 'src/main/oauth/adapters/inception.ts'), 'utf8')
+  assert.match(oauthAdapterSource, /chat\.inceptionlabs\.ai|INCEPTION_API_BASE/)
+  assert.match(oauthAdapterSource, /fetchInceptionSessionToken/)
 
   const inceptionDoc = readFileSync(join(root, 'docs/providers/inception.md'), 'utf8')
   assert.match(inceptionDoc, /_vcrcs/)
   assert.match(inceptionDoc, /chat\.inceptionlabs\.ai/)
-  assert.match(inceptionDoc, /OAuth/)
+  assert.match(inceptionDoc, /无需登录|no login/i)
   assert.match(inceptionDoc, /mercury-3/)
 })
 

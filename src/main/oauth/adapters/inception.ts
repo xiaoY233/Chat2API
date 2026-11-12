@@ -1,8 +1,10 @@
 /**
  * Inception (Mercury) Authentication Adapter
- * Authentication method: in-app browser login on https://chat.inceptionlabs.ai,
- * then reuse the anonymous web session's Vercel clearance cookie (no official
- * API key, no account).
+ *
+ * Inception is anonymous: the playground has no account system and no official
+ * API key. The only credential is the Vercel clearance cookie, which the app
+ * solves natively (or accepts manually via the optional `_vcrcs` field). There
+ * is no login step.
  */
 
 import {
@@ -29,7 +31,7 @@ export class InceptionAdapter extends BaseOAuthAdapter {
     super({
       ...config,
       providerType: 'inception',
-      authMethods: ['manual', 'cookie'],
+      authMethods: ['manual'],
       loginUrl: INCEPTION_LOGIN_URL,
       apiUrl: INCEPTION_API_BASE,
     })
@@ -40,20 +42,20 @@ export class InceptionAdapter extends BaseOAuthAdapter {
       success: false,
       providerId: options.providerId,
       providerType: 'inception',
-      error: 'Use startInAppLogin for automatic clearance extraction',
+      error: 'Inception needs no login; the app solves the Vercel challenge automatically',
     }
   }
 
   protected async processCallback(_data: OAuthCallbackData): Promise<void> {
-    // Inception login happens entirely in the in-app browser window.
+    // No login flow: the clearance cookie is solved natively.
   }
 
   async validateToken(credentials: Record<string, string>): Promise<TokenValidationResult> {
     const stored = buildInceptionCookieHeader(credentials)
 
     try {
-      // Prefer the captured browser cookie; if it is stale (or absent) solve a
-      // fresh checkpoint natively so validation does not depend on the window.
+      // Prefer a manually supplied cookie; if it is stale (or absent) solve a
+      // fresh checkpoint natively.
       let cookie = stored
       let token: string | null = null
 

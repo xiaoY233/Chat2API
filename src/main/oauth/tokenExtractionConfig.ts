@@ -4,7 +4,6 @@
  */
 
 import { ProviderType } from './types'
-import { INCEPTION_USER_AGENT } from '../providers/inception'
 
 export type TokenSourceType = 'networkHeader' | 'localStorage' | 'cookie' | 'cookieJar'
 
@@ -29,16 +28,9 @@ export interface TokenExtractionConfig {
   windowTitle?: string
   windowWidth?: number
   windowHeight?: number
-  /**
-   * Optional User-Agent used by the in-app login window and the cookieJar
-   * probe. Providers whose cookie is bound to a specific UA (e.g. the Vercel
-   * clearance cookie) must set this so the captured cookie matches the UA the
-   * proxy adapter later sends.
-   */
-  userAgent?: string
 }
 
-export const TOKEN_EXTRACTION_CONFIGS: Record<ProviderType, TokenExtractionConfig> = {
+export const TOKEN_EXTRACTION_CONFIGS: Partial<Record<ProviderType, TokenExtractionConfig>> = {
   kimi: {
     loginUrl: 'https://www.kimi.com',
     tokenSources: [
@@ -180,30 +172,6 @@ export const TOKEN_EXTRACTION_CONFIGS: Record<ProviderType, TokenExtractionConfi
     windowTitle: 'LongCat Login',
     windowWidth: 1000,
     windowHeight: 760,
-  },
-  inception: {
-    loginUrl: 'https://chat.inceptionlabs.ai/',
-    tokenSources: [
-      {
-        // Capture the whole chat.inceptionlabs.ai cookie jar after the real
-        // browser solves the Vercel Security Checkpoint, which stores the
-        // _vcrcs clearance cookie. GET /api/session answers { ok: true } once
-        // the edge accepts the request.
-        type: 'cookieJar',
-        key: 'cookie',
-        cookieDomains: ['chat.inceptionlabs.ai', '.inceptionlabs.ai'],
-        probeUrl: 'https://chat.inceptionlabs.ai/api/session',
-        probeLoginStatusPath: 'ok',
-      },
-    ],
-    targetDomains: ['.inceptionlabs.ai', 'chat.inceptionlabs.ai', 'inceptionlabs.ai'],
-    successUrlPatterns: [/chat\.inceptionlabs\.ai/i],
-    windowTitle: 'Inception (Mercury) Login',
-    windowWidth: 1000,
-    windowHeight: 760,
-    // The Vercel clearance cookie is bound to the UA that solved the
-    // challenge, so the login window, the probe, and the adapter must share it.
-    userAgent: INCEPTION_USER_AGENT,
   },
   perplexity: {
     loginUrl: 'https://www.perplexity.ai',

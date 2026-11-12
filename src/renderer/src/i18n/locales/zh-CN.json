@@ -348,10 +348,10 @@
   },
   "inception": {
     "name": "Inception（Mercury）",
-    "description": "Inception Mercury 网页版聊天（chat.inceptionlabs.ai），使用匿名 Vercel 清关 Cookie，支持联网搜索",
+    "description": "Inception Mercury 网页版聊天（chat.inceptionlabs.ai）。匿名使用，无需登录，应用会自行完成 Vercel 校验",
     "vcrcs": "Vercel 清关 Cookie（_vcrcs）",
     "vcrcsPlaceholder": "可选：粘贴 _vcrcs Cookie 值或完整 Cookie 字符串",
-    "vcrcsHelp": "可切换到 OAuth 登录标签页，应用会自动打开 chat.inceptionlabs.ai 并获取清关 Cookie。留空也可以：应用会自行完成 Vercel 校验。手动方式：打开开发者工具 -> Application -> Cookies -> chat.inceptionlabs.ai -> _vcrcs。"
+    "vcrcsHelp": "无需登录。应用会自动完成 Vercel 校验并创建会话，因此该字段留空即可添加账号。进阶/手动方式：打开开发者工具 -> Application -> Cookies -> chat.inceptionlabs.ai -> _vcrcs。"
   },
   "proxy": {
     "title": "代理设置",

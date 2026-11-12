@@ -18,7 +18,6 @@ import glmIcon from '@/assets/providers/glm.svg'
 import kimiIcon from '@/assets/providers/kimi.svg'
 import minimaxIcon from '@/assets/providers/minimax.svg'
 import longcatIcon from '@/assets/providers/longcat.svg'
-import inceptionIcon from '@/assets/providers/inception.svg'
 import qwenIcon from '@/assets/providers/qwen.svg'
 import zaiIcon from '@/assets/providers/zai.svg'
 
@@ -28,7 +27,6 @@ const providerIcons: Record<string, string> = {
   kimi: kimiIcon,
   minimax: minimaxIcon,
   longcat: longcatIcon,
-  inception: inceptionIcon,
   qwen: qwenIcon,
   'qwen-ai': qwenIcon,
   zai: zaiIcon,
@@ -153,20 +151,6 @@ export function LoginGuideDialog({
         t('oauth.step3'),
         'In Cookies → longcat.ai',
         'Find passport_token_key and copy its value',
-        t('loginGuide.paste'),
-      ],
-    },
-    inception: {
-      loginUrl: 'https://chat.inceptionlabs.ai/',
-      steps: [
-        t('loginGuide.openWebsite', { provider: t('inception.name') }),
-        'Or use the OAuth Login tab: the app opens the site and captures the clearance cookie automatically',
-        'The app also solves the Vercel checkpoint on its own, so this field is optional',
-        t('oauth.step1'),
-        t('oauth.step2'),
-        t('oauth.step3'),
-        'In Cookies → chat.inceptionlabs.ai',
-        'Find _vcrcs and copy its value (optional)',
         t('loginGuide.paste'),
       ],
     },

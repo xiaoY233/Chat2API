@@ -6,20 +6,20 @@ import { join } from 'node:path'
 const root = process.cwd()
 
 for (const dialog of ['AddAccountDialog.tsx', 'AddProviderDialog.tsx']) {
-  test(`${dialog} exposes Inception OAuth login and maps the clearance cookie`, () => {
+  test(`${dialog} treats Inception as a no-login provider`, () => {
     const source = readFileSync(
       join(root, 'src/renderer/src/components/providers', dialog),
       'utf8',
     )
 
-    assert.match(source, /supportsOAuth[^\n]*inception/)
-    assert.match(source, /if \(providerId === 'inception'\)/)
-    assert.match(source, /credentials\.cookie \|\| credentials\.cookieJar/)
-    assert.match(source, /result\['_vcrcs'\] = vcrcs/)
+    // Inception is anonymous: it must not appear in the OAuth-capable list and
+    // must not carry an OAuth credential-mapping branch.
+    assert.doesNotMatch(source, /supportsOAuth[^\n]*inception/)
+    assert.doesNotMatch(source, /if \(providerId === 'inception'\)/)
   })
 }
 
-test('Inception provider card, model list, and login guide wire the icon and steps', () => {
+test('Inception provider card and model list wire the icon', () => {
   const card = readFileSync(
     join(root, 'src/renderer/src/components/providers/ProviderCard.tsx'),
     'utf8',
@@ -28,19 +28,22 @@ test('Inception provider card, model list, and login guide wire the icon and ste
     join(root, 'src/renderer/src/components/models/ModelList.tsx'),
     'utf8',
   )
+
+  assert.match(card, /inception: inceptionIcon/)
+  assert.match(modelList, /inception: inceptionIcon/)
+})
+
+test('Inception has no login guide entry in the dialog', () => {
   const guide = readFileSync(
     join(root, 'src/renderer/src/components/providers/LoginGuideDialog.tsx'),
     'utf8',
   )
 
-  assert.match(card, /inception: inceptionIcon/)
-  assert.match(modelList, /inception: inceptionIcon/)
-  assert.match(guide, /inception: \{[\s\S]*?loginUrl: 'https:\/\/chat\.inceptionlabs\.ai\/'/)
-  assert.match(guide, /Cookies → chat\.inceptionlabs\.ai/)
-  assert.match(guide, /_vcrcs/)
+  assert.doesNotMatch(guide, /inception: \{/)
+  assert.doesNotMatch(guide, /chat\.inceptionlabs\.ai/)
 })
 
-test('Inception i18n entries exist in both locales', () => {
+test('Inception i18n entries describe a no-login provider in both locales', () => {
   const en = JSON.parse(
     readFileSync(join(root, 'src/renderer/src/i18n/locales/en-US.json'), 'utf8'),
   )
@@ -48,6 +51,7 @@ test('Inception i18n entries exist in both locales', () => {
     readFileSync(join(root, 'src/renderer/src/i18n/locales/zh-CN.json'), 'utf8'),
   )
   assert.equal(en.inception.name, 'Inception (Mercury)')
+  assert.match(en.inception.description, /no login/i)
   assert.ok(en.inception.vcrcs)
   assert.ok(en.inception.vcrcsHelp)
   assert.ok(zh.inception.name)

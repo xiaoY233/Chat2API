@@ -3,7 +3,6 @@ import assert from 'node:assert/strict'
 import crypto from 'node:crypto'
 
 import {
-  INCEPTION_USER_AGENT,
   buildInceptionCookieHeader,
   buildInceptionMessages,
   buildInceptionRequestBody,
@@ -180,25 +179,14 @@ test('Inception builtin uses the anonymous clearance cookie and mercury-3', () =
   assert.equal(inceptionConfig.tokenCheckEndpoint, '/api/session')
 })
 
-test('Inception OAuth adapter is registered with manual and cookie methods', () => {
-  assert.deepEqual(getSupportedAuthMethods('inception'), ['manual', 'cookie'])
+test('Inception OAuth adapter is registered as manual-only (no login flow)', () => {
+  assert.deepEqual(getSupportedAuthMethods('inception'), ['manual'])
   const adapter = createAdapter('inception', { providerType: 'inception' } as any)
   assert.equal(adapter.getProviderType(), 'inception')
 })
 
-test('Inception login opens the site and captures the clearance cookie jar', () => {
-  const config = getTokenExtractionConfig('inception')
-  assert.ok(config)
-  assert.equal(config!.loginUrl, 'https://chat.inceptionlabs.ai/')
-  assert.match(config!.windowTitle || '', /Inception/)
-
-  const jarSource = config!.tokenSources.find((source) => source.type === 'cookieJar')
-  assert.ok(jarSource)
-  assert.equal(jarSource!.key, 'cookie')
-  assert.deepEqual(jarSource!.cookieDomains, ['chat.inceptionlabs.ai', '.inceptionlabs.ai'])
-  assert.equal(jarSource!.probeUrl, 'https://chat.inceptionlabs.ai/api/session')
-  assert.equal(jarSource!.probeLoginStatusPath, 'ok')
-  // The Vercel clearance cookie is UA-bound: the login window and probe must
-  // use the same UA as the adapter.
-  assert.equal(config!.userAgent, INCEPTION_USER_AGENT)
+test('Inception has no in-app login token-extraction config', () => {
+  // Inception is anonymous, so there is no login window and no cookieJar
+  // capture; the native Vercel solver handles clearance.
+  assert.equal(getTokenExtractionConfig('inception'), null)
 })
