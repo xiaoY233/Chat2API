@@ -247,11 +247,18 @@ Check for updates in the **About** page, or download the latest version from [Gi
 
 ### Linux: `glxQueryExtensionsString returned NULL` / `Initialization of all EGL display types failed`
 
-Chromium tries to initialize ANGLE through GLX/EGL at startup. Those errors mean there is no usable GL driver — common under Xvfb, WSL, VMs, or remote X sessions. The app detects this and switches to software rendering (SwiftShader) automatically, so the messages are harmless. To force a mode yourself:
+Chromium tries to initialize ANGLE through GLX/EGL at startup. Those errors mean the GL stack is not usable — common under Xvfb, WSL, VMs, remote X sessions, and some NVIDIA/Xwayland setups. A `/dev/dri` render node can exist even when GLX/EGL is broken, so on Linux the app now uses software rendering (SwiftShader) by default. To opt back into hardware GL:
 
 ```bash
-CHAT2API_DISABLE_GPU=1 ./Chat2API   # always software rendering
-CHAT2API_DISABLE_GPU=0 ./Chat2API   # always try hardware GL
+CHAT2API_DISABLE_GPU=0 ./Chat2API   # force hardware GL
+CHAT2API_DISABLE_GPU=1 ./Chat2API   # force software rendering
+```
+
+The startup log prints the running version and the built-in Qwen AI model list, which makes it easy to confirm what a build contains:
+
+```
+[App] Chat2API v1.5.2 (linux/x64)
+[Providers] qwen-ai models: Qwen4-Max-Preview, Qwen3.8-Max, ...
 ```
 
 ## 🤝 Contributing

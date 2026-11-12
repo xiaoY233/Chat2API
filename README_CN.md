@@ -247,11 +247,18 @@ sudo xattr -rd com.apple.quarantine "/Applications/Chat2API.app"
 
 ### Linux 提示 `glxQueryExtensionsString returned NULL` / `Initialization of all EGL display types failed`
 
-Chromium 启动时会通过 GLX/EGL 初始化 ANGLE。出现这些错误说明没有可用的 GL 驱动，常见于 Xvfb、WSL、虚拟机和远程 X 会话。应用会自动检测并切换到软件渲染（SwiftShader），因此这些日志本身无害。也可以手动指定：
+Chromium 启动时会通过 GLX/EGL 初始化 ANGLE。出现这些错误说明 GL 栈不可用，常见于 Xvfb、WSL、虚拟机、远程 X 会话以及部分 NVIDIA/Xwayland 环境。即使 `/dev/dri` 存在渲染节点，GLX/EGL 也可能不可用，因此 Linux 上应用现在默认使用软件渲染（SwiftShader）。如需强制硬件 GL：
 
 ```bash
-CHAT2API_DISABLE_GPU=1 ./Chat2API   # 始终使用软件渲染
-CHAT2API_DISABLE_GPU=0 ./Chat2API   # 始终尝试硬件 GL
+CHAT2API_DISABLE_GPU=0 ./Chat2API   # 强制硬件 GL
+CHAT2API_DISABLE_GPU=1 ./Chat2API   # 强制软件渲染
+```
+
+启动日志会打印当前版本和内置 Qwen AI 模型列表，方便确认构建内容：
+
+```
+[App] Chat2API v1.5.2 (linux/x64)
+[Providers] qwen-ai models: Qwen4-Max-Preview, Qwen3.8-Max, ...
 ```
 
 ## 🤝 贡献
