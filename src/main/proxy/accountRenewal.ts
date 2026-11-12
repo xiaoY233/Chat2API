@@ -19,11 +19,17 @@ import type { Account, Provider } from '../store/types'
 const RENEWABLE_PROVIDER_TYPES: Record<string, string> = {
   deepseek: 'deepseek',
   kimi: 'kimi',
+  'qwen-ai': 'qwen-ai',
 }
 
 const AUTH_FAILURE_PATTERNS: RegExp[] = [
   /invalid token/i,
   /token invalid or expired/i,
+  /token expired or invalid/i,
+  /token expired/i,
+  /token is no longer valid/i,
+  /session has expired/i,
+  /please sign in again/i,
   /authorization failed/i,
   /unauthenticated/i,
   /auth\.token/i,
@@ -70,6 +76,15 @@ export async function renewAccountCredentials(
     existing ||
     (async () => {
       try {
+        if (provider.id === 'qwen-ai') {
+          const { refreshQwenAiToken } = await import('../oauth/qwenAiRefresh')
+          const refreshed = await refreshQwenAiToken(
+            account.credentials.cookies || account.credentials.cookie
+          )
+          if (refreshed) {
+            return refreshed
+          }
+        }
         const { oauthManager } = await import('../oauth/manager')
         return oauthManager.reacquireCredentials(provider.id, providerType as any)
       } catch (error) {

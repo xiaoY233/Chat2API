@@ -5,6 +5,7 @@
 
 import axios from 'axios'
 import { BaseOAuthAdapter } from './base'
+import { getQwenBaxiaSession } from '../../proxy/adapters/qwen-baxia'
 import {
   OAuthResult,
   OAuthOptions,
@@ -97,7 +98,14 @@ export class QwenAiAdapter extends BaseOAuthAdapter {
       try {
         const parts = token.split('.')
         const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString())
-        
+
+        if (typeof payload.exp === 'number' && payload.exp * 1000 <= Date.now()) {
+          return {
+            valid: false,
+            error: 'Token expired, please log in again',
+          }
+        }
+
         if (payload.email && payload.email.includes('@guest.com')) {
           return {
             valid: false,
@@ -157,10 +165,15 @@ export class QwenAiAdapter extends BaseOAuthAdapter {
 
   async getUserInfo(token: string): Promise<Record<string, unknown> | null> {
     try {
+      const baxia = await getQwenBaxiaSession()
       const response = await axios.get(`${QWEN_AI_API_BASE}/api/v2/user/info`, {
         headers: {
           Authorization: `Bearer ${token}`,
           ...FAKE_HEADERS,
+          ...(baxia
+            ? { 'bx-ua': baxia.bxUa, 'bx-umidtoken': baxia.bxUmidToken, 'bx-v': baxia.bxV }
+            : {}),
+          ...(baxia?.cookies ? { Cookie: baxia.cookies } : {}),
         },
         timeout: 15000,
         validateStatus: () => true,

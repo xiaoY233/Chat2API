@@ -253,9 +253,15 @@ export class RequestForwarder {
     const maxRetries = config.retryCount
 
     let lastError: string | undefined
+    let currentAccount = account
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       if (attempt > 0) {
+        // Credentials may have been renewed during the previous attempt.
+        const fresh = storeManager.getAccountById(account.id, true)
+        if (fresh) {
+          currentAccount = fresh
+        }
         await this.delay(5000)
       }
 
@@ -264,7 +270,7 @@ export class RequestForwarder {
       if (config.contextManagement?.enabled && modifiedRequest.messages && modifiedRequest.messages.length > 0) {
         try {
           const summaryGenerator = this.createSummaryGenerator(
-            account,
+            currentAccount,
             provider,
             actualModel,
             context
@@ -311,13 +317,19 @@ export class RequestForwarder {
       }
 
       try {
-        const result = await this.doForward(modifiedRequest, account, provider, actualModel, context)
+        const result = await this.doForward(modifiedRequest, currentAccount, provider, actualModel, context)
 
         if (result.success) {
           return result
         }
 
         lastError = result.error
+
+        // An authentication failure was already given a chance to renew the
+        // token; repeating the request with the same stale account cannot help.
+        if (isAuthFailure(result.error)) {
+          break
+        }
 
         if (result.status && result.status < 500 && result.status !== 429) {
           break
@@ -348,7 +360,15 @@ export class RequestForwarder {
 
     const dedicatedForwarder = this.providerForwarders.find(forwarder => forwarder.matches(provider))
     if (dedicatedForwarder) {
-      return dedicatedForwarder.forward(request, account, provider, actualModel, startTime)
+      const result = await dedicatedForwarder.forward(request, account, provider, actualModel, startTime)
+      if (!result.success && isAuthFailure(result.error) && isRenewableProvider(provider.id)) {
+        const renewed = await renewAccountCredentials(account, provider)
+        if (renewed) {
+          console.log('[Forwarder] Renewed credentials for', provider.id, '- retrying request once')
+          return dedicatedForwarder.forward(request, renewed, provider, actualModel, startTime)
+        }
+      }
+      return result
     }
 
     try {
@@ -424,8 +444,7 @@ export class RequestForwarder {
     account: Account,
     provider: Provider,
     actualModel: string,
-    startTime: number,
-    retried = false
+    startTime: number
   ): Promise<ForwardResult> {
     try {
       const transformed = this.transformRequestForPromptToolUse(request, provider)
@@ -522,17 +541,9 @@ export class RequestForwarder {
       }
     } catch (error) {
       const latency = Date.now() - startTime
-      const message = error instanceof Error ? error.message : 'Unknown error'
-      if (!retried && isAuthFailure(message)) {
-        const renewed = await renewAccountCredentials(account, provider)
-        if (renewed) {
-          console.log('[Forwarder] DeepSeek credentials renewed, retrying request')
-          return this.forwardDeepSeek(request, renewed, provider, actualModel, startTime, true)
-        }
-      }
       return {
         success: false,
-        error: message,
+        error: error instanceof Error ? error.message : 'Unknown error',
         latency,
       }
     }
@@ -655,8 +666,7 @@ export class RequestForwarder {
     account: Account,
     provider: Provider,
     actualModel: string,
-    startTime: number,
-    retried = false
+    startTime: number
   ): Promise<ForwardResult> {
     try {
       const transformed = this.transformRequestForPromptToolUse(request, provider)
@@ -735,17 +745,9 @@ export class RequestForwarder {
       }
     } catch (error) {
       const latency = Date.now() - startTime
-      const message = error instanceof Error ? error.message : 'Unknown error'
-      if (!retried && isAuthFailure(message)) {
-        const renewed = await renewAccountCredentials(account, provider)
-        if (renewed) {
-          console.log('[Forwarder] Kimi credentials renewed, retrying request')
-          return this.forwardKimi(request, renewed, provider, actualModel, startTime, true)
-        }
-      }
       return {
         success: false,
-        error: message,
+        error: error instanceof Error ? error.message : 'Unknown error',
         latency,
       }
     }

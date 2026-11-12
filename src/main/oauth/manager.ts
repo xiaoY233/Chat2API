@@ -18,6 +18,7 @@ import {
 import { createAdapter, BaseOAuthAdapter } from './adapters'
 import { storeManager } from '../store/store'
 import { inAppLoginManager, InAppLoginResult } from './inAppLogin'
+import { resolveProviderSessionPartition } from './sessionPartitions'
 
 const DEFAULT_CALLBACK_PORT = 8311
 const DEFAULT_TIMEOUT = 300000 // 5 minutes
@@ -584,12 +585,13 @@ export class OAuthManager extends EventEmitter {
       return null
     }
     try {
+      const partition = await resolveProviderSessionPartition(providerType)
       const reacquire = this.startInAppLogin(
         providerId,
         providerType,
         timeout,
         undefined,
-        { silent: true, partition: `persist:oauth-${providerType}` }
+        { silent: true, partition }
       )
       const result = await Promise.race([
         reacquire,
