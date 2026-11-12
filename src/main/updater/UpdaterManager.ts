@@ -46,6 +46,9 @@ export class UpdaterManager extends EventEmitter {
     releaseNotes: null,
   }
 
+  /** Set when electron-updater could not be initialised at all. */
+  private unavailableReason: string | null = null
+
   private constructor() {
     super()
     this.setupAutoUpdater()
@@ -64,6 +67,22 @@ export class UpdaterManager extends EventEmitter {
   }
 
   private setupAutoUpdater(): void {
+    // electron-updater validates the running app version as strict semver while
+    // constructing the platform updater. A build stamped with a non-semver
+    // version (e.g. "1.5.2pre-1") throws from the `autoUpdater` getter, which
+    // used to take down the whole main process at import time. Updates are a
+    // convenience, so a broken updater must never prevent the app from running.
+    try {
+      this.configureAutoUpdater()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      this.unavailableReason = message
+      this.status.error = message
+      console.error('[Updater] Auto updater unavailable:', message)
+    }
+  }
+
+  private configureAutoUpdater(): void {
     autoUpdater.autoDownload = false
     autoUpdater.autoInstallOnAppQuit = true
     autoUpdater.allowPrerelease = false
@@ -136,6 +155,14 @@ export class UpdaterManager extends EventEmitter {
   }
 
   public async checkForUpdates(): Promise<void> {
+    if (this.unavailableReason) {
+      const error = `Auto updater unavailable: ${this.unavailableReason}`
+      console.error('[Updater]', error)
+      this.updateStatus({ checking: false, error })
+      this.sendToRenderer(IpcChannels.APP_UPDATE_ERROR, { message: error })
+      return
+    }
+
     if (this.status.checking) {
       console.log('[Updater] Already checking for updates')
       return
@@ -158,6 +185,14 @@ export class UpdaterManager extends EventEmitter {
   }
 
   public async downloadUpdate(): Promise<void> {
+    if (this.unavailableReason) {
+      const error = `Auto updater unavailable: ${this.unavailableReason}`
+      console.error('[Updater]', error)
+      this.updateStatus({ error })
+      this.sendToRenderer(IpcChannels.APP_UPDATE_ERROR, { message: error })
+      return
+    }
+
     if (!this.status.available) {
       const error = 'No update available to download'
       console.error('[Updater]', error)
@@ -189,6 +224,14 @@ export class UpdaterManager extends EventEmitter {
   }
 
   public quitAndInstall(): void {
+    if (this.unavailableReason) {
+      const error = `Auto updater unavailable: ${this.unavailableReason}`
+      console.error('[Updater]', error)
+      this.updateStatus({ error })
+      this.sendToRenderer(IpcChannels.APP_UPDATE_ERROR, { message: error })
+      return
+    }
+
     if (!this.status.downloaded) {
       const error = 'No update downloaded to install'
       console.error('[Updater]', error)

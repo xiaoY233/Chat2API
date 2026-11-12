@@ -21,10 +21,46 @@ test('linux with a display but no DRI node uses software rendering', () => {
   )
 })
 
-test('linux with a display and a DRI node keeps hardware rendering', () => {
+test('linux with a display and a DRI render node keeps hardware rendering', () => {
   assert.equal(
-    shouldUseSoftwareRendering({ platform: 'linux', env: { DISPLAY: ':0' }, driDeviceExists: true }),
+    shouldUseSoftwareRendering({
+      platform: 'linux',
+      env: { DISPLAY: ':0' },
+      driDeviceExists: true,
+    }),
     false,
+  )
+})
+
+test('a card node without a render node still uses software rendering', () => {
+  // Android/proot exposes /dev/dri/card0 but no /dev/dri/renderD*, so ANGLE
+  // cannot create a context and logs glxQueryExtensionsString errors.
+  assert.equal(
+    shouldUseSoftwareRendering({
+      platform: 'linux',
+      env: { DISPLAY: ':0' },
+      driDeviceExists: false,
+    }),
+    true,
+  )
+})
+
+test('proot and termux environments always use software rendering', () => {
+  assert.equal(
+    shouldUseSoftwareRendering({
+      platform: 'linux',
+      env: { DISPLAY: ':0', PROOT_L2S_DIR: '/data/data/com.termux/var/lib/l2s' },
+      driDeviceExists: true,
+    }),
+    true,
+  )
+  assert.equal(
+    shouldUseSoftwareRendering({
+      platform: 'linux',
+      env: { DISPLAY: ':0', TERMUX_EXEC__PROC_SELF_EXE: '/data/data/com.termux/files/usr/bin/proot' },
+      driDeviceExists: true,
+    }),
+    true,
   )
 })
 
