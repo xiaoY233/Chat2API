@@ -66,6 +66,8 @@ export interface Provider {
   icon?: string
   supportedModels?: string[]
   modelMappings?: Record<string, string>
+  /** Gated models stay mapped but are not served until a verified check passes. */
+  temporarilyUnavailableModels?: string[]
   status?: ProviderStatus
   lastStatusCheck?: number
 }

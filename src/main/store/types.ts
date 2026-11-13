@@ -150,6 +150,12 @@ export interface Provider {
   supportedModels?: string[]
   /** Model name mapping */
   modelMappings?: Record<string, string>
+  /**
+   * Models gated as temporarily unavailable. They stay in `supportedModels`
+   * and `modelMappings` (route and price/catalog wiring stay intact) but are
+   * not served until a fresh verification call returns a non-empty answer.
+   */
+  temporarilyUnavailableModels?: string[]
   /** Provider status */
   status?: ProviderStatus
   /** Last status check time */

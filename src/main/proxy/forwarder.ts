@@ -864,6 +864,7 @@ export class RequestForwarder {
 
     try {
       const transformed = this.transformRequestForPromptToolUse(request, provider)
+      const deleteSession = request.deleteSession === true || shouldDeleteSession()
       
       const adapter = new QwenAiAdapter(provider, account, transformed.plan)
       const { response, chatId, parentId } = await adapter.chatCompletion({
@@ -893,7 +894,7 @@ export class RequestForwarder {
       if (request.stream) {
         const transformedStream = await handler.handleStream(response.data)
 
-        if (shouldDeleteSession()) {
+        if (deleteSession) {
           const originalEnd = transformedStream.end.bind(transformedStream)
           transformedStream.end = function(chunk?: any, encoding?: any, callback?: any) {
             adapter.deleteChat(chatId).catch(err => {
@@ -918,7 +919,7 @@ export class RequestForwarder {
 
       this.applyToolCallsToResponse(result, transformed)
 
-      if (shouldDeleteSession()) {
+      if (deleteSession) {
         await adapter.deleteChat(chatId)
       }
 

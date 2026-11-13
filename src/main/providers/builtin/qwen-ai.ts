@@ -39,6 +39,10 @@ export const qwenAiConfig: BuiltinProviderConfig = {
     'Qwen-Image-3.0': 'qwen-image-3.0',
     'Wan3.0-Video': 'wan3.0-video',
   },
+  // Kept in supportedModels/modelMappings so the route and catalog entry stay
+  // wired. The proxy answers 503 model_unavailable while the model returns
+  // empty answers, then restores it after a fresh bare no-system call passes.
+  temporarilyUnavailableModels: ['Qwen4-Max-Preview'],
   credentialFields: [
     {
       name: 'token',

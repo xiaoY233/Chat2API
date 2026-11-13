@@ -12,6 +12,16 @@
 
 Qwen AI 的 access token 有效期约 15 分钟，`refresh_token` Cookie 有效期约 300 天。应用会在 token 到期前 3 分钟自动调用 `GET https://auth.qwen.ai/api/v2/auths/refresh`（携带 `refresh_token` Cookie 和 `x-request-origin` 请求头）续期，并把新的 token / Cookie 写回账号。上游仍返回 `Token has expired` 时，代理会强制续期并重试一次；续期失败时还会尝试用保留的登录会话在隐藏窗口中让官网前端重新签发 token。因此只要登录时保留了 `refresh_token`，通常不需要手动重新登录。
 
+## 临时不可用与自动恢复
+
+`Qwen4-Max-Preview`（`qwen4.0-max-preview`）目前被标记为**临时不可用**：该模型会间歇性地对不带 system 的裸请求返回空内容，无法稳定服务生产流量。门禁不会改动路由和价格/目录接线：
+
+- 显示名称、`supportedModels`、`modelMappings` 和 `/v1/models` 输出都保持不变，下游的价格与路由配置无需调整。
+- 请求该模型时立即返回 `503`，错误体沿用网关既有的服务不可用格式：`type: "service_unavailable_error"`、`code: "model_unavailable"`，并带 `Retry-After: 60`。
+- 恢复检查由代理自动执行：对门禁模型发送**不带 system prompt 的裸 `ping`**（`stream: false`），只有拿到非空回答（或真实 tool call）才解除门禁；空回答、超时和错误都会保持门禁。
+- 检查在代理启动后约 20 秒开始，之后每 10 分钟一轮；有流量命中门禁模型时会额外触发一次，但同一模型最多每分钟检查一次。
+- 解除门禁会写回供应商配置（`temporarilyUnavailableModels` 变为空数组），重启后不会重新门禁；若需再次门禁，把模型名加回该字段即可。
+
 ## 默认模型
 
 内置默认模型只保留当前筛选后的稳定清单：以 Qwen4 与 Qwen3.8 系列为主，并补充 Qwen 图像与视频生成模型。
@@ -57,7 +67,7 @@ Qwen AI 的 access token 有效期约 15 分钟，`refresh_token` Cookie 有效�
 
 说明：`Qwen-Image-3.0` 与 `Wan3.0-Video` 通过官网对话接口的 `t2i` / `t2v` 会话生成：创建媒体会话后在 `messages[0].extra.meta.model` 传入生成模型，图像直接从流式响应提取 URL，视频从响应提取 `task_id` 并轮询 `/api/v1/tasks/status/{taskId}`。结果以 Markdown 图片/视频链接返回在 `choices[0].message.content` 中，可用请求体 `size` 传入 `1024x1024`、`16:9` 等尺寸或比例。
 
-说明：`Qwen4-Max-Preview` 的模型 ID 为 `qwen4.0-max-preview`，来自 `chat.qwen.ai` 的 `/api/models` 接口（`is_visitor_active: false`，需要登录账号）。该模型默认开启思考与联网能力，上下文 1M。
+说明：`Qwen4-Max-Preview` 的模型 ID 为 `qwen4.0-max-preview`，来自 `chat.qwen.ai` 的 `/api/models` 接口（`is_visitor_active: false`，需要登录账号）。该模型默认开启思考与联网能力，上下文 1M。由于会间歇性返回空回答，当前默认处于临时门禁状态，自动恢复逻辑见「临时不可用与自动恢复」。
 
 后续验证：官网反爬请求头、模型接口版本、Preview 邀请模型是否仍可用、图片/多模态模型字段。
 

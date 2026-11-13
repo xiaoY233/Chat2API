@@ -10,6 +10,7 @@ import { requestForwarder } from '../forwarder'
 import { streamHandler } from '../stream'
 import { proxyStatusManager } from '../status'
 import { modelMapper } from '../modelMapper'
+import { modelAvailability } from '../modelAvailability'
 import { storeManager } from '../../store/store'
 
 const router = new Router({ prefix: '/v1' })
@@ -87,6 +88,22 @@ router.post('/completions', async (ctx: Context) => {
         message: 'Missing required field: prompt',
         type: 'invalid_request_error',
         param: 'prompt',
+      },
+    }
+    return
+  }
+
+  const gate = modelAvailability.findGate(request.model)
+  if (gate) {
+    modelAvailability.requestVerification(request.model)
+    ctx.set('Retry-After', '60')
+    ctx.status = 503
+    ctx.body = {
+      error: {
+        message: `Model ${request.model} is temporarily unavailable. It will be restored automatically after a verified recovery check; use another model meanwhile.`,
+        type: 'service_unavailable_error',
+        param: null,
+        code: 'model_unavailable',
       },
     }
     return
