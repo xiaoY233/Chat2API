@@ -24,6 +24,17 @@ test('Qwen AI and Kimi tokens pass through', () => {
   assert.equal(normalizeRenewedCredentials('kimi', { token: 'kimi' }).token, 'kimi')
 })
 
+test('Qwen AI keeps the rotated refresh token and cookie jar', () => {
+  const out = normalizeRenewedCredentials('qwen-ai', {
+    token: 'access',
+    refresh_token: 'refresh',
+    cookieJar: 'cna=abc; refresh_token=refresh',
+  })
+  assert.equal(out.token, 'access')
+  assert.equal(out.refresh_token, 'refresh')
+  assert.equal(out.cookies, 'cna=abc; refresh_token=refresh')
+})
+
 test('MiniMax realUserID is preserved', () => {
   const out = normalizeRenewedCredentials('minimax', {
     token: 'jwt',

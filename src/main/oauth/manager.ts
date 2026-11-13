@@ -484,6 +484,50 @@ export class OAuthManager extends EventEmitter {
               ph_token: phToken,
             }
             console.log('[OAuthManager] Mimo: Final credentials prepared:', Object.keys(finalCredentials))
+          } else if (providerType === 'qwen-ai') {
+            const token =
+              collectedTokens.token ||
+              collectedTokens.accessToken ||
+              collectedTokens.tongyi_sso_ticket
+            const refreshToken =
+              collectedTokens.refresh_token || collectedTokens.refreshToken
+            const rawCookies = collectedTokens.cookies
+            const allCookies =
+              rawCookies && typeof rawCookies === 'object'
+                ? (rawCookies as unknown as Record<string, string>)
+                : {}
+            const cookies =
+              typeof rawCookies === 'string'
+                ? rawCookies
+                : Object.entries(allCookies)
+                    .filter(([, value]) => typeof value === 'string' && value)
+                    .map(([name, value]) => `${name}=${value}`)
+                    .join('; ')
+
+            if (!token) {
+              console.log('[OAuthManager] Qwen AI: missing access token, waiting for login...')
+              this.sendProgressToRenderer({
+                status: 'pending',
+                message: 'Waiting for Qwen AI login...',
+              })
+              isValidating = false
+              return
+            }
+
+            validationCredentials = { token }
+            finalCredentials = { token }
+            if (refreshToken) {
+              finalCredentials.refresh_token = refreshToken
+            }
+            if (cookies) {
+              finalCredentials.cookies = cookies
+            }
+            console.log(
+              '[OAuthManager] Qwen AI: final credentials prepared:',
+              Object.keys(finalCredentials),
+              'refresh_token:',
+              refreshToken ? 'yes' : 'no',
+            )
           } else if (providerType === 'longcat') {
             const cookieJar = collectedTokens.cookieJar || collectedTokens.cookie || ''
             const allCookies = (collectedTokens.cookies as unknown as Record<string, string>) || {}

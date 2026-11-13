@@ -8,6 +8,7 @@ import { EventEmitter } from 'events'
 import axios from 'axios'
 import { ProviderType } from './types'
 import { TokenExtractionConfig, getTokenExtractionConfig, TokenSource } from './tokenExtractionConfig'
+import { decodeJwtPayload, getJwtExpiryMs } from './qwenAiAuth'
 
 export interface InAppLoginResult {
   success: boolean
@@ -318,15 +319,31 @@ export class InAppLoginManager extends EventEmitter {
       // JWT format (3 parts)
       if (parts.length === 3) {
         try {
-          const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString())
+          const payload = decodeJwtPayload(value)
+          if (!payload) {
+            console.log('[InAppLogin] Token rejected: invalid JWT')
+            return false
+          }
           console.log('[InAppLogin] JWT payload:', payload)
-          
+
           // Reject guest accounts
-          if (payload.email && payload.email.includes('@guest.com')) {
+          if (typeof payload.email === 'string' && payload.email.includes('@guest.com')) {
             console.log('[InAppLogin] Token rejected: guest account')
             return false
           }
-          
+
+          // An expired access token is not usable. Accepting it here made the
+          // silent re-acquisition hand the stale localStorage value back to the
+          // proxy instead of waiting for the page to mint a fresh one.
+          const expiry = getJwtExpiryMs(value)
+          if (expiry !== null && expiry <= Date.now()) {
+            console.log(
+              '[InAppLogin] Token rejected: JWT expired at',
+              new Date(expiry).toISOString(),
+            )
+            return false
+          }
+
           if (payload && (payload.app_id || payload.sub || payload.exp || payload.id || payload.user_id || payload.uid || payload.email)) {
             console.log('[InAppLogin] Token accepted as valid JWT')
             return true
@@ -436,8 +453,22 @@ export class InAppLoginManager extends EventEmitter {
         if (value && value.startsWith('{') && value.endsWith('}')) {
           try {
             const parsed = JSON.parse(value)
-            if (parsed.value) {
-              tokenValue = parsed.value
+            // Qwen AI stores { version, stateId, token, expiresAt, ... } in
+            // qwen_access_token_state; other providers wrap the value as
+            // { value } or { access_token }.
+            tokenValue = parsed.token || parsed.access_token || parsed.value || null
+            if (
+              tokenValue &&
+              typeof parsed.expiresAt === 'number' &&
+              parsed.expiresAt <= Date.now()
+            ) {
+              console.log(
+                '[InAppLogin] Token rejected: stored state expired at',
+                new Date(parsed.expiresAt).toISOString(),
+              )
+              continue
+            }
+            if (tokenValue) {
               console.log('[InAppLogin] Extracted token from JSON:', tokenValue.substring(0, 50) + '...')
             }
           } catch (e) {
@@ -447,7 +478,10 @@ export class InAppLoginManager extends EventEmitter {
 
         if (tokenValue && typeof tokenValue === 'string' && this.isValidToken(tokenValue)) {
           console.log('[InAppLogin] Token found and valid from localStorage:', source.key)
-          const emitKey = source.key === '_token' ? 'token' : source.key
+          const emitKey =
+            source.key === '_token' || source.key === 'qwen_access_token_state'
+              ? 'token'
+              : source.key
           this.emit('tokenFound', { key: emitKey, value: tokenValue })
         }
       }

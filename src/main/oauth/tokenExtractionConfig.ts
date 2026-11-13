@@ -142,15 +142,28 @@ export const TOKEN_EXTRACTION_CONFIGS: Partial<Record<ProviderType, TokenExtract
     loginUrl: 'https://chat.qwen.ai',
     tokenSources: [
       {
+        // The current web client keeps { version, stateId, token, expiresAt }
+        // in this key; `token`/`at_expire_time` are the legacy pair.
+        type: 'localStorage',
+        key: 'qwen_access_token_state',
+      },
+      {
         type: 'localStorage',
         key: 'token',
+      },
+      {
+        // HttpOnly, long-lived (about 300 days) and required by
+        // auth.qwen.ai/api/v2/auths/refresh. Electron can read it even though
+        // page JavaScript cannot.
+        type: 'cookie',
+        key: 'refresh_token',
       },
       {
         type: 'cookie',
         key: 'token',
       },
     ],
-    targetDomains: ['.qwen.ai', 'qwen.ai', 'chat.qwen.ai'],
+    targetDomains: ['.qwen.ai', 'qwen.ai', 'chat.qwen.ai', 'auth.qwen.ai'],
     successUrlPatterns: [/chat\.qwen\.ai/i, /qwen\.ai/i],
     windowTitle: 'Qwen AI Login',
   },

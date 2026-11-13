@@ -47,8 +47,14 @@ export function normalizeRenewedCredentials(
       break
     }
     case 'qwen-ai': {
-      const token = pick(raw, 'token', 'tongyi_sso_ticket')
+      const token = pick(raw, 'token', 'accessToken', 'tongyi_sso_ticket')
       if (token) out.token = token
+
+      const refreshToken = pick(raw, 'refresh_token', 'refreshToken')
+      if (refreshToken) out.refresh_token = refreshToken
+
+      const cookies = pick(raw, 'cookies', 'cookie', 'cookieJar')
+      if (cookies) out.cookies = cookies
       break
     }
     case 'zai': {

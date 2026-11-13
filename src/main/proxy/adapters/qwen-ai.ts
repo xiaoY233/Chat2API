@@ -26,6 +26,11 @@ import {
   isQwenWafResponse,
   type QwenBaxiaSession,
 } from './qwen-baxia'
+import { storeManager } from '../../store/store'
+import {
+  isQwenAiTokenExpiring,
+  normalizeCookieHeader,
+} from '../../oauth/qwenAiAuth'
 
 const QWEN_AI_BASE = 'https://chat.qwen.ai'
 
@@ -198,7 +203,45 @@ export class QwenAiAdapter {
 
   private getCookies(): string {
     const credentials = this.account.credentials
-    return credentials.cookies || credentials.cookie || ''
+    return normalizeCookieHeader(credentials.cookies || credentials.cookie)
+  }
+
+  /**
+   * Qwen AI access tokens expire after ~15 minutes. Refresh them a few minutes
+   * early through auth.qwen.ai using the long-lived refresh_token cookie, so a
+   * long-lived proxy session never sends an expired token upstream.
+   */
+  async ensureValidToken(force = false): Promise<string> {
+    const current = this.getToken()
+    if (!force && !isQwenAiTokenExpiring(current)) {
+      return current
+    }
+
+    const { refreshQwenAiToken } = await import('../../oauth/qwenAiRefresh')
+    const refreshed = await refreshQwenAiToken(this.account.credentials)
+    if (refreshed.status !== 'success') {
+      if (force) {
+        console.warn('[QwenAI] Forced token refresh failed:', refreshed.status, refreshed.reason || '')
+      }
+      return current
+    }
+
+    const nextCredentials = {
+      ...this.account.credentials,
+      token: refreshed.token,
+      refresh_token: refreshed.refreshToken,
+      cookies: refreshed.cookies,
+    }
+    this.account.credentials = nextCredentials
+
+    try {
+      storeManager.updateAccount(this.account.id, { credentials: nextCredentials })
+      console.log('[QwenAI] Refreshed access token persisted for account', this.account.id)
+    } catch (error) {
+      console.warn('[QwenAI] Failed to persist refreshed access token:', error)
+    }
+
+    return refreshed.token
   }
 
   private async buildHeaders(chatId?: string, session?: QwenBaxiaSession | null): Promise<Record<string, string>> {
@@ -270,6 +313,8 @@ export class QwenAiAdapter {
     title: string = 'New Chat',
     chatType: 't2t' | 't2i' | 't2v' = 't2t'
   ): Promise<string> {
+    await this.ensureValidToken()
+
     const url = `${QWEN_AI_BASE}/api/v2/chats/new`
     const payload = {
       title,
@@ -281,8 +326,10 @@ export class QwenAiAdapter {
     }
 
     let session = await getQwenBaxiaSession()
+    let wafRetried = false
+    let tokenRefreshed = false
 
-    for (let attempt = 0; attempt < 2; attempt++) {
+    for (let attempt = 0; attempt < 4; attempt++) {
       try {
         const response = await this.axiosInstance.post(url, payload, {
           headers: await this.buildHeaders(undefined, session),
@@ -290,7 +337,8 @@ export class QwenAiAdapter {
         })
 
         if (this.isWafResponse(response)) {
-          if (attempt === 0) {
+          if (!wafRetried) {
+            wafRetried = true
             console.warn('[QwenAI] Create chat hit the Aliyun WAF, refreshing baxia session...')
             session = await getQwenBaxiaSession(true)
             continue
@@ -309,6 +357,26 @@ export class QwenAiAdapter {
           response.data?.msg ||
           response.data?.message ||
           response.data?.data?.code
+        const detailText = String(detail || '')
+        const code = String(response.data?.data?.code || '').toLowerCase()
+
+        // The server may reject a token that still looks valid locally (clock
+        // skew or early revocation). Force a refresh and retry once.
+        if (
+          !tokenRefreshed &&
+          (code === 'unauthorized' ||
+            code === 'invalid token' ||
+            /token has expired|token is invalid|session has expired/i.test(detailText))
+        ) {
+          tokenRefreshed = true
+          const previousToken = this.getToken()
+          const refreshedToken = await this.ensureValidToken(true)
+          if (refreshedToken && refreshedToken !== previousToken) {
+            console.log('[QwenAI] Create chat unauthorized, retrying with the refreshed token')
+            continue
+          }
+        }
+
         const status = response.status && response.status !== 200 ? `HTTP ${response.status}: ` : ''
         throw new Error(
           `Failed to create chat: ${status}${detail || 'no chat ID returned'}`
@@ -319,7 +387,7 @@ export class QwenAiAdapter {
       }
     }
 
-    throw new Error(WAF_ERROR_MESSAGE)
+    throw new Error('Failed to create chat: too many retries')
   }
 
   async deleteChat(chatId: string): Promise<boolean> {
@@ -375,6 +443,7 @@ export class QwenAiAdapter {
     chatId: string
     parentId: string | null
   }> {
+    await this.ensureValidToken()
     const token = this.getToken()
     if (!token) {
       throw new Error('Qwen AI token not configured, please add token in account settings')
@@ -527,6 +596,7 @@ export class QwenAiAdapter {
     width?: number
     height?: number
   }> {
+    await this.ensureValidToken()
     const token = this.getToken()
     if (!token) {
       throw new Error('Qwen AI token not configured, please add token in account settings')

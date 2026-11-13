@@ -49,6 +49,10 @@ test('isAuthFailure recognizes expired-token messages from every renewable provi
     isAuthFailure('Failed to create chat: Your session has expired, or the token is no longer valid. Please sign in again to proceed.'),
     true
   )
+  assert.equal(
+    isAuthFailure('Failed to create chat: Token has expired, please log in again.'),
+    true
+  )
   assert.equal(isAuthFailure('您的授权已过期，请重新登录'), true)
   assert.equal(isAuthFailure('登录已失效'), true)
   assert.equal(isAuthFailure('Kimi API error: auth.token.invalid'), true)

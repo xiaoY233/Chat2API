@@ -3,6 +3,7 @@ import { getBuiltinProvider } from './builtin'
 import { LONGCAT_API_BASE, buildLongCatCookieHeader, longCatHeaders } from './longcatCookie'
 import { buildInceptionCookieHeader, fetchInceptionSessionToken, getInceptionClearance } from './inception'
 import { getQwenBaxiaSession, isQwenWafResponse } from '../proxy/adapters/qwen-baxia'
+import { normalizeCookieHeader } from '../oauth/qwenAiAuth'
 import type { Provider, ProviderCheckResult, Account } from '../../shared/types'
 import type { BuiltinProviderConfig } from '../store/types'
 
@@ -557,12 +558,12 @@ export class ProviderChecker {
   ): Promise<TokenCheckResult> {
     try {
       const baxia = await getQwenBaxiaSession()
-      const cookieHeader = [baxia?.cookies, cookies]
+      const cookieHeader = [baxia?.cookies, normalizeCookieHeader(cookies)]
         .filter((value): value is string => !!value)
         .join('; ')
 
       const response = await axios.get(
-        'https://chat.qwen.ai/api/v2/user',
+        'https://auth.qwen.ai/api/v2/auths/',
         {
           headers: {
             Authorization: `Bearer ${token}`,
@@ -570,6 +571,8 @@ export class ProviderChecker {
             Accept: 'application/json',
             'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
             source: 'web',
+            Version: '0.3.42',
+            'x-request-origin': 'https://chat.qwen.ai',
             'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36',
             Origin: 'https://chat.qwen.ai',
             ...(baxia

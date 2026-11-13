@@ -5,8 +5,12 @@
 | 供应商 ID | qwen-ai |
 | 官网 | https://chat.qwen.ai |
 | API Base | https://chat.qwen.ai |
-| 认证 | JWT Token |
-| 凭据字段 | `token`, `cookies` |
+| 认证 | JWT Token + `refresh_token` Cookie |
+| 凭据字段 | `token`, `cookies`（含 `refresh_token`）, `refresh_token`（可选） |
+
+## Token 自动续期
+
+Qwen AI 的 access token 有效期约 15 分钟，`refresh_token` Cookie 有效期约 300 天。应用会在 token 到期前 3 分钟自动调用 `GET https://auth.qwen.ai/api/v2/auths/refresh`（携带 `refresh_token` Cookie 和 `x-request-origin` 请求头）续期，并把新的 token / Cookie 写回账号。上游仍返回 `Token has expired` 时，代理会强制续期并重试一次；续期失败时还会尝试用保留的登录会话在隐藏窗口中让官网前端重新签发 token。因此只要登录时保留了 `refresh_token`，通常不需要手动重新登录。
 
 ## 默认模型
 
@@ -60,6 +64,6 @@
 ## 教程
 
 1. 登录 `chat.qwen.ai`。
-2. 打开 DevTools -> Application -> Local Storage，复制 `token`；如请求需要 Cookie，同时复制完整 Cookie 字符串。
+2. 打开 DevTools -> Application -> Local Storage，优先从 `qwen_access_token_state` 的 `token` 字段复制；旧版页面使用 `token` 键。随后从 Cookies 复制完整 Cookie 字符串（必须包含 `refresh_token`，否则无法自动续期）。
 3. 在供应商管理中添加 Qwen AI 账号，填入 `token`，可选填 `cookies`。
 4. 在模型管理中使用默认模型；如需上表其他模型，手动添加显示名称和实际模型 ID。
