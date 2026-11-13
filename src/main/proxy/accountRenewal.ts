@@ -80,10 +80,32 @@ export async function renewAccountCredentials(
       try {
         if (provider.id === 'qwen-ai') {
           const { refreshQwenAiToken } = await import('../oauth/qwenAiRefresh')
-          // The native refresh only needs the retained session cookies; opening
-          // a window cannot help when no session exists, so do not fall back.
-          return await refreshQwenAiToken(
+          const refreshed = await refreshQwenAiToken(
             account.credentials.cookies || account.credentials.cookie
+          )
+          if (refreshed.status === 'success') {
+            return { token: refreshed.token, cookies: refreshed.cookies }
+          }
+          if (refreshed.status === 'no-session') {
+            console.log(
+              '[AccountRenewal] Qwen session is not signed in; a manual login is required'
+            )
+            return null
+          }
+
+          // The refresh itself failed (network/WAF/server error). If a browser
+          // login session is still on disk, let Qwen's own frontend mint a
+          // token in a hidden window and extract it.
+          const { getProviderSessionCookies } = await import('../oauth/sessionPartitions')
+          const { cookies: partitionCookies } = await getProviderSessionCookies('qwen-ai')
+          if (!partitionCookies) {
+            console.log(
+              '[AccountRenewal] No retained Qwen login session; a manual login is required'
+            )
+            return null
+          }
+          console.log(
+            '[AccountRenewal] Native Qwen refresh failed; retrying via the retained login window'
           )
         }
         const { oauthManager } = await import('../oauth/manager')
