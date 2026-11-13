@@ -454,7 +454,7 @@ export class RequestForwarder {
         tools: transformed.tools,
       }
 
-      const adapter = new DeepSeekAdapter(provider, account)
+      const adapter = new DeepSeekAdapter(provider, account, transformed.plan)
       
       const { response, sessionId } = await adapter.chatCompletion({
         model: request.model,
@@ -567,7 +567,7 @@ export class RequestForwarder {
         tools: transformed.tools,
       }
 
-      const adapter = new GLMAdapter(provider, account)
+      const adapter = new GLMAdapter(provider, account, transformed.plan)
       const { response, conversationId } = await adapter.chatCompletion({
         model: actualModel,
         originalModel: request.model,
@@ -671,7 +671,7 @@ export class RequestForwarder {
     try {
       const transformed = this.transformRequestForPromptToolUse(request, provider)
       
-      const adapter = new KimiAdapter(provider, account)
+      const adapter = new KimiAdapter(provider, account, transformed.plan)
       const { response, conversationId } = await adapter.chatCompletion({
         model: actualModel,
         originalModel: request.model,
@@ -771,7 +771,7 @@ export class RequestForwarder {
         tools: transformed.tools,
       }
 
-      const adapter = new QwenAdapter(provider, account)
+      const adapter = new QwenAdapter(provider, account, transformed.plan)
       const { response, sessionId, reqId } = await adapter.chatCompletion({
         model: actualModel,
         originalModel: request.model,
@@ -865,7 +865,7 @@ export class RequestForwarder {
     try {
       const transformed = this.transformRequestForPromptToolUse(request, provider)
       
-      const adapter = new QwenAiAdapter(provider, account)
+      const adapter = new QwenAiAdapter(provider, account, transformed.plan)
       const { response, chatId, parentId } = await adapter.chatCompletion({
         model: actualModel,
         originalModel: request.model,
@@ -887,7 +887,7 @@ export class RequestForwarder {
         }
       }
 
-      const handler = new QwenAiStreamHandler(actualModel)
+      const handler = new QwenAiStreamHandler(actualModel, undefined, transformed.plan)
       handler.setChatId(chatId)
 
       if (request.stream) {
@@ -1060,7 +1060,7 @@ export class RequestForwarder {
     try {
       const transformed = this.transformRequestForPromptToolUse(request, provider)
       
-      const adapter = new ZaiAdapter(provider, account)
+      const adapter = new ZaiAdapter(provider, account, transformed.plan)
       const { response, chatId, requestId } = await adapter.chatCompletion({
         model: actualModel,
         originalModel: request.model,
@@ -1093,7 +1093,7 @@ export class RequestForwarder {
           }
         : undefined
 
-      const handler = new ZaiStreamHandler(actualModel, deleteChatCallback)
+      const handler = new ZaiStreamHandler(actualModel, deleteChatCallback, transformed.plan)
       handler.setChatId(chatId)
       
       if (request.stream === true) {
@@ -1151,7 +1151,7 @@ export class RequestForwarder {
     try {
       const transformed = this.transformRequestForPromptToolUse(request, provider)
       
-      const adapter = new MiniMaxAdapter(provider, account)
+      const adapter = new MiniMaxAdapter(provider, account, transformed.plan)
       const { response, stream, chatId } = await adapter.chatCompletion({
         model: actualModel,
         originalModel: request.model,
@@ -1256,7 +1256,7 @@ export class RequestForwarder {
     startTime: number
   ): Promise<ForwardResult> {
     try {
-      const adapter = new MimoAdapter(provider, account)
+      const adapter = new MimoAdapter(provider, account, transformed.plan)
       const { response, body } = await adapter.ttsCompletion({
         model: actualModel,
         originalModel: request.originalModel,
@@ -1313,7 +1313,7 @@ export class RequestForwarder {
         messages: transformed.messages,
         tools: transformed.tools,
       }
-      const adapter = new MimoAdapter(provider, account)
+      const adapter = new MimoAdapter(provider, account, transformed.plan)
 
       const { response, conversationId, query } = await adapter.chatCompletion({
         model: actualModel,
@@ -1432,7 +1432,7 @@ export class RequestForwarder {
     try {
       const transformed = this.transformRequestForPromptToolUse(request, provider)
 
-      const adapter = new LongCatAdapter(provider, account)
+      const adapter = new LongCatAdapter(provider, account, transformed.plan)
       const { response, conversationId } = await adapter.chatCompletion({
         model: actualModel,
         originalModel: request.model,
@@ -1615,7 +1615,7 @@ export class RequestForwarder {
     try {
       const transformed = this.transformRequestForPromptToolUse(request, provider)
       
-      const adapter = new PerplexityAdapter(provider, account)
+      const adapter = new PerplexityAdapter(provider, account, transformed.plan)
       
       const { stream, sessionId } = await adapter.chatCompletion({
         model: actualModel,
@@ -1637,7 +1637,7 @@ export class RequestForwarder {
             }
           : undefined
 
-        const handler = new PerplexityStreamHandler(actualModel, sessionId, deleteSessionCallback, adapter)
+        const handler = new PerplexityStreamHandler(actualModel, sessionId, deleteSessionCallback, adapter, transformed.plan)
         const transformedStream = await handler.handleStream(stream)
         
         return {
@@ -1651,7 +1651,7 @@ export class RequestForwarder {
         }
       }
 
-      const handler = new PerplexityStreamHandler(actualModel, sessionId, undefined, adapter)
+      const handler = new PerplexityStreamHandler(actualModel, sessionId, undefined, adapter, transformed.plan)
       const result = await handler.handleNonStream(stream)
       
       this.applyToolCallsToResponse(result, transformed)

@@ -17,6 +17,7 @@ import { createParser } from 'eventsource-parser'
 import { Account, Provider } from '../../store/types'
 import { createBaseChunk } from '../utils/streamToolHandler'
 import { ToolStreamParser } from '../toolCalling/ToolStreamParser'
+import { getProviderToolProfile } from '../toolCalling/providerProfiles'
 import type { ToolCallingPlan } from '../toolCalling/types'
 import {
   LONGCAT_API_BASE,
@@ -42,6 +43,8 @@ const LONGCAT_HEADERS: Record<string, string> = {
 export interface LongCatMessage {
   role: string
   content: string | Array<{ type?: string; text?: string }> | null
+  tool_calls?: Array<{ id?: string; function?: { name?: string; arguments?: string } }>
+  tool_call_id?: string
 }
 
 export interface LongCatChatRequest {
@@ -85,10 +88,28 @@ function messageText(message: LongCatMessage): string {
  * The web API takes a single `content` string, so a conversation is flattened
  * into `role:content;role:content` pairs.
  */
-export function flattenLongCatMessages(messages: LongCatMessage[]): string {
+export function flattenLongCatMessages(
+  messages: LongCatMessage[],
+  protocol?: ToolCallingPlan['protocol'],
+): string {
+  const toolProfile = getProviderToolProfile('longcat', protocol)
   return messages
     .map((message) => {
-      const content = messageText(message)
+      let content = messageText(message)
+
+      if (message.role === 'assistant' && message.tool_calls && message.tool_calls.length > 0) {
+        content = toolProfile.formatAssistantToolCalls(message.tool_calls.map((call) => ({
+          id: call.id || 'call_0',
+          name: call.function?.name || 'unknown',
+          arguments: call.function?.arguments || '{}',
+        })))
+      } else if (message.role === 'tool' && message.tool_call_id) {
+        content = toolProfile.formatToolResult({
+          toolCallId: message.tool_call_id,
+          content,
+        })
+      }
+
       if (!content) {
         return null
       }
@@ -195,10 +216,12 @@ export function extractLongCatDelta(input: any): LongCatDelta {
 export class LongCatAdapter {
   private provider: Provider
   private account: Account
+  private toolCallingPlan?: ToolCallingPlan
 
-  constructor(provider: Provider, account: Account) {
+  constructor(provider: Provider, account: Account, toolCallingPlan?: ToolCallingPlan) {
     this.provider = provider
     this.account = account
+    this.toolCallingPlan = toolCallingPlan
   }
 
   static isLongCatProvider(provider: Provider): boolean {
@@ -273,7 +296,7 @@ export class LongCatAdapter {
   ): Promise<{ response: AxiosResponse; conversationId: string }> {
     const cookie = this.getCookie()
     const conversationId = await this.createSession()
-    const content = flattenLongCatMessages(request.messages)
+    const content = flattenLongCatMessages(request.messages, this.toolCallingPlan?.protocol)
     const { searchEnabled, reasonEnabled } = resolveLongCatOptions(request)
 
     const body = {

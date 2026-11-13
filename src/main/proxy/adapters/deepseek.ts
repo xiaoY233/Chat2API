@@ -11,6 +11,7 @@ import { getDeepSeekHash } from '../../lib/challenge'
 import type { Account, Provider } from '../../store/types'
 import { resolveDeepSeekChatOptions } from './providerModelOptions'
 import { getProviderToolProfile } from '../toolCalling/providerProfiles'
+import type { ToolCallingPlan } from '../toolCalling/types'
 
 const DEEPSEEK_API_BASE = 'https://chat.deepseek.com/api'
 
@@ -106,10 +107,12 @@ export class DeepSeekAdapter {
   private provider: Provider
   private account: Account
   private token: string
+  private toolCallingPlan?: ToolCallingPlan
 
-  constructor(provider: Provider, account: Account) {
+  constructor(provider: Provider, account: Account, toolCallingPlan?: ToolCallingPlan) {
     this.provider = provider
     this.account = account
+    this.toolCallingPlan = toolCallingPlan
     console.log('[DeepSeek] Account credentials:', JSON.stringify(account.credentials, null, 2))
     this.token = account.credentials.token || account.credentials.apiKey || account.credentials.refreshToken || ''
     console.log('[DeepSeek] Using token:', this.token.substring(0, 20) + '...')
@@ -286,7 +289,7 @@ export class DeepSeekAdapter {
   }
 
   private messagesToPrompt(messages: DeepSeekMessage[], isMultiTurn: boolean = false): string {
-    const toolProfile = getProviderToolProfile('deepseek')
+    const toolProfile = getProviderToolProfile('deepseek', this.toolCallingPlan?.protocol)
     const processedMessages = messages.map(message => {
       let text: string
 

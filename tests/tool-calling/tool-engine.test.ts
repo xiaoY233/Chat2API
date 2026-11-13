@@ -44,7 +44,7 @@ function request(overrides: Partial<ChatCompletionRequest> = {}): ChatCompletion
   }
 }
 
-test('OpenAI tools plus DeepSeek choose managed prompt', () => {
+test('OpenAI tools plus DeepSeek choose managed coding prompt', () => {
   const result = new ToolCallingEngine().transformRequest({
     request: request(),
     provider,
@@ -52,10 +52,34 @@ test('OpenAI tools plus DeepSeek choose managed prompt', () => {
   })
 
   assert.equal(result.plan.mode, 'managed')
-  assert.equal(result.plan.protocol, 'managed_xml')
+  assert.equal(result.plan.protocol, 'managed_bracket')
+  assert.equal(result.plan.coding, true)
   assert.equal(result.plan.shouldInjectPrompt, true)
   assert.equal(result.tools, undefined)
   assert.equal(result.plan.tools.length, 2)
+  assert.match(result.messages[0].content as string, /Tool Calling \(Coding Mode\)/)
+  assert.match(result.messages[0].content as string, /\[function_calls\]/)
+})
+
+test('non-coding tools keep the provider XML protocol', () => {
+  const result = new ToolCallingEngine().transformRequest({
+    request: request({
+      messages: [{ role: 'user', content: 'what is the weather in Paris?' }],
+      tools: [{
+        type: 'function',
+        function: {
+          name: 'weather-test:get_weather',
+          description: 'Get weather',
+          parameters: { type: 'object', properties: { city: { type: 'string' } } },
+        },
+      }],
+    }),
+    provider,
+    actualModel: 'deepseek-chat',
+  })
+
+  assert.equal(result.plan.protocol, 'managed_xml')
+  assert.equal(result.plan.coding, false)
   assert.match(result.messages[0].content as string, /<\|CHAT2API\|tool_calls>/)
 })
 
@@ -151,7 +175,7 @@ test('forced function choice narrows allowed tool names to the selected function
   assert.deepEqual(result.plan.tools.map((tool) => tool.name), ['default_api:list_dir'])
 })
 
-test('non-stream parsing only accepts the selected provider protocol', () => {
+test('non-stream parsing falls back to bracket when the selected protocol is XML', () => {
   const engine = new ToolCallingEngine()
   const transformed = engine.transformRequest({
     request: request(),
@@ -170,6 +194,104 @@ test('non-stream parsing only accepts the selected provider protocol', () => {
 
   engine.applyNonStreamResponse(result, transformed.plan)
 
-  assert.equal(result.choices[0].message.tool_calls, undefined)
-  assert.equal(result.choices[0].message.content, '[function_calls][call:default_api:read_file]{"filePath":"/tmp/a"}[/call][/function_calls]')
+  assert.equal(result.choices[0].message.tool_calls[0].function.name, 'default_api:read_file')
+  assert.equal(result.choices[0].message.content, null)
+  assert.equal(result.choices[0].finish_reason, 'tool_calls')
+  assert.equal(transformed.plan.diagnostics.parserFormat, 'managed_bracket')
+})
+
+test('non-stream parsing accepts fenced XML and removes the fence', () => {
+  const engine = new ToolCallingEngine()
+  const transformed = engine.transformRequest({
+    request: request(),
+    provider,
+    actualModel: 'deepseek-chat',
+  })
+  const result: any = {
+    choices: [{
+      message: {
+        role: 'assistant',
+        content: '```xml\n<tool_calls><invoke name="default_api:read_file"><parameter name="filePath">/tmp/a</parameter></invoke></tool_calls>\n```',
+      },
+      finish_reason: 'stop',
+    }],
+  }
+
+  engine.applyNonStreamResponse(result, transformed.plan)
+
+  assert.equal(result.choices[0].message.tool_calls[0].function.name, 'default_api:read_file')
+  assert.equal(result.choices[0].message.content, null)
+})
+
+test('non-stream parsing accepts OpenAI JSON tool calls', () => {
+  const engine = new ToolCallingEngine()
+  const transformed = engine.transformRequest({
+    request: request(),
+    provider,
+    actualModel: 'deepseek-chat',
+  })
+  const result: any = {
+    choices: [{
+      message: {
+        role: 'assistant',
+        content: JSON.stringify({
+          tool_calls: [{
+            type: 'function',
+            function: { name: 'default_api:read_file', arguments: '{"filePath":"/tmp/a"}' },
+          }],
+        }),
+      },
+      finish_reason: 'stop',
+    }],
+  }
+
+  engine.applyNonStreamResponse(result, transformed.plan)
+
+  assert.equal(result.choices[0].message.tool_calls[0].function.name, 'default_api:read_file')
+  assert.equal(result.choices[0].message.content, null)
+  assert.equal(transformed.plan.diagnostics.parserFormat, 'json_tool_calls')
+})
+
+test('non-stream parsing keeps unrelated code when a tool call is present', () => {
+  const engine = new ToolCallingEngine()
+  const transformed = engine.transformRequest({
+    request: request(),
+    provider,
+    actualModel: 'deepseek-chat',
+  })
+  const result: any = {
+    choices: [{
+      message: {
+        role: 'assistant',
+        content: 'Here is the code:\n```ts\nconst a = 1\n```\n<tool_calls><invoke name="default_api:read_file"><parameter name="filePath">/tmp/a</parameter></invoke></tool_calls>',
+      },
+      finish_reason: 'stop',
+    }],
+  }
+
+  engine.applyNonStreamResponse(result, transformed.plan)
+
+  assert.equal(result.choices[0].message.tool_calls[0].function.name, 'default_api:read_file')
+  assert.equal(result.choices[0].message.content, 'Here is the code:\n```ts\nconst a = 1\n```')
+})
+
+test('coding mode removes conflicting client tool prompts before injection', () => {
+  const result = new ToolCallingEngine().transformRequest({
+    request: request({
+      messages: [
+        {
+          role: 'system',
+          content: 'You are Cline, a coding agent.\n\n# TOOL USE\nWhen using tools, follow this format: <read_file><path>...</path></read_file>\n\n# USER\'S CURRENT REQUEST\nFix the bug.',
+        },
+        { role: 'user', content: 'read /tmp/a' },
+      ],
+    }),
+    provider,
+    actualModel: 'deepseek-chat',
+  })
+
+  const system = result.messages[0].content as string
+  assert.match(system, /You are Cline, a coding agent\./)
+  assert.doesNotMatch(system, /When using tools, follow this format/)
+  assert.match(system, /Tool Calling \(Coding Mode\)/)
 })

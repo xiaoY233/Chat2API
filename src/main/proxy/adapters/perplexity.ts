@@ -1,6 +1,8 @@
 import { net } from 'electron'
 import { Readable } from 'stream'
 import { Account, Provider } from '../store/types'
+import { getProviderToolProfile } from '../toolCalling/providerProfiles'
+import type { ToolCallingPlan } from '../toolCalling/types'
 
 const PERPLEXITY_URL = 'https://www.perplexity.ai'
 const QUERY_ENDPOINT = `${PERPLEXITY_URL}/rest/sse/perplexity_ask`
@@ -62,7 +64,8 @@ function uuid(): string {
   })
 }
 
-function extractQuery(messages: PerplexityMessage[]): string {
+function extractQuery(messages: PerplexityMessage[], protocol?: ToolCallingPlan['protocol']): string {
+  const toolProfile = getProviderToolProfile('perplexity', protocol)
   // First, extract system prompt if present
   let systemPrompt = ''
   for (const msg of messages) {
@@ -84,9 +87,23 @@ function extractQuery(messages: PerplexityMessage[]): string {
   const conversationParts: string[] = []
   for (const msg of messages) {
     if (msg.role === 'system') continue
-    
+
     let content = ''
-    if (typeof msg.content === 'string') {
+    let roleLabel = msg.role === 'user' ? 'User' : 'Assistant'
+
+    if (msg.role === 'assistant' && msg.tool_calls && msg.tool_calls.length > 0) {
+      content = toolProfile.formatAssistantToolCalls(msg.tool_calls.map((tc) => ({
+        id: tc.id,
+        name: tc.function.name,
+        arguments: tc.function.arguments,
+      })))
+    } else if (msg.role === 'tool' && msg.tool_call_id) {
+      content = toolProfile.formatToolResult({
+        toolCallId: msg.tool_call_id,
+        content: typeof msg.content === 'string' ? msg.content : '',
+      })
+      roleLabel = 'Tool'
+    } else if (typeof msg.content === 'string') {
       content = msg.content
     } else if (Array.isArray(msg.content)) {
       const texts = msg.content
@@ -96,7 +113,6 @@ function extractQuery(messages: PerplexityMessage[]): string {
     }
     
     if (content) {
-      const roleLabel = msg.role === 'user' ? 'User' : 'Assistant'
       conversationParts.push(`[${roleLabel}]: ${content}`)
     }
   }
@@ -160,10 +176,12 @@ export class PerplexityAdapter {
   private account: Account
   private cookie: string
   private allCookies: StoredCookies
+  private toolCallingPlan?: ToolCallingPlan
 
-  constructor(provider: Provider, account: Account) {
+  constructor(provider: Provider, account: Account, toolCallingPlan?: ToolCallingPlan) {
     this.provider = provider
     this.account = account
+    this.toolCallingPlan = toolCallingPlan
     this.cookie = account.credentials.sessionToken || account.credentials.cookie || account.credentials.token || ''
     // Store all cookies from credentials for Cloudflare-protected requests
     this.allCookies = account.credentials.cookies || {}
@@ -291,7 +309,7 @@ export class PerplexityAdapter {
   }
 
   async chatCompletion(request: ChatCompletionRequest): Promise<{ stream: Readable; sessionId: string }> {
-    const query = extractQuery(request.messages)
+    const query = extractQuery(request.messages, this.toolCallingPlan?.protocol)
     if (!query) {
       throw new Error('No user message found in request')
     }

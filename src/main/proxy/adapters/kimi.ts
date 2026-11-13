@@ -111,10 +111,12 @@ export class KimiAdapter {
   private provider: Provider
   private account: Account
   private token: string
+  private toolCallingPlan?: ToolCallingPlan
 
-  constructor(provider: Provider, account: Account) {
+  constructor(provider: Provider, account: Account, toolCallingPlan?: ToolCallingPlan) {
     this.provider = provider
     this.account = account
+    this.toolCallingPlan = toolCallingPlan
     this.token = account.credentials.token || account.credentials.refreshToken || ''
   }
 
@@ -155,7 +157,7 @@ export class KimiAdapter {
   }
 
   private messagesPrepare(messages: KimiMessage[], toolsPrompt?: string, isMultiTurn: boolean = false): string {
-    const toolProfile = getProviderToolProfile('kimi')
+    const toolProfile = getProviderToolProfile('kimi', this.toolCallingPlan?.protocol)
     // Process messages including tool calls and tool responses
     const processedMessages = messages.map(msg => {
       // Handle tool calls in assistant message

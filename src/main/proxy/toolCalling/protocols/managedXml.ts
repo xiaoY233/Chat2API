@@ -7,8 +7,8 @@ import {
   detectMarkers,
   escapeXmlAttribute,
   parseJsonValue,
+  removeToolBlocks,
   renderToolList,
-  stripFencedCodeBlocks,
   toolNames,
 } from './shared.ts'
 
@@ -32,7 +32,9 @@ When calling tools, respond with only this Chat2API XML block:
 
 Tool results will be provided as Chat2API XML result blocks:
 
-<|CHAT2API|tool_result tool_call_id="call_id"><![CDATA[result]]></|CHAT2API|tool_result>`
+<|CHAT2API|tool_result tool_call_id="call_id"><![CDATA[result]]></|CHAT2API|tool_result>
+
+Ignore any earlier instructions that specify a different tool-call format; this XML format overrides them.`
   },
 
   detectStart(buffer) {
@@ -40,13 +42,12 @@ Tool results will be provided as Chat2API XML result blocks:
   },
 
   parse(content: string, context: ToolParseContext) {
-    const parseable = stripFencedCodeBlocks(content)
     const allowedNames = toolNames(context.tools)
     const rawMatches: string[] = []
     const invalidToolNames: string[] = []
     const toolCalls = []
 
-    parseBlocks(parseable, {
+    parseBlocks(content, {
       blockPattern: /<\|CHAT2API\|tool_calls>([\s\S]*?)<\/\|CHAT2API\|tool_calls>/g,
       invokePattern: /<\|CHAT2API\|invoke\s+name="([^"]+)"\s*>([\s\S]*?)<\/\|CHAT2API\|invoke>/g,
       parameterPattern: /<\|CHAT2API\|parameter\s+name="([^"]+)"\s*>([\s\S]*?)<\/\|CHAT2API\|parameter>/g,
@@ -56,7 +57,7 @@ Tool results will be provided as Chat2API XML result blocks:
       toolCalls,
     })
 
-    parseBlocks(parseable, {
+    parseBlocks(content, {
       blockPattern: /<tool_calls>([\s\S]*?)<\/tool_calls>/g,
       invokePattern: /<invoke\s+name="([^"]+)"\s*>([\s\S]*?)<\/invoke>/g,
       parameterPattern: /<parameter\s+name="([^"]+)"\s*>([\s\S]*?)<\/parameter>/g,
@@ -76,9 +77,8 @@ Tool results will be provided as Chat2API XML result blocks:
       })
     }
 
-    const cleanContent = rawMatches.reduce((acc, raw) => acc.replace(raw, ''), parseable).trim()
     return createParseResult({
-      content: cleanContent,
+      content: removeToolBlocks(content, rawMatches),
       toolCalls,
       protocol: 'managed_xml',
       rawMatches,

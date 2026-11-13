@@ -1,5 +1,7 @@
 import { PassThrough } from 'stream'
 import { parseToolCallsFromText } from '../utils/toolParser'
+import { ToolStreamParser } from '../toolCalling/ToolStreamParser'
+import type { ToolCallingPlan } from '../toolCalling/types'
 import { 
   createToolCallState, 
   processStreamContent, 
@@ -58,6 +60,7 @@ export class PerplexityStreamHandler {
   private created: number
   private onEnd?: () => void
   private toolCallState: ToolCallState
+  private toolStreamParser?: ToolStreamParser
   private adapter?: PerplexityAdapter
   private sessionTokens: SessionTokens = {}
   private accumulatedContent: string = ''
@@ -68,13 +71,17 @@ export class PerplexityStreamHandler {
     model: string,
     sessionId: string,
     onEnd?: () => void,
-    adapter?: PerplexityAdapter
+    adapter?: PerplexityAdapter,
+    toolCallingPlan?: ToolCallingPlan,
   ) {
     this.model = model
     this.sessionId = sessionId
     this.created = Math.floor(Date.now() / 1000)
     this.onEnd = onEnd
     this.toolCallState = createToolCallState()
+    this.toolStreamParser = toolCallingPlan?.shouldParseResponse
+      ? new ToolStreamParser(toolCallingPlan)
+      : undefined
     this.adapter = adapter
   }
 
@@ -295,17 +302,23 @@ export class PerplexityStreamHandler {
     if (!filteredContent) return
 
     const baseChunk = createBaseChunk(this.sessionId, this.model, this.created)
-    const { chunks, shouldFlush } = processStreamContent(
-      filteredContent,
-      this.toolCallState,
-      baseChunk,
-      this.isFirstChunk,
-      'perplexity'
-    )
+    const chunks = this.toolStreamParser
+      ? this.toolStreamParser.push(filteredContent, baseChunk, this.isFirstChunk)
+      : processStreamContent(
+          filteredContent,
+          this.toolCallState,
+          baseChunk,
+          this.isFirstChunk,
+          'perplexity'
+        ).chunks
 
     for (const chunk of chunks) {
       transStream.write(`data: ${JSON.stringify(chunk)}\n\n`)
       this.isFirstChunk = false
+    }
+
+    if (this.toolStreamParser) {
+      return
     }
 
     if (this.toolCallState.isBufferingToolCall || this.toolCallState.hasEmittedToolCall) {
@@ -329,7 +342,9 @@ export class PerplexityStreamHandler {
 
   private handleDone(transStream: PassThrough): void {
     const baseChunk = createBaseChunk(this.sessionId, this.model, this.created)
-    const flushChunks = flushToolCallBuffer(this.toolCallState, baseChunk, 'perplexity')
+    const flushChunks = this.toolStreamParser
+      ? this.toolStreamParser.flush(baseChunk)
+      : flushToolCallBuffer(this.toolCallState, baseChunk, 'perplexity')
     for (const outChunk of flushChunks) {
       transStream.write(`data: ${JSON.stringify(outChunk)}\n\n`)
     }
@@ -346,7 +361,9 @@ export class PerplexityStreamHandler {
       }
     }
 
-    const finishReason = this.toolCallState.hasEmittedToolCall ? 'tool_calls' : 'stop'
+    const finishReason = (this.toolStreamParser
+      ? this.toolStreamParser.hasEmittedToolCall()
+      : this.toolCallState.hasEmittedToolCall) ? 'tool_calls' : 'stop'
 
     transStream.write(this.createChunk({}, finishReason))
     transStream.write('data: [DONE]\n\n')

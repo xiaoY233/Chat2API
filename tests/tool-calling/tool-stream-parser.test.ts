@@ -11,6 +11,7 @@ function plan(protocol: ToolCallingPlan['protocol'] = 'managed_xml'): ToolCallin
   return {
     mode: 'managed',
     protocol,
+    coding: false,
     clientAdapterId: 'standard-openai-tools',
     providerId: 'deepseek',
     tools,
@@ -48,13 +49,13 @@ test('bracket marker split across chunks emits a tool call', () => {
   assert.equal(chunks.at(-1)?.choices[0].delta.tool_calls[0].function.name, 'default_api:read_file')
 })
 
-test('bracket output is text when XML protocol is selected', () => {
+test('bracket output is parsed as a fallback when XML protocol is selected', () => {
   const parser = new ToolStreamParser(plan('managed_xml'))
   const text = '[function_calls][call:default_api:read_file]{"filePath":"/tmp/a"}[/call][/function_calls]'
   const chunks = parser.push(text, baseChunk)
 
-  assert.equal(chunks.length, 1)
-  assert.equal(chunks[0].choices[0].delta.content, text)
+  assert.equal(chunks.at(-1)?.choices[0].delta.tool_calls[0].function.name, 'default_api:read_file')
+  assert.equal(parser.hasEmittedToolCall(), true)
 })
 
 test('XML marker split across chunks emits a tool call', () => {
@@ -96,13 +97,63 @@ test('invalid tool name is not emitted as a tool call', () => {
   assert.equal(chunks.some((chunk) => chunk.choices[0].delta.tool_calls), false)
 })
 
-test('fenced code block examples are emitted as text and never as tool calls', () => {
+test('fenced tool calls are parsed and never leak as text', () => {
   const parser = new ToolStreamParser(plan('managed_xml'))
   const text = '```xml\n<tool_calls><invoke name="default_api:read_file"><parameter name="filePath">fake</parameter></invoke></tool_calls>\n```'
   const chunks = parser.push(text, baseChunk)
 
-  assert.equal(chunks.length, 1)
-  assert.equal(chunks[0].choices[0].delta.content, text)
+  assert.equal(chunks.some((chunk) => chunk.choices[0].delta.content), false)
+  assert.equal(chunks.at(-1)?.choices[0].delta.tool_calls[0].function.name, 'default_api:read_file')
+  assert.equal(parser.hasEmittedToolCall(), true)
+})
+
+test('normal fenced code is still emitted as text', () => {
+  const parser = new ToolStreamParser(plan('managed_xml'))
+  const text = 'Here:\n```ts\nconst a = 1\n```\nBye'
+  const chunks = parser.push(text, baseChunk)
+
+  assert.equal(chunks.map((chunk) => chunk.choices[0].delta.content).join(''), text)
+  assert.equal(parser.hasEmittedToolCall(), false)
+})
+
+test('code before a fenced tool call is preserved', () => {
+  const parser = new ToolStreamParser(plan('managed_xml'))
+  const chunks = parser.push(
+    'Here:\n```ts\nconst a = 1\n```\n```xml\n<tool_calls><invoke name="default_api:read_file"><parameter name="filePath">/tmp/a</parameter></invoke></tool_calls>\n```',
+    baseChunk,
+  )
+
+  const content = chunks
+    .map((chunk) => chunk.choices[0].delta.content || '')
+    .join('')
+  assert.match(content, /const a = 1/)
+  assert.equal(chunks.at(-1)?.choices[0].delta.tool_calls[0].function.name, 'default_api:read_file')
+})
+
+test('fenced tool call split across chunks is parsed', () => {
+  const parser = new ToolStreamParser(plan('managed_xml'))
+  assert.deepEqual(parser.push('```xml\n<tool_calls><invoke name="default_api:read_file"><para', baseChunk), [])
+  const chunks = parser.push('meter name="filePath">/tmp/a</parameter></invoke></tool_calls>\n```', baseChunk)
+
+  assert.equal(chunks.at(-1)?.choices[0].delta.tool_calls[0].function.name, 'default_api:read_file')
+})
+
+test('OpenAI JSON tool call is parsed while XML is selected', () => {
+  const parser = new ToolStreamParser(plan('managed_xml'))
+  const text = '{"tool_calls":[{"type":"function","function":{"name":"default_api:read_file","arguments":"{\\"filePath\\":\\"/tmp/a\\"}"}}]}'
+  const chunks = parser.push(text, baseChunk)
+
+  assert.equal(chunks.at(-1)?.choices[0].delta.tool_calls[0].function.name, 'default_api:read_file')
+})
+
+test('Cherry tool_use XML is parsed while XML is selected', () => {
+  const parser = new ToolStreamParser(plan('managed_xml'))
+  const chunks = parser.push(
+    '<tool_use><name>default_api:read_file</name><arguments>{"filePath":"/tmp/a"}</arguments></tool_use>',
+    baseChunk,
+  )
+
+  assert.equal(chunks.at(-1)?.choices[0].delta.tool_calls[0].function.name, 'default_api:read_file')
 })
 
 test('generated call IDs stay stable between emitted chunks and final state', () => {

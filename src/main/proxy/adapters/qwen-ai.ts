@@ -9,6 +9,9 @@ import { PassThrough } from 'stream'
 import { createParser } from 'eventsource-parser'
 import { Account, Provider } from '../../store/types'
 import { hasToolUse, parseToolUse, ToolCall } from '../promptToolUse'
+import { ToolStreamParser } from '../toolCalling/ToolStreamParser'
+import { getProviderToolProfile } from '../toolCalling/providerProfiles'
+import type { ToolCallingPlan } from '../toolCalling/types'
 import {
   QWEN_MEDIA_CHAT_MODEL,
   buildQwenAiMediaPayload,
@@ -82,8 +85,10 @@ const MODEL_ALIASES: Record<string, string> = {
 }
 
 interface QwenAiMessage {
-  role: 'user' | 'assistant' | 'system'
-  content: string
+  role: 'user' | 'assistant' | 'system' | 'tool'
+  content: string | Array<{ type?: string; text?: string }> | null
+  tool_calls?: Array<{ id?: string; function?: { name?: string; arguments?: string } }>
+  tool_call_id?: string
 }
 
 interface ChatCompletionRequest {
@@ -110,18 +115,80 @@ function timestamp(): number {
   return Date.now()
 }
 
+function messageText(content: QwenAiMessage['content']): string {
+  if (typeof content === 'string') return content
+  if (Array.isArray(content)) {
+    return content
+      .filter((part) => typeof part === 'object' && part !== null && 'text' in part)
+      .map((part) => String(part.text ?? ''))
+      .join('\n')
+  }
+  return ''
+}
+
+/**
+ * The Qwen AI web endpoint accepts a single user message. Flatten the OpenAI
+ * conversation (including tool calls and tool results) into a transcript so a
+ * coding client's follow-up request still carries the tool history.
+ */
+export function buildQwenAiPrompt(
+  messages: QwenAiMessage[],
+  protocol?: ToolCallingPlan['protocol'],
+): { systemContent: string; userContent: string } {
+  const toolProfile = getProviderToolProfile('qwen-ai', protocol)
+  let systemContent = ''
+  const turns: string[] = []
+
+  for (const message of messages) {
+    if (message.role === 'system') {
+      const text = messageText(message.content)
+      if (text) systemContent += (systemContent ? '\n\n' : '') + text
+      continue
+    }
+
+    if (message.role === 'assistant' && message.tool_calls && message.tool_calls.length > 0) {
+      turns.push(
+        `Assistant: ${toolProfile.formatAssistantToolCalls(message.tool_calls.map((call) => ({
+          id: call.id || 'call_0',
+          name: call.function?.name || 'unknown',
+          arguments: call.function?.arguments || '{}',
+        })))}`,
+      )
+      continue
+    }
+
+    if (message.role === 'tool' && message.tool_call_id) {
+      turns.push(
+        `Tool: ${toolProfile.formatToolResult({
+          toolCallId: message.tool_call_id,
+          content: messageText(message.content),
+        })}`,
+      )
+      continue
+    }
+
+    const text = messageText(message.content)
+    if (!text) continue
+    turns.push(`${message.role === 'assistant' ? 'Assistant' : 'User'}: ${text}`)
+  }
+
+  return { systemContent, userContent: turns.join('\n\n') }
+}
+
 export class QwenAiAdapter {
   private provider: Provider
   private account: Account
+  private toolCallingPlan?: ToolCallingPlan
   private axiosInstance = axios.create({
     timeout: 120000,
     maxBodyLength: Infinity,
     maxContentLength: Infinity,
   })
 
-  constructor(provider: Provider, account: Account) {
+  constructor(provider: Provider, account: Account, toolCallingPlan?: ToolCallingPlan) {
     this.provider = provider
     this.account = account
+    this.toolCallingPlan = toolCallingPlan
   }
 
   private getToken(): string {
@@ -344,22 +411,16 @@ export class QwenAiAdapter {
 
     const messages = request.messages
     
-    // Extract system message and user message
-    let systemContent = ''
-    let userContent = ''
-    
-    // Single-turn mode: extract all messages
-    for (const msg of messages) {
-      if (msg.role === 'system') {
-        systemContent += (systemContent ? '\n\n' : '') + msg.content
-      } else if (msg.role === 'user') {
-        userContent = msg.content
-      }
-    }
+    // The web endpoint is single-turn, so flatten the conversation.
+    const { systemContent, userContent: conversationContent } = buildQwenAiPrompt(
+      messages,
+      this.toolCallingPlan?.protocol,
+    )
+    let userContent = conversationContent
     
     // If system prompt exists, prepend it to user content
     if (systemContent) {
-      userContent = `${systemContent}\n\nUser: ${userContent}`
+      userContent = `${systemContent}\n\n${userContent}`
     }
 
     const fid = uuid()
@@ -614,11 +675,24 @@ export class QwenAiStreamHandler {
   private responseId: string = ''
   private content: string = ''
   private toolCallsSent: boolean = false
+  private toolStreamParser?: ToolStreamParser
 
-  constructor(model: string, onEnd?: (chatId: string) => void) {
+  constructor(model: string, onEnd?: (chatId: string) => void, toolCallingPlan?: ToolCallingPlan) {
     this.model = model
     this.created = Math.floor(Date.now() / 1000)
     this.onEnd = onEnd
+    this.toolStreamParser = toolCallingPlan?.shouldParseResponse
+      ? new ToolStreamParser(toolCallingPlan)
+      : undefined
+  }
+
+  private baseChunk(): any {
+    return {
+      id: this.responseId || this.chatId,
+      model: this.model,
+      object: 'chat.completion.chunk',
+      created: this.created,
+    }
   }
 
   setChatId(chatId: string) {
@@ -806,6 +880,40 @@ export class QwenAiStreamHandler {
               
               if (content) {
                 console.log('[QwenAI] Sending content chunk:', content)
+                if (this.toolStreamParser) {
+                  const chunks = this.toolStreamParser.push(content, this.baseChunk(), !initialChunkSent)
+                  for (const chunk of chunks) {
+                    transStream.write(`data: ${JSON.stringify(chunk)}\n\n`)
+                    initialChunkSent = true
+                  }
+                  if (this.toolStreamParser.isBuffering() || this.toolStreamParser.hasEmittedToolCall()) {
+                    console.log('[QwenAI] Tool call buffering active')
+                  }
+                } else {
+                  const chunk = {
+                    id: this.responseId || this.chatId,
+                    model: this.model,
+                    object: 'chat.completion.chunk',
+                    choices: [{ index: 0, delta: { content }, finish_reason: null }],
+                    created: this.created,
+                  }
+                  transStream.write(`data: ${JSON.stringify(chunk)}\n\n`)
+                  console.log('[QwenAI] Content chunk written')
+                }
+              }
+            } else if (phase === null && content) {
+              if (!initialChunkSent) {
+                sendInitialChunk()
+              }
+              // Accumulate content for tool call detection
+              this.content += content
+
+              if (this.toolStreamParser) {
+                const chunks = this.toolStreamParser.push(content, this.baseChunk(), false)
+                for (const chunk of chunks) {
+                  transStream.write(`data: ${JSON.stringify(chunk)}\n\n`)
+                }
+              } else {
                 const chunk = {
                   id: this.responseId || this.chatId,
                   model: this.model,
@@ -814,28 +922,35 @@ export class QwenAiStreamHandler {
                   created: this.created,
                 }
                 transStream.write(`data: ${JSON.stringify(chunk)}\n\n`)
-                console.log('[QwenAI] Content chunk written')
               }
-            } else if (phase === null && content) {
-              if (!initialChunkSent) {
-                sendInitialChunk()
-              }
-              // Accumulate content for tool call detection
-              this.content += content
-              
-              const chunk = {
-                id: this.responseId || this.chatId,
-                model: this.model,
-                object: 'chat.completion.chunk',
-                choices: [{ index: 0, delta: { content }, finish_reason: null }],
-                created: this.created,
-              }
-              transStream.write(`data: ${JSON.stringify(chunk)}\n\n`)
             }
 
             if (status === 'finished' && (phase === 'answer' || phase === null)) {
-              // Check for tool calls before sending stop
-              if (hasToolUse(this.content)) {
+              if (this.toolStreamParser) {
+                const flushChunks = this.toolStreamParser.flush(this.baseChunk())
+                for (const chunk of flushChunks) {
+                  transStream.write(`data: ${JSON.stringify(chunk)}\n\n`)
+                  initialChunkSent = true
+                }
+
+                if (this.toolStreamParser.hasEmittedToolCall()) {
+                  console.log('[QwenAI] Tool stream parser emitted tool calls')
+                  const toolFinishChunk = {
+                    id: this.responseId || this.chatId,
+                    model: this.model,
+                    object: 'chat.completion.chunk',
+                    choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }],
+                    usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+                    created: this.created,
+                  }
+                  transStream.write(`data: ${JSON.stringify(toolFinishChunk)}\n\n`)
+                  transStream.end('data: [DONE]\n\n')
+                  if (this.onEnd && this.chatId) {
+                    this.onEnd(this.chatId)
+                  }
+                  return
+                }
+              } else if (hasToolUse(this.content)) {
                 console.log('[QwenAI] Found tool_use in stream, sending tool_calls')
                 this.sendToolCalls(transStream)
                 return

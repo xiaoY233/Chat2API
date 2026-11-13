@@ -1,12 +1,14 @@
 import type { ToolProtocolAdapter } from './base.ts'
 import {
   buildToolCall,
+  collectJsonCandidates,
   createParseResult,
   genericToolResultBlock,
   detectMarkers,
   normalizeArguments,
+  removeToolBlocks,
   renderToolList,
-  stripFencedCodeBlocks,
+  repairJson,
   toolNames,
 } from './shared.ts'
 
@@ -25,53 +27,66 @@ When Codex Responses compatibility is enabled, emit response items with type "fu
   },
 
   parse(content, context) {
-    const parseable = stripFencedCodeBlocks(content).trim()
     const allowedNames = toolNames(context.tools)
     const rawMatches: string[] = []
     const invalidToolNames: string[] = []
     const toolCalls = []
+    const seenCalls = new Set<string>()
 
-    let parsed: unknown
-    try {
-      parsed = JSON.parse(parseable)
-    } catch {
+    for (const candidate of collectJsonCandidates(content)) {
+      let parsed: unknown
+      try {
+        parsed = JSON.parse(candidate.text)
+      } catch {
+        parsed = repairJson(candidate.text)
+      }
+      if (parsed === undefined) continue
+
+      const items = extractResponseItems(parsed)
+      let used = false
+      for (const item of items) {
+        if (!item || typeof item !== 'object') continue
+        const record = item as Record<string, unknown>
+        if (record.type !== 'function_call') continue
+
+        const name = typeof record.name === 'string' ? record.name : ''
+        if (!allowedNames.has(name)) {
+          if (name) invalidToolNames.push(name)
+          continue
+        }
+
+        const id =
+          typeof record.call_id === 'string'
+            ? record.call_id
+            : typeof record.id === 'string'
+              ? record.id
+              : `call_${toolCalls.length}`
+
+        const key = `${id}:${name}:${normalizeArguments(record.arguments)}`
+        if (seenCalls.has(key)) continue
+        seenCalls.add(key)
+
+        toolCalls.push(buildToolCall(id, toolCalls.length, name, normalizeArguments(record.arguments), candidate.raw))
+        used = true
+      }
+      if (used) rawMatches.push(candidate.raw)
+    }
+
+    if (toolCalls.length === 0) {
       return createParseResult({
         content,
         toolCalls,
-        protocol: 'unknown',
+        protocol: rawMatches.length > 0 || invalidToolNames.length > 0 ? 'codex_responses' : 'unknown',
         rawMatches,
-        malformedReason: 'codex_responses_json_parse_failed',
+        invalidToolNames,
+        malformedReason: invalidToolNames.length > 0 ? 'codex_tool_name_not_declared' : undefined,
       })
     }
 
-    const items = extractResponseItems(parsed)
-    for (const item of items) {
-      if (!item || typeof item !== 'object') continue
-      const record = item as Record<string, unknown>
-      if (record.type !== 'function_call') continue
-
-      const name = typeof record.name === 'string' ? record.name : ''
-      if (!allowedNames.has(name)) {
-        if (name) invalidToolNames.push(name)
-        continue
-      }
-
-      const id =
-        typeof record.call_id === 'string'
-          ? record.call_id
-          : typeof record.id === 'string'
-            ? record.id
-            : `call_${toolCalls.length}`
-
-      toolCalls.push(buildToolCall(id, toolCalls.length, name, normalizeArguments(record.arguments), parseable))
-    }
-
-    if (toolCalls.length > 0) rawMatches.push(parseable)
-
     return createParseResult({
-      content: toolCalls.length > 0 ? '' : content,
+      content: removeToolBlocks(content, rawMatches),
       toolCalls,
-      protocol: toolCalls.length > 0 || invalidToolNames.length > 0 ? 'codex_responses' : 'unknown',
+      protocol: 'codex_responses',
       rawMatches,
       invalidToolNames,
     })

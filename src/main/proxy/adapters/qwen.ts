@@ -111,15 +111,17 @@ function extractTextContent(content: string | any[]): string {
 export class QwenAdapter {
   private provider: Provider
   private account: Account
+  private toolCallingPlan?: ToolCallingPlan
   private axiosInstance = axios.create({
     timeout: 120000,
     maxBodyLength: Infinity,
     maxContentLength: Infinity,
   })
 
-  constructor(provider: Provider, account: Account) {
+  constructor(provider: Provider, account: Account, toolCallingPlan?: ToolCallingPlan) {
     this.provider = provider
     this.account = account
+    this.toolCallingPlan = toolCallingPlan
   }
 
   private getTicket(): string {
@@ -328,7 +330,7 @@ export class QwenAdapter {
     })
     console.log('[Qwen] Using model:', actualModel)
 
-    const toolProfile = getProviderToolProfile('qwen')
+    const toolProfile = getProviderToolProfile('qwen', this.toolCallingPlan?.protocol)
 
     // Build prompt content from conversation messages
     let systemPrompt = ''

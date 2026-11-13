@@ -333,8 +333,8 @@ function extractTextContent(content: ChatMessage['content']): string {
   return ''
 }
 
-export function buildMimoQuery(messages: MimoMessage[]): string {
-  const toolProfile = getProviderToolProfile('mimo')
+export function buildMimoQuery(messages: MimoMessage[], protocol?: ToolCallingPlan['protocol']): string {
+  const toolProfile = getProviderToolProfile('mimo', protocol)
   const entries: Array<{ role: string; content: string }> = []
 
   for (const message of messages) {
@@ -385,10 +385,12 @@ export function buildMimoQuery(messages: MimoMessage[]): string {
 export class MimoAdapter {
   private provider: Provider
   private account: Account
+  private toolCallingPlan?: ToolCallingPlan
 
-  constructor(provider: Provider, account: Account) {
+  constructor(provider: Provider, account: Account, toolCallingPlan?: ToolCallingPlan) {
     this.provider = provider
     this.account = account
+    this.toolCallingPlan = toolCallingPlan
   }
 
   private getCredentials(): {
@@ -508,7 +510,7 @@ export class MimoAdapter {
 
     const conversationId = uuid(false)
     const msgId = uuid(false).slice(0, 32)
-    const query = buildMimoQuery(request.messages)
+    const query = buildMimoQuery(request.messages, this.toolCallingPlan?.protocol)
     await this.saveConversation(conversationId)
 
     const modelLower = request.model.toLowerCase()

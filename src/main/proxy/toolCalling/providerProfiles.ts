@@ -1,4 +1,5 @@
 import type { NormalizedToolResult, ToolProtocolId } from './types.ts'
+import { getToolProtocol } from './protocols/index.ts'
 import { managedXmlProtocol } from './protocols/managedXml.ts'
 
 export interface ProviderToolProfile {
@@ -41,9 +42,28 @@ const profiles: Record<string, ProviderToolProfile> = {
   },
 }
 
-export function getProviderToolProfile(providerId: string): ProviderToolProfile {
-  return profiles[providerId] ?? {
+export function getProviderToolProfile(
+  providerId: string,
+  protocol?: ToolProtocolId,
+): ProviderToolProfile {
+  const base = profiles[providerId] ?? {
     providerId,
     ...chat2ApiXmlHistoryProfile,
+  }
+
+  if (!protocol || protocol === base.preferredManagedProtocol) {
+    return base
+  }
+
+  const adapter = getToolProtocol(protocol)
+  return {
+    ...base,
+    preferredManagedProtocol: protocol,
+    formatAssistantToolCalls(calls) {
+      return adapter.formatAssistantToolCalls(calls)
+    },
+    formatToolResult(result) {
+      return adapter.formatToolResult(result)
+    },
   }
 }

@@ -11,6 +11,9 @@ import FormData from 'form-data'
 import { Account, Provider } from '../../store/types'
 import { hasToolUse, parseToolUse, ToolCall } from '../promptToolUse'
 import { parseToolCallsFromText } from '../utils/toolParser'
+import { ToolStreamParser } from '../toolCalling/ToolStreamParser'
+import { getProviderToolProfile } from '../toolCalling/providerProfiles'
+import type { ToolCallingPlan } from '../toolCalling/types'
 import {
   createToolCallState,
   processStreamContent,
@@ -172,6 +175,8 @@ function cleanSearchCitationsWithBuffer(text: string, buffer: { value: string })
 interface ZaiMessage {
   role: 'user' | 'assistant' | 'system'
   content: string | any[]
+  tool_calls?: any[]
+  tool_call_id?: string
 }
 
 interface ChatCompletionRequest {
@@ -200,10 +205,12 @@ export class ZaiAdapter {
   private provider: Provider
   private account: Account
   private token: string | null = null
+  private toolCallingPlan?: ToolCallingPlan
 
-  constructor(provider: Provider, account: Account) {
+  constructor(provider: Provider, account: Account, toolCallingPlan?: ToolCallingPlan) {
     this.provider = provider
     this.account = account
+    this.toolCallingPlan = toolCallingPlan
   }
 
   private getToken(): string {
@@ -464,11 +471,29 @@ export class ZaiAdapter {
     
     // Extract system message and merge with user message
     let systemContent = ''
-    let processedMessages = []
-    
+    let processedMessages: ZaiMessage[] = []
+    const toolProfile = getProviderToolProfile('zai', this.toolCallingPlan?.protocol)
+
     for (const msg of request.messages) {
       if (msg.role === 'system') {
         systemContent += (systemContent ? '\n\n' : '') + (typeof msg.content === 'string' ? msg.content : '')
+      } else if (msg.role === 'assistant' && msg.tool_calls && msg.tool_calls.length > 0) {
+        processedMessages.push({
+          role: 'assistant',
+          content: toolProfile.formatAssistantToolCalls(msg.tool_calls.map((tc) => ({
+            id: tc.id,
+            name: tc.function.name,
+            arguments: tc.function.arguments,
+          }))),
+        })
+      } else if (msg.role === 'tool' && msg.tool_call_id) {
+        processedMessages.push({
+          role: 'user',
+          content: toolProfile.formatToolResult({
+            toolCallId: msg.tool_call_id,
+            content: typeof msg.content === 'string' ? msg.content : '',
+          }),
+        })
       } else {
         processedMessages.push(msg)
       }
@@ -713,17 +738,21 @@ export class ZaiStreamHandler {
   private toolCallsSent: boolean = false
   private lastMessageId: string = ''
   private toolCallState: ToolCallState
+  private toolStreamParser?: ToolStreamParser
   private sentRole: boolean = false
   private sentThinkingRole: boolean = false
   private streamEnded: boolean = false
   private citationBuffer: { value: string } = { value: '' }
   private thinkingCitationBuffer: { value: string } = { value: '' }
 
-  constructor(model: string, onEnd?: (chatId: string) => void) {
+  constructor(model: string, onEnd?: (chatId: string) => void, toolCallingPlan?: ToolCallingPlan) {
     this.model = model
     this.created = Math.floor(Date.now() / 1000)
     this.onEnd = onEnd
     this.toolCallState = createToolCallState()
+    this.toolStreamParser = toolCallingPlan?.shouldParseResponse
+      ? new ToolStreamParser(toolCallingPlan)
+      : undefined
   }
 
   setChatId(chatId: string) {
@@ -858,13 +887,15 @@ export class ZaiStreamHandler {
             
             // Process tool call interception
             const baseChunk = createBaseChunk(this.chatId, this.model, this.created)
-            const { chunks: outputChunks } = processStreamContent(
-              cleanedContent, 
-              this.toolCallState, 
-              baseChunk, 
-              !this.sentRole && !this.sentThinkingRole,
-              'zai'
-            )
+            const outputChunks = this.toolStreamParser
+              ? this.toolStreamParser.push(cleanedContent, baseChunk, !this.sentRole && !this.sentThinkingRole)
+              : processStreamContent(
+                  cleanedContent,
+                  this.toolCallState,
+                  baseChunk,
+                  !this.sentRole && !this.sentThinkingRole,
+                  'zai'
+                ).chunks
 
             for (const outChunk of outputChunks) {
               transStream.write(`data: ${JSON.stringify(outChunk)}\n\n`)
@@ -876,14 +907,18 @@ export class ZaiStreamHandler {
             
             // Flush any remaining tool calls
             const baseChunk = createBaseChunk(this.chatId, this.model, this.created)
-            const flushChunks = flushToolCallBuffer(this.toolCallState, baseChunk, 'zai')
+            const flushChunks = this.toolStreamParser
+              ? this.toolStreamParser.flush(baseChunk)
+              : flushToolCallBuffer(this.toolCallState, baseChunk, 'zai')
             
             for (const outChunk of flushChunks) {
               transStream.write(`data: ${JSON.stringify(outChunk)}\n\n`)
             }
             
             // Check if we emitted tool calls
-            const finishReason = this.toolCallState.hasEmittedToolCall ? 'tool_calls' : 'stop'
+            const finishReason = (this.toolStreamParser
+              ? this.toolStreamParser.hasEmittedToolCall()
+              : this.toolCallState.hasEmittedToolCall) ? 'tool_calls' : 'stop'
             
             const usage = result.usage || { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 }
             
