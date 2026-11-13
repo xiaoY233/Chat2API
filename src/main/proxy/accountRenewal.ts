@@ -1,25 +1,35 @@
 /**
  * Account credential renewal
  *
- * DeepSeek and Kimi accounts are added through the in-app OAuth login, which
- * captures a short-lived web token. When the upstream server expires that token
- * the adapter throws an authentication error. Because the login session is kept
- * on disk in a per-provider partition, the provider page can be reloaded in a
- * hidden window to capture a freshly minted token without asking the user to
- * log in again.
+ * Providers added through the in-app browser login capture a short-lived web
+ * token or cookie. When the upstream server expires it, the adapter throws an
+ * authentication error. Because the login session is kept on disk in a
+ * per-provider partition, the provider page can be reloaded in a hidden window
+ * to capture freshly minted credentials without asking the user to log in
+ * again. Qwen AI additionally exposes a native refresh endpoint, which is
+ * tried first because it is instant and needs no window.
  *
  * This module decides when a failure is an authentication failure, performs a
  * single silent re-acquisition per account (de-duplicated and rate limited),
- * persists the new credentials to the store, and hands back an updated account
- * so the caller can retry the request once.
+ * normalizes the captured keys to the ones the proxy adapters read, persists
+ * the new credentials to the store, and hands back an updated account so the
+ * caller can retry the request once.
  */
 
 import type { Account, Provider } from '../store/types'
+import { normalizeRenewedCredentials } from '../oauth/credentialMapping'
 
 const RENEWABLE_PROVIDER_TYPES: Record<string, string> = {
   deepseek: 'deepseek',
+  glm: 'glm',
   kimi: 'kimi',
+  qwen: 'qwen',
   'qwen-ai': 'qwen-ai',
+  zai: 'zai',
+  minimax: 'minimax',
+  mimo: 'mimo',
+  perplexity: 'perplexity',
+  longcat: 'longcat',
 }
 
 const AUTH_FAILURE_PATTERNS: RegExp[] = [
@@ -28,13 +38,23 @@ const AUTH_FAILURE_PATTERNS: RegExp[] = [
   /token expired or invalid/i,
   /token expired/i,
   /token is no longer valid/i,
+  /token refresh failed/i,
   /session has expired/i,
+  /session (?:token )?(?:is )?(?:expired|invalid)/i,
+  /cookie expired or invalid/i,
   /please sign in again/i,
+  /please (?:log|sign) in/i,
+  /not logged in/i,
   /authorization failed/i,
   /unauthenticated/i,
+  /unauthorized/i,
+  /\b401\b/,
   /auth\.token/i,
   /授权已过期/,
   /请重新登录/,
+  /登录.*(?:过期|失效|重新)/,
+  /未登录/,
+  /请.*登录/,
 ]
 
 const RENEWAL_COOLDOWN_MS = 60_000
@@ -133,7 +153,10 @@ export async function renewAccountCredentials(
     return null
   }
 
-  const merged = { ...account.credentials, ...credentials }
+  const merged = {
+    ...account.credentials,
+    ...normalizeRenewedCredentials(provider.id, credentials),
+  }
   try {
     const { storeManager } = await import('../store/store')
     storeManager.updateAccount(account.id, { credentials: merged })
