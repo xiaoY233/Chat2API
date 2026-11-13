@@ -32,7 +32,7 @@ import { PerplexityStreamHandler } from './adapters/perplexity-stream'
 import { ToolCallingEngine } from './toolCalling/ToolCallingEngine'
 import type { ToolCallingTransformResult } from './toolCalling/types'
 import { sessionManager } from './sessionManager'
-import { isAuthFailure, renewAccountCredentials } from './accountRenewal'
+import { isAuthFailure, isRenewableProvider, renewAccountCredentials } from './accountRenewal'
 import {
   createContextManagementService,
   SummaryGenerator,

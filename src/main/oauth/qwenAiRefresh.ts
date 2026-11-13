@@ -71,6 +71,9 @@ async function tryRefresh(cookieHeader: string): Promise<string | null> {
     console.log('[QwenAI] Refreshed access token from the retained session')
     return token
   }
+
+  const reason = data?.data?.code || data?.data?.message || data?.data?.details
+  console.log('[QwenAI] Token refresh did not return a token:', reason || `HTTP ${response.status}`)
   return null
 }
 

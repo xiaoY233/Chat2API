@@ -71,6 +71,8 @@ export async function renewAccountCredentials(
     return null
   }
 
+  console.log('[AccountRenewal] Attempting credential renewal for', provider.id, 'account', account.id)
+
   const existing = inflight.get(account.id)
   const promise =
     existing ||
@@ -78,12 +80,11 @@ export async function renewAccountCredentials(
       try {
         if (provider.id === 'qwen-ai') {
           const { refreshQwenAiToken } = await import('../oauth/qwenAiRefresh')
-          const refreshed = await refreshQwenAiToken(
+          // The native refresh only needs the retained session cookies; opening
+          // a window cannot help when no session exists, so do not fall back.
+          return await refreshQwenAiToken(
             account.credentials.cookies || account.credentials.cookie
           )
-          if (refreshed) {
-            return refreshed
-          }
         }
         const { oauthManager } = await import('../oauth/manager')
         return oauthManager.reacquireCredentials(provider.id, providerType as any)
