@@ -210,17 +210,32 @@ router.post('/completions', async (ctx: Context) => {
     if (!result.success) {
       proxyStatusManager.recordRequestFailure(latency)
 
-      if (result.status && result.status >= 400 && result.status !== 429) {
+      if (
+        result.code !== 'waf_captcha' &&
+        result.code !== 'account_session_expired' &&
+        result.status &&
+        result.status >= 400 &&
+        result.status !== 429
+      ) {
         loadBalancer.markAccountFailed(account.id)
       }
 
+      if (result.retryAfter) {
+        ctx.set('Retry-After', String(result.retryAfter))
+      }
       ctx.status = result.status || 500
+      const errorType =
+        result.status === 503
+          ? 'service_unavailable_error'
+          : result.status === 401
+            ? 'authentication_error'
+            : 'api_error'
       ctx.body = {
         error: {
           message: result.error || 'Request failed',
-          type: 'api_error',
+          type: errorType,
           param: null,
-          code: null,
+          code: result.code ?? null,
         },
       }
 
@@ -236,9 +251,9 @@ router.post('/completions', async (ctx: Context) => {
       const errorResponseBody = JSON.stringify({
         error: {
           message: result.error || 'Request failed',
-          type: 'api_error',
+          type: errorType,
           param: null,
-          code: null,
+          code: result.code ?? null,
         },
       })
       storeManager.addRequestLog({

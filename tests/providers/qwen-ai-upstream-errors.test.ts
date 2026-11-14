@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { extractQwenUpstreamError } from '../../src/main/proxy/adapters/qwen-ai.ts'
+import { extractQwenUpstreamError, QwenSessionExpiredError } from '../../src/main/proxy/adapters/qwen-ai.ts'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '../..')
 
@@ -80,4 +80,83 @@ test('both streaming and non-streaming handlers surface upstream JSON errors', (
   assert.match(source, /private isPunishedResponse\(response: AxiosResponse\)/)
   assert.match(source, /WAF_CAPTCHA_MESSAGE/)
   assert.match(source, /this\.isPunishedResponse\(response\)/)
+})
+
+test('bxpunish clears the baxia partition, fails fast with 503, and cools down', () => {
+  const source = readFileSync(
+    join(root, 'src/main/proxy/adapters/qwen-ai.ts'),
+    'utf8'
+  )
+  const baxia = readFileSync(
+    join(root, 'src/main/proxy/adapters/qwen-baxia.ts'),
+    'utf8'
+  )
+  const forwarder = readFileSync(
+    join(root, 'src/main/proxy/forwarder.ts'),
+    'utf8'
+  )
+
+  // The persistent partition holds the punished x5sec cookies, so re-harvesting
+  // without clearing them just reuses the captcha state.
+  assert.match(baxia, /export async function clearQwenBaxiaSession\(\)/)
+  assert.match(baxia, /const partition = \(electron as any\)\?\.session\?\.fromPartition\('persist:qwen-baxia'\)/)
+  assert.match(baxia, /await partition\.clearStorageData\(\)/)
+  assert.match(baxia, /await partition\.clearCache\(\)/)
+  assert.match(baxia, /await fs\.rm\(filePath, \{ force: true \}\)/)
+
+  // Punishment is upstream and time-based: retrying immediately extends it.
+  // The adapter drops the local baxia state, records a cooldown, and throws a
+  // typed error that the forwarder turns into a 503 + Retry-After.
+  assert.match(source, /export class QwenWafCaptchaError extends Error/)
+  assert.match(source, /readonly code = 'waf_captcha'/)
+  assert.match(source, /readonly status = 503/)
+  assert.match(source, /assertQwenNotCoolingDown\(\)/)
+  assert.match(source, /await clearQwenBaxiaSession\(\)/)
+  assert.match(source, /const cooldown = noteQwenPunished\(\)/)
+  assert.match(source, /throw new QwenWafCaptchaError\(WAF_CAPTCHA_MESSAGE, cooldown\)/)
+  assert.match(source, /noteQwenSuccess\(\)/)
+
+  assert.match(forwarder, /error instanceof QwenWafCaptchaError/)
+  assert.match(forwarder, /retryAfter: error\.retryAfter/)
+  assert.match(forwarder, /result\.code === 'waf_captcha'/)
+})
+
+test('Qwen requests are serialized to avoid triggering the anti-bot burst limit', () => {
+  const forwarder = readFileSync(
+    join(root, 'src/main/proxy/forwarder.ts'),
+    'utf8'
+  )
+  assert.match(forwarder, /async function acquireQwenAiSlot\(\)/)
+  assert.match(forwarder, /const releaseSlot = await acquireQwenAiSlot\(\)/)
+  assert.match(forwarder, /transformedStream\.once\('end', releaseOnce\)/)
+  assert.match(forwarder, /releaseSlot\(\)/)
+})
+
+test('a revoked Qwen session fails fast instead of retrying the expired token', () => {
+  const source = readFileSync(
+    join(root, 'src/main/proxy/adapters/qwen-ai.ts'),
+    'utf8'
+  )
+  const refresh = readFileSync(
+    join(root, 'src/main/oauth/qwenAiRefresh.ts'),
+    'utf8'
+  )
+  const forwarder = readFileSync(
+    join(root, 'src/main/proxy/forwarder.ts'),
+    'utf8'
+  )
+
+  const error = new QwenSessionExpiredError()
+  assert.equal(error.code, 'account_session_expired')
+  assert.equal(error.status, 401)
+  assert.match(error.message, /sign in again/i)
+
+  assert.match(source, /throw new QwenSessionExpiredError\(\)/)
+  assert.match(forwarder, /error instanceof QwenSessionExpiredError/)
+  assert.match(forwarder, /result\.code === 'account_session_expired'/)
+
+  // Token refresh must not open a browser window: a blocked baxia harvest
+  // added ~45 seconds before the refresh could report a revoked session.
+  assert.match(refresh, /getCachedQwenBaxiaSession\(\)/)
+  assert.doesNotMatch(refresh, /await getQwenBaxiaSession\(\)/)
 })

@@ -22,8 +22,12 @@ import {
   type QwenMediaKind,
 } from './qwen-ai-media'
 import {
+  clearQwenBaxiaSession,
   getQwenBaxiaSession,
+  getQwenPunishCooldownMs,
   isQwenWafResponse,
+  noteQwenPunished,
+  noteQwenSuccess,
   type QwenBaxiaSession,
 } from './qwen-baxia'
 import { storeManager } from '../../store/store'
@@ -58,8 +62,59 @@ const WAF_ERROR_MESSAGE =
 
 const WAF_CAPTCHA_MESSAGE =
   'Qwen AI requires an Aliyun WAF captcha challenge for this account (bxpunish). ' +
-  'The account is temporarily rate-limited. Wait a few minutes and retry; ' +
-  'if it keeps happening, open chat.qwen.ai, complete the captcha, and sign in again.'
+  'The account is temporarily rate-limited. Chat2API stopped sending requests ' +
+  'to avoid extending the block; retry after the cooldown. If it keeps ' +
+  'happening, open chat.qwen.ai, complete the captcha, and sign in again.'
+
+/**
+ * A `bxpunish` captcha is not an ordinary upstream failure: the account is
+ * blocked for a while, so the proxy answers 503 with `Retry-After` instead of
+ * retrying immediately and leaving the client waiting on an empty stream.
+ */
+export class QwenWafCaptchaError extends Error {
+  readonly code = 'waf_captcha'
+  readonly status = 503
+  readonly retryAfter: number
+
+  constructor(message: string, retryAfterMs: number) {
+    super(message)
+    this.name = 'QwenWafCaptchaError'
+    this.retryAfter = Math.max(1, Math.ceil(retryAfterMs / 1000))
+  }
+}
+
+/**
+ * A revoked refresh token cannot be renewed without a manual login. Fail with
+ * an actionable 401 instead of retrying the expired token upstream.
+ */
+export class QwenSessionExpiredError extends Error {
+  readonly code = 'account_session_expired'
+  readonly status = 401
+
+  constructor() {
+    super(
+      'Qwen AI session expired or was revoked. Sign in again in the account ' +
+      'settings to renew it.',
+    )
+    this.name = 'QwenSessionExpiredError'
+  }
+}
+
+function wafCooldownMessage(cooldownMs: number): string {
+  const seconds = Math.max(1, Math.ceil(cooldownMs / 1000))
+  return (
+    `Qwen AI is cooling down after an Aliyun WAF captcha (bxpunish); ` +
+    `the account is temporarily rate-limited. Retry in ${seconds}s. ` +
+    `Chat2API will try Qwen again automatically after the cooldown.`
+  )
+}
+
+function assertQwenNotCoolingDown(): void {
+  const cooldown = getQwenPunishCooldownMs()
+  if (cooldown > 0) {
+    throw new QwenWafCaptchaError(wafCooldownMessage(cooldown), cooldown)
+  }
+}
 
 function mergeCookieHeader(...parts: Array<string | undefined>): string {
   const seen = new Set<string>()
@@ -280,6 +335,9 @@ export class QwenAiAdapter {
       if (force) {
         console.warn('[QwenAI] Forced token refresh failed:', refreshed.status, refreshed.reason || '')
       }
+      if (refreshed.status === 'no-session') {
+        throw new QwenSessionExpiredError()
+      }
       return current
     }
 
@@ -375,6 +433,7 @@ export class QwenAiAdapter {
     title: string = 'New Chat',
     chatType: 't2t' | 't2i' | 't2v' = 't2t'
   ): Promise<string> {
+    assertQwenNotCoolingDown()
     await this.ensureValidToken()
 
     const url = `${QWEN_AI_BASE}/api/v2/chats/new`
@@ -406,6 +465,15 @@ export class QwenAiAdapter {
             continue
           }
           throw new Error(WAF_ERROR_MESSAGE)
+        }
+
+        if (this.isPunishedResponse(response)) {
+          console.warn(
+            '[QwenAI] Create chat rejected with bxpunish; clearing the baxia session and entering cooldown'
+          )
+          await clearQwenBaxiaSession()
+          const cooldown = noteQwenPunished()
+          throw new QwenWafCaptchaError(WAF_CAPTCHA_MESSAGE, cooldown)
         }
 
         if (response.data?.data?.id) {
@@ -505,6 +573,7 @@ export class QwenAiAdapter {
     chatId: string
     parentId: string | null
   }> {
+    assertQwenNotCoolingDown()
     await this.ensureValidToken()
     const token = this.getToken()
     if (!token) {
@@ -633,13 +702,40 @@ export class QwenAiAdapter {
 
     if (this.isPunishedResponse(response)) {
       try { (response.data as any)?.destroy?.() } catch { /* ignore */ }
-      void this.deleteChat(chatId).catch(() => { /* best effort */ })
-      console.warn('[QwenAI] Completion rejected with bxpunish (Aliyun WAF captcha)')
-      throw new Error(WAF_CAPTCHA_MESSAGE)
+      console.warn(
+        '[QwenAI] Completion rejected with bxpunish; clearing the baxia session and entering cooldown'
+      )
+      // Retrying immediately cannot lift an upstream captcha block and only
+      // extends it. Drop the punished browser state and answer 503 quickly so
+      // the client backs off until the cooldown expires.
+      await clearQwenBaxiaSession()
+      const cooldown = noteQwenPunished()
+      throw new QwenWafCaptchaError(WAF_CAPTCHA_MESSAGE, cooldown)
     }
 
     console.log('[QwenAI] Response status:', response.status)
     console.log('[QwenAI] Response headers:', JSON.stringify(response.headers, null, 2))
+
+    // A Qwen stream that goes silent after the headers used to leave the client
+    // waiting until the 120s axios timeout, or forever on a socket that stayed
+    // open. Abort the upstream stream after 90s without data so the client gets
+    // a real error instead of an answer that never arrives.
+    const upstreamStream = response.data as any
+    if (upstreamStream && typeof upstreamStream.setTimeout === 'function') {
+      const clearIdle = () => {
+        try { upstreamStream.setTimeout?.(0) } catch { /* ignore */ }
+      }
+      upstreamStream.setTimeout(90_000, () => {
+        console.warn('[QwenAI] Upstream stream idle for 90s; aborting')
+        try {
+          upstreamStream.destroy?.(new Error('Qwen AI stopped responding (no data for 90s)'))
+        } catch { /* ignore */ }
+      })
+      upstreamStream.once?.('end', clearIdle)
+      upstreamStream.once?.('close', clearIdle)
+    }
+
+    noteQwenSuccess()
 
     return {
       response,
@@ -665,6 +761,7 @@ export class QwenAiAdapter {
     width?: number
     height?: number
   }> {
+    assertQwenNotCoolingDown()
     await this.ensureValidToken()
     const token = this.getToken()
     if (!token) {
@@ -712,6 +809,15 @@ export class QwenAiAdapter {
       throw new Error(WAF_ERROR_MESSAGE)
     }
 
+    if (this.isPunishedResponse(response)) {
+      console.warn(
+        '[QwenAI] Media request rejected with bxpunish; clearing the baxia session and entering cooldown'
+      )
+      await clearQwenBaxiaSession()
+      const cooldown = noteQwenPunished()
+      throw new QwenWafCaptchaError(WAF_CAPTCHA_MESSAGE, cooldown)
+    }
+
     if (response.status >= 400) {
       throw new Error(
         `Qwen ${request.kind} generation failed: HTTP ${response.status} ${raw.slice(0, 300)}`
@@ -721,6 +827,7 @@ export class QwenAiAdapter {
     const parsed = parseQwenAiMediaResponse(raw, request.kind)
 
     if (parsed.url) {
+      noteQwenSuccess()
       return {
         chatId,
         url: parsed.url,
@@ -736,6 +843,7 @@ export class QwenAiAdapter {
         extractQwenMediaTaskId(safeJsonParse(raw))
       if (taskId) {
         const status = await this.pollVideoTask(taskId)
+        noteQwenSuccess()
         return { chatId, url: status.url, taskId }
       }
     }
@@ -899,6 +1007,7 @@ export class QwenAiStreamHandler {
     let summaryText = ''
     let initialChunkSent = false
     let streamEnded = false
+    let sawCompletion = false
 
     const endStream = (chunk?: string) => {
       if (streamEnded) return
@@ -907,6 +1016,7 @@ export class QwenAiStreamHandler {
     }
 
     const failStream = (error: QwenUpstreamError) => {
+      sawCompletion = true
       console.error(
         `[QwenAI] Upstream error${error.code ? ` (${error.code})` : ''}: ${error.message}`
       )
@@ -943,6 +1053,19 @@ export class QwenAiStreamHandler {
           
           if (event.data === '[DONE]') {
             console.log('[QwenAI] Received [DONE] signal')
+            sawCompletion = true
+            if (
+              !this.content &&
+              !reasoningText &&
+              !this.toolStreamParser?.hasEmittedToolCall()
+            ) {
+              failStream({
+                message: 'Qwen AI completed without an answer',
+                code: 'empty_answer',
+              })
+            } else {
+              endStream('data: [DONE]\n\n')
+            }
             return
           }
 
@@ -1109,6 +1232,7 @@ export class QwenAiStreamHandler {
                     created: this.created,
                   }
                   transStream.write(`data: ${JSON.stringify(toolFinishChunk)}\n\n`)
+                  sawCompletion = true
                   endStream('data: [DONE]\n\n')
                   if (this.onEnd && this.chatId) {
                     this.onEnd(this.chatId)
@@ -1118,6 +1242,7 @@ export class QwenAiStreamHandler {
               } else if (hasToolUse(this.content)) {
                 console.log('[QwenAI] Found tool_use in stream, sending tool_calls')
                 if (this.sendToolCalls(transStream)) {
+                  sawCompletion = true
                   endStream('data: [DONE]\n\n')
                   if (this.onEnd && this.chatId) {
                     this.onEnd(this.chatId)
@@ -1135,6 +1260,7 @@ export class QwenAiStreamHandler {
                 created: this.created,
               }
               transStream.write(`data: ${JSON.stringify(finalChunk)}\n\n`)
+              sawCompletion = true
               endStream('data: [DONE]\n\n')
 
               if (this.onEnd && this.chatId) {
@@ -1168,10 +1294,20 @@ export class QwenAiStreamHandler {
     })
     stream.once('error', (err: Error) => {
       console.error('[QwenAI] Stream error:', err)
-      endStream('data: [DONE]\n\n')
+      failStream({
+        message: `Qwen AI stream failed: ${err.message}`,
+        code: 'stream_error',
+      })
     })
     stream.once('close', () => {
       console.log('[QwenAI] Stream closed')
+      if (!sawCompletion && !this.content && !this.toolStreamParser?.hasEmittedToolCall()) {
+        failStream({
+          message: 'Qwen AI closed the stream without a complete answer',
+          code: 'incomplete_stream',
+        })
+        return
+      }
       endStream('data: [DONE]\n\n')
     })
 
@@ -1198,6 +1334,7 @@ export class QwenAiStreamHandler {
       let reasoningText = ''
       let summaryText = ''
       let resolved = false
+      let sawCompletion = false
 
       const resolveOnce = (value: any) => {
         if (!resolved) {
@@ -1216,7 +1353,15 @@ export class QwenAiStreamHandler {
       const parser = createParser({
         onEvent: (event: any) => {
           try {
-            if (event.data === '[DONE]') return
+            if (event.data === '[DONE]') {
+              sawCompletion = true
+              const finalReasoning = reasoningText || summaryText
+              if (finalReasoning) {
+                data.choices[0].message.reasoning_content = finalReasoning
+              }
+              resolveOnce(data)
+              return
+            }
 
             const parsed = JSON.parse(event.data)
 
@@ -1263,6 +1408,7 @@ export class QwenAiStreamHandler {
                     this.onEnd(this.chatId)
                   }
 
+                  sawCompletion = true
                   resolveOnce(data)
                 }
               } else if (phase === null && content) {
@@ -1298,11 +1444,19 @@ export class QwenAiStreamHandler {
         rejectOnce(err)
       })
       stream.once('close', () => {
+        if (!sawCompletion) {
+          const content = data.choices[0].message.content
+          if (!content && !reasoningText && !summaryText) {
+            rejectOnce(new Error('Qwen AI closed the stream without an answer'))
+            return
+          }
+        }
         // Use reasoningText or summaryText for reasoning_content
         const finalReasoning = reasoningText || summaryText
         if (finalReasoning) {
           data.choices[0].message.reasoning_content = finalReasoning
         }
+        sawCompletion = true
         resolveOnce(data)
       })
     })

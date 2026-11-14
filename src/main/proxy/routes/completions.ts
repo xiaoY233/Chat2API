@@ -168,11 +168,20 @@ router.post('/completions', async (ctx: Context) => {
     if (!result.success) {
       proxyStatusManager.recordRequestFailure(latency)
 
+      if (result.retryAfter) {
+        ctx.set('Retry-After', String(result.retryAfter))
+      }
       ctx.status = result.status || 500
       ctx.body = {
         error: {
           message: result.error || 'Request failed',
-          type: 'api_error',
+          type:
+            result.status === 503
+              ? 'service_unavailable_error'
+              : result.status === 401
+                ? 'authentication_error'
+                : 'api_error',
+          code: result.code ?? null,
         },
       }
       return

@@ -16,7 +16,12 @@ import { GLMAdapter, GLMStreamHandler } from './adapters/glm'
 import { KimiAdapter, KimiStreamHandler } from './adapters/kimi'
 import { MimoAdapter, MimoStreamHandler } from './adapters/mimo'
 import { QwenAdapter, QwenStreamHandler } from './adapters/qwen'
-import { QwenAiAdapter, QwenAiStreamHandler } from './adapters/qwen-ai'
+import {
+  QwenAiAdapter,
+  QwenAiStreamHandler,
+  QwenSessionExpiredError,
+  QwenWafCaptchaError,
+} from './adapters/qwen-ai'
 import {
   buildQwenMediaContent,
   extractMediaPrompt,
@@ -41,6 +46,50 @@ import {
 
 function shouldDeleteSession(): boolean {
   return sessionManager.shouldDeleteAfterChat()
+}
+
+/**
+ * Qwen punishes bursts of parallel requests with an Aliyun WAF captcha that
+ * blocks the whole account. Requests are therefore queued and spaced out per
+ * provider so a client that fans out does not trip the anti-bot layer.
+ */
+const QWEN_AI_MIN_GAP_MS = 1000
+const QWEN_AI_MAX_HOLD_MS = 5 * 60_000
+let qwenAiGate: Promise<void> = Promise.resolve()
+let qwenAiLastFinishedAt = 0
+
+async function acquireQwenAiSlot(): Promise<() => void> {
+  const previous = qwenAiGate
+  let release!: () => void
+  qwenAiGate = previous.then(
+    () => new Promise<void>((resolve) => { release = resolve })
+  )
+  await previous
+
+  const waitMs = qwenAiLastFinishedAt + QWEN_AI_MIN_GAP_MS - Date.now()
+  if (waitMs > 0) {
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, waitMs)
+      timer.unref?.()
+    })
+  }
+
+  let released = false
+  const holdTimer = setTimeout(() => {
+    if (released) return
+    released = true
+    qwenAiLastFinishedAt = Date.now()
+    release()
+  }, QWEN_AI_MAX_HOLD_MS)
+  holdTimer.unref?.()
+
+  return () => {
+    if (released) return
+    released = true
+    clearTimeout(holdTimer)
+    qwenAiLastFinishedAt = Date.now()
+    release()
+  }
 }
 
 type ProviderForwarder = {
@@ -253,6 +302,9 @@ export class RequestForwarder {
     const maxRetries = config.retryCount
 
     let lastError: string | undefined
+    let lastStatus: number | undefined
+    let lastCode: string | undefined
+    let lastRetryAfter: number | undefined
     let currentAccount = account
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -324,6 +376,16 @@ export class RequestForwarder {
         }
 
         lastError = result.error
+        lastStatus = result.status
+        lastCode = result.code
+        lastRetryAfter = result.retryAfter
+
+        // A captcha block is account-wide and time-based; repeating the request
+        // now would only extend it. A revoked session cannot be renewed by
+        // retrying either. The route answers 503/401 with a clear error.
+        if (result.code === 'waf_captcha' || result.code === 'account_session_expired') {
+          break
+        }
 
         // An authentication failure was already given a chance to renew the
         // token; repeating the request with the same stale account cannot help.
@@ -341,6 +403,9 @@ export class RequestForwarder {
 
     return {
       success: false,
+      status: lastStatus,
+      code: lastCode,
+      retryAfter: lastRetryAfter,
       error: lastError || 'Request failed after retries',
       latency: Date.now() - startTime,
     }
@@ -857,17 +922,19 @@ export class RequestForwarder {
     actualModel: string,
     startTime: number
   ): Promise<ForwardResult> {
-    const mediaKind = qwenAiMediaKind(actualModel)
-    if (mediaKind) {
-      return this.forwardQwenAiMedia(request, account, provider, actualModel, mediaKind, startTime)
-    }
-
+    const releaseSlot = await acquireQwenAiSlot()
+    let releaseAfterReturn = true
     try {
+      const mediaKind = qwenAiMediaKind(actualModel)
+      if (mediaKind) {
+        return await this.forwardQwenAiMedia(request, account, provider, actualModel, mediaKind, startTime)
+      }
+
       const transformed = this.transformRequestForPromptToolUse(request, provider)
       const deleteSession = request.deleteSession === true || shouldDeleteSession()
-      
+
       const adapter = new QwenAiAdapter(provider, account, transformed.plan)
-      const { response, chatId, parentId } = await adapter.chatCompletion({
+      const { response, chatId } = await adapter.chatCompletion({
         model: actualModel,
         originalModel: request.model,
         messages: transformed.messages as any,
@@ -879,7 +946,7 @@ export class RequestForwarder {
       const latency = Date.now() - startTime
 
       if (response.status >= 400) {
-        let errorMessage = `HTTP ${response.status}`
+        const errorMessage = `HTTP ${response.status}`
         return {
           success: false,
           status: response.status,
@@ -902,6 +969,17 @@ export class RequestForwarder {
             })
             return originalEnd(chunk, encoding, callback)
           }
+        }
+
+        // Keep the provider slot until the client has consumed the stream, so
+        // two generations never overlap on the same account.
+        releaseAfterReturn = false
+        const releaseOnce = () => releaseSlot()
+        transformedStream.once('end', releaseOnce)
+        transformedStream.once('close', releaseOnce)
+        transformedStream.once('error', releaseOnce)
+        if ((transformedStream as any).readableEnded || (transformedStream as any).destroyed) {
+          releaseOnce()
         }
 
         return {
@@ -933,10 +1011,33 @@ export class RequestForwarder {
       }
     } catch (error) {
       const latency = Date.now() - startTime
+      if (error instanceof QwenWafCaptchaError) {
+        return {
+          success: false,
+          status: error.status,
+          code: error.code,
+          retryAfter: error.retryAfter,
+          error: error.message,
+          latency,
+        }
+      }
+      if (error instanceof QwenSessionExpiredError) {
+        return {
+          success: false,
+          status: error.status,
+          code: error.code,
+          error: error.message,
+          latency,
+        }
+      }
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error',
         latency,
+      }
+    } finally {
+      if (releaseAfterReturn) {
+        releaseSlot()
       }
     }
   }
@@ -1038,6 +1139,25 @@ export class RequestForwarder {
         providerSessionId: media.chatId,
       }
     } catch (error) {
+      if (error instanceof QwenWafCaptchaError) {
+        return {
+          success: false,
+          status: error.status,
+          code: error.code,
+          retryAfter: error.retryAfter,
+          error: error.message,
+          latency: Date.now() - startTime,
+        }
+      }
+      if (error instanceof QwenSessionExpiredError) {
+        return {
+          success: false,
+          status: error.status,
+          code: error.code,
+          error: error.message,
+          latency: Date.now() - startTime,
+        }
+      }
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error',

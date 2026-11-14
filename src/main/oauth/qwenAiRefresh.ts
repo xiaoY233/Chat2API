@@ -9,7 +9,7 @@
  */
 
 import axios from 'axios'
-import { getQwenBaxiaSession } from '../proxy/adapters/qwen-baxia'
+import { getCachedQwenBaxiaSession } from '../proxy/adapters/qwen-baxia'
 import { getProviderSessionCookies } from './sessionPartitions'
 import {
   QWEN_AI_BASE,
@@ -61,7 +61,11 @@ export type QwenRefreshResult =
   | { status: 'failed'; reason?: string }
 
 async function tryRefresh(cookieHeader: string): Promise<RefreshAttempt> {
-  const baxia = await getQwenBaxiaSession()
+  // Use a cached signature when one exists, but never harvest on the refresh
+  // path: a blocked page would add ~45s to every request before the refresh
+  // can even report that the session was revoked. auth.qwen.ai answers without
+  // baxia headers.
+  const baxia = getCachedQwenBaxiaSession()
   const response = await axios.get(QWEN_AI_REFRESH_URL, {
     headers: {
       Accept: 'application/json',

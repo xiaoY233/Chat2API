@@ -35,10 +35,21 @@ const SESSION_TTL_MS = 10 * 60 * 1000
 const HARVEST_FAILURE_COOLDOWN_MS = 3 * 60 * 1000
 const READY_TIMEOUT_MS = 45000
 
+/**
+ * Aliyun's captcha punishment is enforced upstream for a while, not just by a
+ * cookie: retrying immediately with a fresh signature keeps the account
+ * blocked and can extend the block. Requests fail fast during this cooldown,
+ * and each new punishment doubles it up to the cap.
+ */
+const PUNISH_BASE_COOLDOWN_MS = 60 * 1000
+const PUNISH_MAX_COOLDOWN_MS = 30 * 60 * 1000
+
 let memorySession: QwenBaxiaSession | null = null
 let harvestPromise: Promise<QwenBaxiaSession | null> | null = null
 let filePathPromise: Promise<string | null> | null = null
 let nextHarvestAllowedAt = 0
+let punishedUntil = 0
+let punishStreak = 0
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -274,6 +285,80 @@ export function resetQwenBaxiaSessionForTests(): void {
   harvestPromise = null
   filePathPromise = null
   nextHarvestAllowedAt = 0
+  punishedUntil = 0
+  punishStreak = 0
+}
+
+/**
+ * Return the cached signature only, without opening a browser window. Token
+ * refresh runs on the request path and must not wait for a harvest; the auth
+ * endpoint accepts the request without baxia headers.
+ */
+export function getCachedQwenBaxiaSession(): QwenBaxiaSession | null {
+  return isFresh(memorySession) ? memorySession : null
+}
+
+/**
+ * Remaining cooldown after an Aliyun `bxpunish` captcha. Zero means the next
+ * request may try Qwen again.
+ */
+export function getQwenPunishCooldownMs(): number {
+  return Math.max(0, punishedUntil - Date.now())
+}
+
+/**
+ * Record another `bxpunish` response and return the cooldown applied. A
+ * blocked account should not be hammered: the gate doubles on every fresh
+ * punishment and caps at 30 minutes.
+ */
+export function noteQwenPunished(): number {
+  punishStreak = Math.min(punishStreak + 1, 6)
+  const cooldown = Math.min(
+    PUNISH_BASE_COOLDOWN_MS * 2 ** (punishStreak - 1),
+    PUNISH_MAX_COOLDOWN_MS,
+  )
+  punishedUntil = Date.now() + cooldown
+  return cooldown
+}
+
+/** A verified answer means the punishment is over; reset the backoff. */
+export function noteQwenSuccess(): void {
+  punishedUntil = 0
+  punishStreak = 0
+}
+
+/**
+ * Drop the cached baxia signature and the cookies held by the hidden browser
+ * partition. The next harvest gets a clean challenge state.
+ *
+ * Aliyun's `bxpunish` captcha is tied to the `x5secdata` / `x5sectag` cookies
+ * stored in the persistent partition, so re-harvesting without clearing them
+ * just reuses the punished session. This deliberately does not harvest right
+ * away: while the account is blocked, hitting chat.qwen.ai again only extends
+ * the block. The next request after the cooldown harvests a fresh session.
+ */
+export async function clearQwenBaxiaSession(): Promise<void> {
+  memorySession = null
+  nextHarvestAllowedAt = 0
+
+  const filePath = await getSessionFilePath()
+  if (filePath) {
+    await fs.rm(filePath, { force: true }).catch((error) => {
+      console.warn('[QwenAI] Failed to remove baxia session file:', error)
+    })
+  }
+
+  try {
+    const electron = await import('electron')
+    const partition = (electron as any)?.session?.fromPartition('persist:qwen-baxia')
+    if (partition) {
+      await partition.clearStorageData()
+      await partition.clearCache()
+      console.log('[QwenAI] Cleared the baxia browser partition')
+    }
+  } catch (error) {
+    console.warn('[QwenAI] Failed to clear the baxia partition:', error)
+  }
 }
 
 /** Test helper: seed the in-memory session cache. */

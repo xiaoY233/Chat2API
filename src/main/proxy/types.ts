@@ -252,6 +252,10 @@ export interface ForwardResult {
   stream?: NodeJS.ReadableStream
   skipTransform?: boolean
   error?: string
+  /** Machine-readable error code, e.g. `waf_captcha`. */
+  code?: string
+  /** Seconds the client should wait before retrying a 503. */
+  retryAfter?: number
   latency?: number
   providerSessionId?: string
   parentMessageId?: string

@@ -30,7 +30,9 @@ Qwen AI 的 access token 有效期约 15 分钟，`refresh_token` Cookie 有效�
 {"ret":["FAIL_SYS_USER_VALIDATE","RGV587_ERROR::SM::..."],"data":{"url":"https://chat.qwen.ai/.../punish?action=captcha"}}
 ```
 
-代理会把它识别为 `waf_captcha` 错误并立即返回明确提示，而不是像以前那样把空内容当成正常回答（流式请求只剩 `data: [DONE]`，客户端会一直等到超时）。遇到该错误时等待几分钟后重试；如果持续出现，在浏览器打开 `chat.qwen.ai` 完成验证码并重新登录账号。降低健康检查频率可以避免再次触发该限制。
+代理会把它识别为 `waf_captcha` 错误。识别到 `bxpunish` 后，代理会清空 baxia 的持久化分区（`Partitions/qwen-baxia` 中的 `x5secdata` 等 cookie）和 `qwen-baxia-session.json`，并进入冷却期：立即返回 `503` 和 `Retry-After`，而不是马上重试。Qwen 的验证码封禁在上游持续一段时间，立即重试只会延长封禁；冷却期从 60 秒开始，每次再次被判定时翻倍，最长 30 分钟。冷却结束后的第一个请求会自动重新采集签名；成功回答后冷却立即清零。
+
+为避免再次触发验证码，同一时间只允许一个 Qwen 请求访问上游，相邻请求之间至少间隔 1 秒；客户端并发发送时会排队，而不是一起冲击反爬层。如果持续出现该错误，等待冷却结束，或在浏览器打开 `chat.qwen.ai` 完成验证码并重新登录账号。
 
 ## 默认模型
 
