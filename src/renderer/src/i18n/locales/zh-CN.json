@@ -243,13 +243,13 @@
     "userTokenPlaceholder": "请输入 DeepSeek 用户 Token",
     "userTokenHelp": "从 DeepSeek 网页版获取的认证 Token，可在浏览器开发者工具 Application -> Local Storage -> userToken 中找到",
     "models": {
-      "deepseek-v4-flash": "DeepSeek V4 Flash",
+      "deepseek-v4.1-flash": "DeepSeek V4.1 Flash",
       "deepseek-v4-pro": "DeepSeek V4 Pro"
     }
   },
   "glm": {
     "name": "GLM",
-    "description": "智谱清言 AI 助手，支持 GLM-5.1 旗舰模型、深度思考和联网搜索",
+    "description": "智谱清言 AI 助手，支持 GLM-5.3 旗舰模型、深度思考和联网搜索",
     "refreshToken": "刷新令牌",
     "refreshTokenPlaceholder": "请输入智谱清言刷新令牌",
     "refreshTokenHelp": "从智谱清言网页版获取 chatglm_refresh_token，可在浏览器开发者工具 Application -> Cookie 中找到"
@@ -293,12 +293,10 @@
     "codeMode": "代码模式",
     "codeModeDesc": "使用 Qwen-Coder 模型，专注于编程任务",
     "models": {
-      "Qwen3.6": "Qwen",
-      "Qwen3.7-Max": "Qwen3.7-Max",
-      "Qwen3.5-Flash": "Qwen3.5-Flash",
-      "Qwen3-Max": "Qwen3-Max",
-      "Qwen3-Max-Thinking-Preview": "Qwen3-Max-Thinking-Preview",
-      "Qwen3-Coder": "Qwen3-Coder"
+      "Qwen3.8": "Qwen",
+      "Qwen3.8-Max": "Qwen3.8-Max",
+      "Qwen3.8-Flash": "Qwen3.8-Flash",
+      "Qwen3.8-Omni-Flash": "Qwen3.8-Omni-Flash"
     }
   },
   "qwen-ai": {
@@ -315,7 +313,7 @@
   },
   "zai": {
     "name": "Z.ai",
-    "description": "Z.ai - 免费AI聊天机器人，由 GLM-5.1、GLM-5 和 GLM-4.7 驱动",
+    "description": "Z.ai - 免费AI聊天机器人，由 GLM-5.3、GLM-5.3-flash 和 GLM-5.2 驱动",
     "token": "访问令牌",
     "tokenPlaceholder": "请输入 Z.ai JWT Token",
     "tokenHelp": "从Z.ai 网页版获取token，可在浏览器开发者工具 Application -> Cookie 中找到，以\"eyJ...\"为开头"
@@ -340,6 +338,20 @@
     "sessionTokenPlaceholder": "请输入 Perplexity 会话令牌",
     "sessionTokenHelp": "请从浏览器开发者工具获取 __Secure-next-auth.session-token Cookie，或切换到 OAuth 登录标签页自动获取",
     "freeUserNotice": "官方免费用户仅限 Auto 模型，系统自动分配模型响应"
+  },
+  "longcat": {
+    "name": "LongCat",
+    "description": "LongCat 网页版（美团）聊天，使用 longcat.ai 网页会话 Cookie，支持联网搜索",
+    "passportTokenKey": "passport_token_key Cookie",
+    "passportTokenKeyPlaceholder": "请输入 passport_token_key Cookie 值或完整 Cookie 字符串",
+    "passportTokenKeyHelp": "可切换到 OAuth 登录标签页，在应用内登录 longcat.ai 自动获取。手动方式：登录 longcat.ai 后打开开发者工具 -> Application -> Cookies -> longcat.ai -> passport_token_key，粘贴 Cookie 值或完整 Cookie 字符串。"
+  },
+  "inception": {
+    "name": "Inception（Mercury）",
+    "description": "Inception Mercury 网页版聊天（chat.inceptionlabs.ai）。匿名使用，无需登录，应用会自行完成 Vercel 校验",
+    "vcrcs": "Vercel 清关 Cookie（_vcrcs）",
+    "vcrcsPlaceholder": "可选：粘贴 _vcrcs Cookie 值或完整 Cookie 字符串",
+    "vcrcsHelp": "无需登录。应用会自动完成 Vercel 校验并创建会话，因此该字段留空即可添加账号。进阶/手动方式：打开开发者工具 -> Application -> Cookies -> chat.inceptionlabs.ai -> _vcrcs。"
   },
   "proxy": {
     "title": "代理设置",

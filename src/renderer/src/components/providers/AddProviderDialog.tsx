@@ -22,6 +22,8 @@ import glmIcon from '@/assets/providers/glm.svg'
 import kimiIcon from '@/assets/providers/kimi.svg'
 import mimoIcon from '@/assets/providers/mimo.svg'
 import minimaxIcon from '@/assets/providers/minimax.svg'
+import longcatIcon from '@/assets/providers/longcat.svg'
+import inceptionIcon from '@/assets/providers/inception.svg'
 import perplexityIcon from '@/assets/providers/perplexity.svg'
 import qwenIcon from '@/assets/providers/qwen.svg'
 import zaiIcon from '@/assets/providers/zai.svg'
@@ -50,6 +52,8 @@ const providerIcons: Record<string, string> = {
   kimi: kimiIcon,
   mimo: mimoIcon,
   minimax: minimaxIcon,
+  longcat: longcatIcon,
+  inception: inceptionIcon,
   perplexity: perplexityIcon,
   qwen: qwenIcon,
   'qwen-ai': qwenIcon,
@@ -109,6 +113,19 @@ function mapOAuthCredentials(providerId: string | undefined, credentials: Record
   if (providerId === 'perplexity' && credentials['next-auth.session-token']) {
     console.log('[mapOAuthCredentials] Mapped Perplexity session token')
     return { sessionToken: credentials['next-auth.session-token'] }
+  }
+
+  if (providerId === 'longcat') {
+    const result: Record<string, string> = {}
+    const cookie = credentials.cookie || credentials.cookieJar || ''
+    const passport = credentials.passport_token_key || ''
+    if (cookie) {
+      result.cookie = cookie
+    }
+    if (passport || cookie) {
+      result.passport_token_key = passport || cookie
+    }
+    return result
   }
 
   if (providerId === 'mimo') {
@@ -218,7 +235,7 @@ export function AddProviderDialog({
     ? providers.find((p) => p.id === selectedProvider) 
     : null
 
-  const supportsOAuth = selectedProviderData && ['deepseek', 'glm', 'kimi', 'mimo', 'minimax', 'qwen', 'qwen-ai', 'zai', 'perplexity'].includes(selectedProviderData.id)
+  const supportsOAuth = selectedProviderData && ['deepseek', 'glm', 'kimi', 'mimo', 'minimax', 'qwen', 'qwen-ai', 'zai', 'perplexity', 'longcat'].includes(selectedProviderData.id)
 
   const toggleModelExpansion = (providerId: string) => {
     setExpandedModels(prev => {
@@ -498,6 +515,20 @@ export function AddProviderDialog({
                   label: t('perplexity.sessionToken'),
                   placeholder: t('perplexity.sessionTokenPlaceholder'),
                   helpText: t('perplexity.sessionTokenHelp'),
+                },
+              },
+              longcat: {
+                passport_token_key: {
+                  label: t('longcat.passportTokenKey'),
+                  placeholder: t('longcat.passportTokenKeyPlaceholder'),
+                  helpText: t('longcat.passportTokenKeyHelp'),
+                },
+              },
+              inception: {
+                _vcrcs: {
+                  label: t('inception.vcrcs'),
+                  placeholder: t('inception.vcrcsPlaceholder'),
+                  helpText: t('inception.vcrcsHelp'),
                 },
               },
             }

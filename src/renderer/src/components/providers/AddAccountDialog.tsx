@@ -87,6 +87,21 @@ function mapOAuthCredentials(providerId: string | undefined, credentials: Record
     return { sessionToken: credentials['next-auth.session-token'] }
   }
 
+  // LongCat stores the captured cookie jar plus passport_token_key.
+  // Fall back to the jar in the required field if the named cookie is absent.
+  if (providerId === 'longcat') {
+    const result: Record<string, string> = {}
+    const cookie = credentials.cookie || credentials.cookieJar || ''
+    const passport = credentials.passport_token_key || ''
+    if (cookie) {
+      result.cookie = cookie
+    }
+    if (passport || cookie) {
+      result.passport_token_key = passport || cookie
+    }
+    return result
+  }
+
   // For Mimo, map all three tokens
   if (providerId === 'mimo') {
     const result: Record<string, string> = {}
@@ -169,7 +184,7 @@ export function AddAccountDialog({
   const isEditing = !!editingAccount
   const builtinProvider = provider as BuiltinProviderConfig | null
   const credentialFields: CredentialField[] = builtinProvider?.credentialFields || getDefaultCredentialFields(provider?.authType, t)
-  const supportsOAuth = provider && ['deepseek', 'glm', 'kimi', 'mimo', 'minimax', 'qwen', 'qwen-ai', 'zai', 'perplexity'].includes(provider.id)
+  const supportsOAuth = provider && ['deepseek', 'glm', 'kimi', 'mimo', 'minimax', 'qwen', 'qwen-ai', 'zai', 'perplexity', 'longcat'].includes(provider.id)
 
   useEffect(() => {
     if (open) {

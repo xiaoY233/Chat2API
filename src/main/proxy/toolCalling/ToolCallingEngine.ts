@@ -7,8 +7,12 @@ import {
 } from '../../../shared/toolCalling.ts'
 import { getToolProtocol } from './protocols/index.ts'
 import { getToolClientAdapter } from './clientAdapters/index.ts'
+import { cleanConflictingToolPrompts, stripManagedToolPrompt } from './codingMode.ts'
+import { parseToolResponse } from './parseResponse.ts'
 import { buildToolCallingRuntimePlan } from './runtimePlan.ts'
 import type { NormalizedToolDefinition, ToolCallingPlan, ToolCallingTransformResult, ToolProtocolId } from './types.ts'
+
+const PROMPT_SENTINEL = '<!-- chat2api:managed-tools -->'
 
 export class ToolCallingEngine {
   private readonly config: ToolCallingConfig
@@ -40,6 +44,7 @@ export class ToolCallingEngine {
       model: request.model,
       config: this.config,
       clientRequest,
+      messages: request.messages,
     })
     const shouldInjectPrompt = plan.shouldInjectPrompt
 
@@ -51,8 +56,12 @@ export class ToolCallingEngine {
       }
     }
 
+    const messages = plan.coding
+      ? cleanConflictingToolPrompts(request.messages)
+      : stripManagedToolPrompt(request.messages)
+
     return {
-      messages: injectPrompt(request.messages, renderPrompt(plan.protocol, plan.tools, this.config)),
+      messages: injectPrompt(messages, renderPrompt(plan, this.config)),
       tools: undefined,
       plan,
     }
@@ -63,12 +72,15 @@ export class ToolCallingEngine {
 
     const message = result?.choices?.[0]?.message
     if (!message || typeof message.content !== 'string') return
+    if (Array.isArray(message.tool_calls) && message.tool_calls.length > 0) return
 
-    const parseResult = parseSelectedProtocol(message.content, plan)
+    const parseResult = parseToolResponse(message.content, plan)
     plan.diagnostics.parserFormat = parseResult.protocol
     plan.diagnostics.parsedToolCallCount = parseResult.toolCalls.length
     plan.diagnostics.invalidToolNames = parseResult.invalidToolNames
     plan.diagnostics.malformedReason = parseResult.malformedReason
+    plan.diagnostics.wrapperLeakDetected =
+      parseResult.toolCalls.length === 0 && parseResult.rawMatches.length > 0
 
     if (parseResult.toolCalls.length === 0) return
 
@@ -80,21 +92,17 @@ export class ToolCallingEngine {
   }
 }
 
-function renderPrompt(
-  protocol: ToolProtocolId,
-  tools: NormalizedToolDefinition[],
-  config: ToolCallingConfig,
-): string {
-  const prompt = getToolProtocol(protocol).renderPrompt(tools)
+function renderPrompt(plan: ToolCallingPlan, config: ToolCallingConfig): string {
+  const prompt = getToolProtocol(plan.protocol).renderPrompt(plan.tools, { coding: plan.coding })
   const customPromptTemplate = config.diagnosticsEnabled
     ? config.advanced.customPromptTemplate
     : undefined
-  if (!customPromptTemplate) return prompt
+  if (!customPromptTemplate) return `${PROMPT_SENTINEL}\n${prompt}`
 
-  return customPromptTemplate
+  return `${PROMPT_SENTINEL}\n${customPromptTemplate
     .replace(/\{\{tools\}\}/g, prompt)
-    .replace(/\{\{tool_names\}\}/g, tools.map((tool) => tool.name).join(', '))
-    .replace(/\{\{format\}\}/g, protocol)
+    .replace(/\{\{tool_names\}\}/g, plan.tools.map((tool) => tool.name).join(', '))
+    .replace(/\{\{format\}\}/g, plan.protocol as ToolProtocolId)}`
 }
 
 function injectPrompt(messages: ChatMessage[], prompt: string): ChatMessage[] {
@@ -104,9 +112,4 @@ function injectPrompt(messages: ChatMessage[], prompt: string): ChatMessage[] {
   }
 
   return [{ role: 'system', content: prompt }, ...messages]
-}
-
-function parseSelectedProtocol(content: string, plan: ToolCallingPlan) {
-  const selected = getToolProtocol(plan.protocol)
-  return selected.parse(content, { tools: plan.tools, protocol: plan.protocol })
 }

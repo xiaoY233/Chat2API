@@ -9,12 +9,34 @@ import { PassThrough } from 'stream'
 import { createParser } from 'eventsource-parser'
 import { Account, Provider } from '../../store/types'
 import { hasToolUse, parseToolUse, ToolCall } from '../promptToolUse'
+import { ToolStreamParser } from '../toolCalling/ToolStreamParser'
+import { getProviderToolProfile } from '../toolCalling/providerProfiles'
+import type { ToolCallingPlan } from '../toolCalling/types'
+import {
+  QWEN_MEDIA_CHAT_MODEL,
+  buildQwenAiMediaPayload,
+  extractQwenMediaTaskId,
+  extractQwenMediaUrl,
+  mediaChatType,
+  parseQwenAiMediaResponse,
+  type QwenMediaKind,
+} from './qwen-ai-media'
+import {
+  getQwenBaxiaSession,
+  isQwenWafResponse,
+  type QwenBaxiaSession,
+} from './qwen-baxia'
+import { storeManager } from '../../store/store'
+import {
+  isQwenAiTokenExpiring,
+  normalizeCookieHeader,
+} from '../../oauth/qwenAiAuth'
 
 const QWEN_AI_BASE = 'https://chat.qwen.ai'
 
 const DEFAULT_HEADERS = {
   Accept: 'application/json',
-  'Accept-Language': 'zh-CN,zh;q=0.9',
+  'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
   'Content-Type': 'application/json',
   source: 'web',
   'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36',
@@ -24,27 +46,54 @@ const DEFAULT_HEADERS = {
   'Sec-Fetch-Dest': 'empty',
   'Sec-Fetch-Mode': 'cors',
   'Sec-Fetch-Site': 'same-origin',
-  'bx-v': '2.5.36',
-  'bx-umidtoken': 'T2gAr9z8byN8sNOmfQ3X9j61MNTNmSqDO5L1rs2jMcQCVhOKgZICcBN-UdTuJGig-NM=',
-  'bx-ua': '231!lWD36kmUe5E+joKDK5gBZ48FEl2ZWfPwIPF92lBLek2KxVW/XJ2EwruCiDOX5Px4EXNhmh6EfS9eDwQGRwijIK64A4nPqeLysJcDjUACje/H3J4ZgGZpicG6K8AkiGGaEKC830+QSiSUsLRlL/EyhXTmLcJc/5iDkMuOpUhNz0e0Q/nTqjVJ3ko00Q/oyE+jauHhUHfb1GxGHkE+++3+qCS4+ItkaA6tiItCo+romzElfLFD6RIj7oHt9vffs98nLwpHnaqKjufnLFMejSlAUGiQvTofIiGhIvftAMcoFV4mrUHsqyQ/ncQihmJHkbxXjvM57FCb6b9dEIRZl7jgj0+QLNLRs0NZ4azdZ6rzbGTSO8KA5I3Aq/3gBr87X16Mj0oJtaPKmFGaP2zghfOVhxQht8YjRd50lJa+Ue4PAuPSdu2O69DKLH8VOhrsB+psaBIRxnRi5POUQ6w8s8qlb9vxvExjHNOAKWXV1by1Nz+6FPWdyTeAgcmonjCcV0dCtPj/KyeVDkeSrDkKZjnDzHEqeCdfmJ65kve+Vy3YS0vagzyHfVEnzN0ULUZtkGfJXFNm6+bIa55wmGBhUeXbHL0EdlQXMu1YXxmcwBgTaq7tlQcfv7AefanbfjGE8R1IFnNyg2/jXLbnLg5Z6l1oKqgnxZQg0DE9BJuw6s0XjGwTdSxybWxp+WFD/RsXt76uwvCBk7z+YmSFLtFj2UlTsoq+vl0DTmsVItDKf9SZ94NcuJ7mxJYI02S/2kQBfbbHG0d4hXevDrEC0cb86EvzN2ud+v6bAunNRGNFz/RH0KLusoBVeo+puCFKeeIJWEo0t1UicX5YxJwMAoV7+g0gK93y4W9sMQtso8/wY5wsBzis9dwfLvIwXpaAM1g0MZp/YIRq8T/Qc+U/8x99tam4er0IWizvrkjqhIzCWBKpJ4Y4gj3bOmiS3VCMEaoVfKCwUWENwYKuP3H5VI0n+O2vVVRrekUrwvkm6URRhVhN4eEFTCjB9nSQu++qKyDH8HPpkS3YfwF8/OQtrZo7hQXxvNmP2HcH/K7zcweD00BaoOLiYUtXRItGYbl06sVSbm04soRf1Jqpyo3XiRqBWD9rmJfr4w8NOEGVGUCKXLDLsXy+8JC4Iqf0FsIjWxjMVdraTUtCbwXRbYUownQVm6bt7LYD1SNPoWNPqUJgsLMwP33ugrb1UbHCs24roOch6Go5QHIPA8E15SZE9pkr1SkmqrNs/+KRomFJ9HyFnWUYhZIV9MRLqlOAt6XBBTash3WJnCjhx/PZGhXVvdn2jX4+0Pm55LsiNugA8vaAUJQBxD/8a1u/RvTgbj35+b7I7m8tG0hMhClNZF+tpsOmZZhUGuXH9uVbkJMlMuAmMVCHwn3O31GlLeXXzzep2WS3xN2U+p5J0I7GySnuZUkuGs1ZTVqGUvR2g4q+7ljU55Ak78yPZiQXeUeqS74azszvZvCqWxXn2eePj+gcpliOjrYKpglUP19rQrMt8PqLt8L0ghIqVCmMwl3Hgr/VUcqDpXdpPTR=',
   Timezone: 'Mon Feb 23 2026 22:06:02 GMT+0800',
-  Version: '0.2.7',
+  Version: '0.3.41',
   Origin: 'https://chat.qwen.ai',
 }
 
+const WAF_ERROR_MESSAGE =
+  'Qwen AI refused the request with an Aliyun anti-bot (WAF) challenge. ' +
+  'Chat2API could not mint a fresh browser signature for this account. ' +
+  'Make sure Chat2API runs with a display, or retry in a moment.'
+
+function mergeCookieHeader(...parts: Array<string | undefined>): string {
+  const seen = new Set<string>()
+  const pairs: string[] = []
+  for (const part of parts) {
+    if (!part) continue
+    for (const pair of part.split(';')) {
+      const trimmed = pair.trim()
+      if (!trimmed) continue
+      const name = trimmed.split('=')[0]
+      if (seen.has(name)) continue
+      seen.add(name)
+      pairs.push(trimmed)
+    }
+  }
+  return pairs.join('; ')
+}
+
 const MODEL_ALIASES: Record<string, string> = {
-  qwen: 'qwen3.7-max',
-  qwen3: 'qwen3.7-max',
-  'qwen3.7': 'qwen3.7-max',
-  'qwen3.6': 'qwen3.6-plus',
-  'qwen3.6-35b': 'qwen3.6-35b-a3b',
-  'qwen3.6-27b': 'qwen3.6-27b',
-  'qwen3-coder': 'qwen3-coder-plus',
+  qwen: 'qwen3.8-max',
+  qwen3: 'qwen3.8-max',
+  qwen4: 'qwen4.0-max-preview',
+  'qwen4-max': 'qwen4.0-max-preview',
+  'qwen4.0': 'qwen4.0-max-preview',
+  'qwen4.0-max-preview': 'qwen4.0-max-preview',
+  'qwen3.8': 'qwen3.8-max',
+  'qwen3.8-max': 'qwen3.8-max',
+  'qwen3.8-plus': 'qwen3.8-plus',
+  'qwen3.8-flash': 'qwen3.8-flash',
+  'qwen3.8-omni-flash': 'qwen3.8-omni-flash',
+  'qwen-image-3.0': 'qwen-image-3.0',
+  'wan3.0-video': 'wan3.0-video',
 }
 
 interface QwenAiMessage {
-  role: 'user' | 'assistant' | 'system'
-  content: string
+  role: 'user' | 'assistant' | 'system' | 'tool'
+  content: string | Array<{ type?: string; text?: string }> | null
+  tool_calls?: Array<{ id?: string; function?: { name?: string; arguments?: string } }>
+  tool_call_id?: string
 }
 
 interface ChatCompletionRequest {
@@ -71,18 +120,80 @@ function timestamp(): number {
   return Date.now()
 }
 
+function messageText(content: QwenAiMessage['content']): string {
+  if (typeof content === 'string') return content
+  if (Array.isArray(content)) {
+    return content
+      .filter((part) => typeof part === 'object' && part !== null && 'text' in part)
+      .map((part) => String(part.text ?? ''))
+      .join('\n')
+  }
+  return ''
+}
+
+/**
+ * The Qwen AI web endpoint accepts a single user message. Flatten the OpenAI
+ * conversation (including tool calls and tool results) into a transcript so a
+ * coding client's follow-up request still carries the tool history.
+ */
+export function buildQwenAiPrompt(
+  messages: QwenAiMessage[],
+  protocol?: ToolCallingPlan['protocol'],
+): { systemContent: string; userContent: string } {
+  const toolProfile = getProviderToolProfile('qwen-ai', protocol)
+  let systemContent = ''
+  const turns: string[] = []
+
+  for (const message of messages) {
+    if (message.role === 'system') {
+      const text = messageText(message.content)
+      if (text) systemContent += (systemContent ? '\n\n' : '') + text
+      continue
+    }
+
+    if (message.role === 'assistant' && message.tool_calls && message.tool_calls.length > 0) {
+      turns.push(
+        `Assistant: ${toolProfile.formatAssistantToolCalls(message.tool_calls.map((call) => ({
+          id: call.id || 'call_0',
+          name: call.function?.name || 'unknown',
+          arguments: call.function?.arguments || '{}',
+        })))}`,
+      )
+      continue
+    }
+
+    if (message.role === 'tool' && message.tool_call_id) {
+      turns.push(
+        `Tool: ${toolProfile.formatToolResult({
+          toolCallId: message.tool_call_id,
+          content: messageText(message.content),
+        })}`,
+      )
+      continue
+    }
+
+    const text = messageText(message.content)
+    if (!text) continue
+    turns.push(`${message.role === 'assistant' ? 'Assistant' : 'User'}: ${text}`)
+  }
+
+  return { systemContent, userContent: turns.join('\n\n') }
+}
+
 export class QwenAiAdapter {
   private provider: Provider
   private account: Account
+  private toolCallingPlan?: ToolCallingPlan
   private axiosInstance = axios.create({
     timeout: 120000,
     maxBodyLength: Infinity,
     maxContentLength: Infinity,
   })
 
-  constructor(provider: Provider, account: Account) {
+  constructor(provider: Provider, account: Account, toolCallingPlan?: ToolCallingPlan) {
     this.provider = provider
     this.account = account
+    this.toolCallingPlan = toolCallingPlan
   }
 
   private getToken(): string {
@@ -92,29 +203,78 @@ export class QwenAiAdapter {
 
   private getCookies(): string {
     const credentials = this.account.credentials
-    return credentials.cookies || credentials.cookie || ''
+    return normalizeCookieHeader(credentials.cookies || credentials.cookie)
   }
 
-  private getHeaders(chatId?: string): Record<string, string> {
+  /**
+   * Qwen AI access tokens expire after ~15 minutes. Refresh them a few minutes
+   * early through auth.qwen.ai using the long-lived refresh_token cookie, so a
+   * long-lived proxy session never sends an expired token upstream.
+   */
+  async ensureValidToken(force = false): Promise<string> {
+    const current = this.getToken()
+    if (!force && !isQwenAiTokenExpiring(current)) {
+      return current
+    }
+
+    const { refreshQwenAiToken } = await import('../../oauth/qwenAiRefresh')
+    const refreshed = await refreshQwenAiToken(this.account.credentials)
+    if (refreshed.status !== 'success') {
+      if (force) {
+        console.warn('[QwenAI] Forced token refresh failed:', refreshed.status, refreshed.reason || '')
+      }
+      return current
+    }
+
+    const nextCredentials = {
+      ...this.account.credentials,
+      token: refreshed.token,
+      refresh_token: refreshed.refreshToken,
+      cookies: refreshed.cookies,
+    }
+    this.account.credentials = nextCredentials
+
+    try {
+      storeManager.updateAccount(this.account.id, { credentials: nextCredentials })
+      console.log('[QwenAI] Refreshed access token persisted for account', this.account.id)
+    } catch (error) {
+      console.warn('[QwenAI] Failed to persist refreshed access token:', error)
+    }
+
+    return refreshed.token
+  }
+
+  private async buildHeaders(chatId?: string, session?: QwenBaxiaSession | null): Promise<Record<string, string>> {
+    const baxia = session === undefined ? await getQwenBaxiaSession() : session
     const headers: Record<string, string> = {
       ...DEFAULT_HEADERS,
       Authorization: `Bearer ${this.getToken()}`,
       'X-Request-Id': uuid(),
     }
 
+    if (baxia) {
+      headers['bx-ua'] = baxia.bxUa
+      headers['bx-umidtoken'] = baxia.bxUmidToken
+      headers['bx-v'] = baxia.bxV
+    }
+
     if (chatId) {
       headers['Referer'] = `https://chat.qwen.ai/c/${chatId}`
     }
 
-    const cookies = this.getCookies()
+    const cookies = mergeCookieHeader(baxia?.cookies, this.getCookies())
     if (cookies) {
       headers['Cookie'] = cookies
     } else {
-      console.warn('[QwenAI] Warning: No cookies provided. This may cause Bad_Request error.')
-      console.warn('[QwenAI] Required cookies: cnaui, aui, sca, xlly_s, cna, token, _bl_uid, x-ap')
+      console.warn('[QwenAI] Warning: No cookies available. Requests may be rejected by the anti-bot layer.')
     }
 
     return headers
+  }
+
+  private isWafResponse(response: AxiosResponse): boolean {
+    const contentType = response.headers?.['content-type'] as string | undefined
+    return isQwenWafResponse(contentType, typeof response.data === 'string' ? response.data : undefined)
   }
 
   mapModel(openaiModel: string): string {
@@ -148,34 +308,86 @@ export class QwenAiAdapter {
     return model
   }
 
-  async createChat(modelId: string, title: string = 'New Chat'): Promise<string> {
+  async createChat(
+    modelId: string,
+    title: string = 'New Chat',
+    chatType: 't2t' | 't2i' | 't2v' = 't2t'
+  ): Promise<string> {
+    await this.ensureValidToken()
+
     const url = `${QWEN_AI_BASE}/api/v2/chats/new`
     const payload = {
       title,
       models: [modelId],
       chat_mode: 'normal',
-      chat_type: 't2t',
+      chat_type: chatType,
       timestamp: Date.now(),
       project_id: '',
     }
 
-    try {
-      const response = await this.axiosInstance.post(url, payload, {
-        headers: this.getHeaders(),
-      })
+    let session = await getQwenBaxiaSession()
+    let wafRetried = false
+    let tokenRefreshed = false
 
-      console.log('[QwenAI] Create chat response:', JSON.stringify(response.data, null, 2))
+    for (let attempt = 0; attempt < 4; attempt++) {
+      try {
+        const response = await this.axiosInstance.post(url, payload, {
+          headers: await this.buildHeaders(undefined, session),
+          validateStatus: () => true,
+        })
 
-      if (response.data?.data?.id) {
-        console.log('[QwenAI] Created chat:', response.data.data.id)
-        return response.data.data.id
+        if (this.isWafResponse(response)) {
+          if (!wafRetried) {
+            wafRetried = true
+            console.warn('[QwenAI] Create chat hit the Aliyun WAF, refreshing baxia session...')
+            session = await getQwenBaxiaSession(true)
+            continue
+          }
+          throw new Error(WAF_ERROR_MESSAGE)
+        }
+
+        if (response.data?.data?.id) {
+          console.log('[QwenAI] Created chat:', response.data.data.id)
+          return response.data.data.id
+        }
+
+        const detail =
+          response.data?.data?.details ||
+          response.data?.data?.message ||
+          response.data?.msg ||
+          response.data?.message ||
+          response.data?.data?.code
+        const detailText = String(detail || '')
+        const code = String(response.data?.data?.code || '').toLowerCase()
+
+        // The server may reject a token that still looks valid locally (clock
+        // skew or early revocation). Force a refresh and retry once.
+        if (
+          !tokenRefreshed &&
+          (code === 'unauthorized' ||
+            code === 'invalid token' ||
+            /token has expired|token is invalid|session has expired/i.test(detailText))
+        ) {
+          tokenRefreshed = true
+          const previousToken = this.getToken()
+          const refreshedToken = await this.ensureValidToken(true)
+          if (refreshedToken && refreshedToken !== previousToken) {
+            console.log('[QwenAI] Create chat unauthorized, retrying with the refreshed token')
+            continue
+          }
+        }
+
+        const status = response.status && response.status !== 200 ? `HTTP ${response.status}: ` : ''
+        throw new Error(
+          `Failed to create chat: ${status}${detail || 'no chat ID returned'}`
+        )
+      } catch (error) {
+        console.error('[QwenAI] Failed to create chat:', error)
+        throw error
       }
-
-      throw new Error('Failed to create chat: no chat ID returned')
-    } catch (error) {
-      console.error('[QwenAI] Failed to create chat:', error)
-      throw error
     }
+
+    throw new Error('Failed to create chat: too many retries')
   }
 
   async deleteChat(chatId: string): Promise<boolean> {
@@ -183,7 +395,7 @@ export class QwenAiAdapter {
 
     try {
       const response = await this.axiosInstance.delete(url, {
-        headers: this.getHeaders(),
+        headers: await this.buildHeaders(),
       })
 
       if (response.data?.success) {
@@ -210,7 +422,7 @@ export class QwenAiAdapter {
       console.log('[QwenAI] Deleting all chats for account')
       
       const response = await this.axiosInstance.delete(url, {
-        headers: this.getHeaders(),
+        headers: await this.buildHeaders(),
       })
 
       if (response.data?.success) {
@@ -231,6 +443,7 @@ export class QwenAiAdapter {
     chatId: string
     parentId: string | null
   }> {
+    await this.ensureValidToken()
     const token = this.getToken()
     if (!token) {
       throw new Error('Qwen AI token not configured, please add token in account settings')
@@ -248,9 +461,14 @@ export class QwenAiAdapter {
     } else if (modelForThinking.endsWith('-fast')) {
       forceThinking = false
     } else if (modelLower.includes('think') || modelLower.includes('r1')) {
-      // Auto-enable thinking based on model name keywords (e.g. "Qwen3.6-Plus-AI-Think-Search")
+      // Auto-enable thinking based on model name keywords (e.g. "Qwen3.8-Plus-AI-Think-Search")
       forceThinking = true
       console.log('[QwenAI] Thinking mode enabled (from model name keyword)')
+    } else if (modelLower.includes('qwen4')) {
+      // chat.qwen.ai reports auto_thinking with think_skip disabled for Qwen4,
+      // so thinking is part of the model's normal behavior.
+      forceThinking = true
+      console.log('[QwenAI] Thinking mode enabled (Qwen4 auto thinking)')
     } else {
       // Use the forceThinking from mapModel if no originalModel-specific detection
       forceThinking = (this as any)._forceThinking
@@ -262,22 +480,16 @@ export class QwenAiAdapter {
 
     const messages = request.messages
     
-    // Extract system message and user message
-    let systemContent = ''
-    let userContent = ''
-    
-    // Single-turn mode: extract all messages
-    for (const msg of messages) {
-      if (msg.role === 'system') {
-        systemContent += (systemContent ? '\n\n' : '') + msg.content
-      } else if (msg.role === 'user') {
-        userContent = msg.content
-      }
-    }
+    // The web endpoint is single-turn, so flatten the conversation.
+    const { systemContent, userContent: conversationContent } = buildQwenAiPrompt(
+      messages,
+      this.toolCallingPlan?.protocol,
+    )
+    let userContent = conversationContent
     
     // If system prompt exists, prepend it to user content
     if (systemContent) {
-      userContent = `${systemContent}\n\nUser: ${userContent}`
+      userContent = `${systemContent}\n\n${userContent}`
     }
 
     const fid = uuid()
@@ -340,16 +552,22 @@ export class QwenAiAdapter {
     console.log('[QwenAI] Sending request to /api/v2/chat/completions...')
     console.log('[QwenAI] Request URL:', url)
     console.log('[QwenAI] Request payload:', JSON.stringify(payload, null, 2))
-    console.log('[QwenAI] Request headers:', JSON.stringify(this.getHeaders(chatId), null, 2))
 
+    const session = await getQwenBaxiaSession()
     const response = await this.axiosInstance.post(url, payload, {
       headers: {
-        ...this.getHeaders(chatId),
+        ...(await this.buildHeaders(chatId, session)),
         'x-accel-buffering': 'no',
       },
       responseType: 'stream',
       timeout: 120000,
+      validateStatus: () => true,
     })
+
+    if (this.isWafResponse(response)) {
+      try { (response.data as any)?.destroy?.() } catch { /* ignore */ }
+      throw new Error(WAF_ERROR_MESSAGE)
+    }
 
     console.log('[QwenAI] Response status:', response.status)
     console.log('[QwenAI] Response headers:', JSON.stringify(response.headers, null, 2))
@@ -361,9 +579,162 @@ export class QwenAiAdapter {
     }
   }
 
+  /**
+   * Generates an image or video through the Qwen AI chat media pipeline.
+   * Video generation may block while the upstream task is polled.
+   */
+  async mediaCompletion(request: {
+    model: string
+    prompt: string
+    kind: QwenMediaKind
+    size?: string
+    timeoutMs?: number
+  }): Promise<{
+    chatId: string
+    url?: string
+    taskId?: string
+    width?: number
+    height?: number
+  }> {
+    await this.ensureValidToken()
+    const token = this.getToken()
+    if (!token) {
+      throw new Error('Qwen AI token not configured, please add token in account settings')
+    }
+    if (!request.prompt.trim()) {
+      throw new Error('A non-empty prompt is required for media generation')
+    }
+
+    const generationModel = this.mapModel(request.model)
+    const chatModel = QWEN_MEDIA_CHAT_MODEL
+    const chatType = mediaChatType(request.kind)
+    const title = request.kind === 'image' ? 'Image Generation' : 'Video Generation'
+    const chatId = await this.createChat(chatModel, title, chatType)
+
+    const payload = buildQwenAiMediaPayload({
+      chatId,
+      prompt: request.prompt,
+      kind: request.kind,
+      size: request.size,
+      generationModel,
+      chatModel,
+    })
+
+    const url = `${QWEN_AI_BASE}/api/v2/chat/completions?chat_id=${encodeURIComponent(chatId)}`
+    const timeout = request.timeoutMs ?? (request.kind === 'video' ? 300000 : 180000)
+
+    console.log(`[QwenAI] Sending ${request.kind} generation request...`)
+    const response = await this.axiosInstance.post(url, payload, {
+      headers: {
+        ...(await this.buildHeaders(chatId)),
+        'x-accel-buffering': 'no',
+      },
+      responseType: 'text',
+      timeout,
+      transformResponse: [(data) => data],
+      validateStatus: () => true,
+    })
+
+    const raw = typeof response.data === 'string'
+      ? response.data
+      : JSON.stringify(response.data)
+
+    if (this.isWafResponse(response)) {
+      throw new Error(WAF_ERROR_MESSAGE)
+    }
+
+    if (response.status >= 400) {
+      throw new Error(
+        `Qwen ${request.kind} generation failed: HTTP ${response.status} ${raw.slice(0, 300)}`
+      )
+    }
+
+    const parsed = parseQwenAiMediaResponse(raw, request.kind)
+
+    if (parsed.url) {
+      return {
+        chatId,
+        url: parsed.url,
+        taskId: parsed.taskId,
+        width: parsed.width,
+        height: parsed.height,
+      }
+    }
+
+    if (request.kind === 'video') {
+      const taskId =
+        parsed.taskId ||
+        extractQwenMediaTaskId(safeJsonParse(raw))
+      if (taskId) {
+        const status = await this.pollVideoTask(taskId)
+        return { chatId, url: status.url, taskId }
+      }
+    }
+
+    throw new Error(
+      `No ${request.kind} URL or task id found in Qwen response: ${raw.slice(0, 300)}`
+    )
+  }
+
+  private async pollVideoTask(taskId: string): Promise<{ url: string }> {
+    const deadline = Date.now() + 300000
+    const pollUrl = `${QWEN_AI_BASE}/api/v1/tasks/status/${encodeURIComponent(taskId)}`
+
+    while (Date.now() < deadline) {
+      const response = await this.axiosInstance.get(pollUrl, {
+        headers: await this.buildHeaders(),
+        timeout: 30000,
+        validateStatus: () => true,
+      })
+
+      const json = safeJsonParse(
+        typeof response.data === 'string' ? response.data : JSON.stringify(response.data)
+      ) as Record<string, any> | null
+      if (!json) {
+        await sleep(5000)
+        continue
+      }
+
+      const status = String(json.task_status || json.status || 'running').toLowerCase()
+      const url =
+        json.video_url ||
+        json.data?.video_url ||
+        json.output?.video_url ||
+        extractQwenMediaUrl(json, 'video') ||
+        undefined
+
+      if (status === 'completed' || status === 'success') {
+        if (!url) {
+          throw new Error('Qwen video task completed without a video URL')
+        }
+        return { url }
+      }
+      if (status === 'failed' || status === 'error') {
+        const error = json.error || json.data?.error || 'unknown error'
+        throw new Error(`Qwen video task failed: ${error}`)
+      }
+
+      await sleep(5000)
+    }
+
+    throw new Error(`Qwen video task did not finish within 5 minutes: ${taskId}`)
+  }
+
   static isQwenAiProvider(provider: Provider): boolean {
     return provider.id === 'qwen-ai' || provider.apiEndpoint.includes('chat.qwen.ai')
   }
+}
+
+function safeJsonParse(raw: string): unknown {
+  try {
+    return JSON.parse(raw)
+  } catch {
+    return null
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 export class QwenAiStreamHandler {
@@ -374,11 +745,24 @@ export class QwenAiStreamHandler {
   private responseId: string = ''
   private content: string = ''
   private toolCallsSent: boolean = false
+  private toolStreamParser?: ToolStreamParser
 
-  constructor(model: string, onEnd?: (chatId: string) => void) {
+  constructor(model: string, onEnd?: (chatId: string) => void, toolCallingPlan?: ToolCallingPlan) {
     this.model = model
     this.created = Math.floor(Date.now() / 1000)
     this.onEnd = onEnd
+    this.toolStreamParser = toolCallingPlan?.shouldParseResponse
+      ? new ToolStreamParser(toolCallingPlan)
+      : undefined
+  }
+
+  private baseChunk(): any {
+    return {
+      id: this.responseId || this.chatId,
+      model: this.model,
+      object: 'chat.completion.chunk',
+      created: this.created,
+    }
   }
 
   setChatId(chatId: string) {
@@ -566,6 +950,40 @@ export class QwenAiStreamHandler {
               
               if (content) {
                 console.log('[QwenAI] Sending content chunk:', content)
+                if (this.toolStreamParser) {
+                  const chunks = this.toolStreamParser.push(content, this.baseChunk(), !initialChunkSent)
+                  for (const chunk of chunks) {
+                    transStream.write(`data: ${JSON.stringify(chunk)}\n\n`)
+                    initialChunkSent = true
+                  }
+                  if (this.toolStreamParser.isBuffering() || this.toolStreamParser.hasEmittedToolCall()) {
+                    console.log('[QwenAI] Tool call buffering active')
+                  }
+                } else {
+                  const chunk = {
+                    id: this.responseId || this.chatId,
+                    model: this.model,
+                    object: 'chat.completion.chunk',
+                    choices: [{ index: 0, delta: { content }, finish_reason: null }],
+                    created: this.created,
+                  }
+                  transStream.write(`data: ${JSON.stringify(chunk)}\n\n`)
+                  console.log('[QwenAI] Content chunk written')
+                }
+              }
+            } else if (phase === null && content) {
+              if (!initialChunkSent) {
+                sendInitialChunk()
+              }
+              // Accumulate content for tool call detection
+              this.content += content
+
+              if (this.toolStreamParser) {
+                const chunks = this.toolStreamParser.push(content, this.baseChunk(), false)
+                for (const chunk of chunks) {
+                  transStream.write(`data: ${JSON.stringify(chunk)}\n\n`)
+                }
+              } else {
                 const chunk = {
                   id: this.responseId || this.chatId,
                   model: this.model,
@@ -574,28 +992,35 @@ export class QwenAiStreamHandler {
                   created: this.created,
                 }
                 transStream.write(`data: ${JSON.stringify(chunk)}\n\n`)
-                console.log('[QwenAI] Content chunk written')
               }
-            } else if (phase === null && content) {
-              if (!initialChunkSent) {
-                sendInitialChunk()
-              }
-              // Accumulate content for tool call detection
-              this.content += content
-              
-              const chunk = {
-                id: this.responseId || this.chatId,
-                model: this.model,
-                object: 'chat.completion.chunk',
-                choices: [{ index: 0, delta: { content }, finish_reason: null }],
-                created: this.created,
-              }
-              transStream.write(`data: ${JSON.stringify(chunk)}\n\n`)
             }
 
             if (status === 'finished' && (phase === 'answer' || phase === null)) {
-              // Check for tool calls before sending stop
-              if (hasToolUse(this.content)) {
+              if (this.toolStreamParser) {
+                const flushChunks = this.toolStreamParser.flush(this.baseChunk())
+                for (const chunk of flushChunks) {
+                  transStream.write(`data: ${JSON.stringify(chunk)}\n\n`)
+                  initialChunkSent = true
+                }
+
+                if (this.toolStreamParser.hasEmittedToolCall()) {
+                  console.log('[QwenAI] Tool stream parser emitted tool calls')
+                  const toolFinishChunk = {
+                    id: this.responseId || this.chatId,
+                    model: this.model,
+                    object: 'chat.completion.chunk',
+                    choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }],
+                    usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+                    created: this.created,
+                  }
+                  transStream.write(`data: ${JSON.stringify(toolFinishChunk)}\n\n`)
+                  transStream.end('data: [DONE]\n\n')
+                  if (this.onEnd && this.chatId) {
+                    this.onEnd(this.chatId)
+                  }
+                  return
+                }
+              } else if (hasToolUse(this.content)) {
                 console.log('[QwenAI] Found tool_use in stream, sending tool_calls')
                 this.sendToolCalls(transStream)
                 return

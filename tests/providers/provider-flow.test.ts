@@ -9,6 +9,8 @@ import { glmConfig } from '../../src/main/providers/builtin/glm.ts'
 import { kimiConfig } from '../../src/main/providers/builtin/kimi.ts'
 import { minimaxConfig } from '../../src/main/providers/builtin/minimax.ts'
 import { mimoConfig } from '../../src/main/providers/builtin/mimo.ts'
+import { longcatConfig } from '../../src/main/providers/builtin/longcat.ts'
+import { inceptionConfig } from '../../src/main/providers/builtin/inception.ts'
 import { perplexityConfig } from '../../src/main/providers/builtin/perplexity.ts'
 import { qwenConfig } from '../../src/main/providers/builtin/qwen.ts'
 import { qwenAiConfig } from '../../src/main/providers/builtin/qwen-ai.ts'
@@ -31,15 +33,15 @@ import {
 const root = dirname(dirname(dirname(fileURLToPath(import.meta.url))))
 
 test('DeepSeek exposes two primary models and keeps feature aliases in default mappings', () => {
-  assert.deepEqual(DEEPSEEK_PRIMARY_MODELS, ['deepseek-v4-flash', 'deepseek-v4-pro'])
+  assert.deepEqual(DEEPSEEK_PRIMARY_MODELS, ['deepseek-v4.1-flash', 'deepseek-v4-pro'])
   assert.deepEqual(deepseekConfig.supportedModels, DEEPSEEK_PRIMARY_MODELS)
   assert.deepEqual(deepseekConfig.modelMappings, {
-    'deepseek-v4-flash': 'deepseek-v4-flash',
+    'deepseek-v4.1-flash': 'deepseek-v4.1-flash',
     'deepseek-v4-pro': 'deepseek-v4-pro',
   })
 
   assert.deepEqual(
-    resolveDeepSeekChatOptions({ model: 'deepseek-v4-flash' }),
+    resolveDeepSeekChatOptions({ model: 'deepseek-v4.1-flash' }),
     { modelType: 'default', searchEnabled: false, thinkingEnabled: false },
   )
   assert.deepEqual(
@@ -51,7 +53,7 @@ test('DeepSeek exposes two primary models and keeps feature aliases in default m
     { modelType: 'expert', searchEnabled: true, thinkingEnabled: true },
   )
   assert.deepEqual(
-    resolveDeepSeekChatOptions({ model: 'deepseek-v4-flash-search' }),
+    resolveDeepSeekChatOptions({ model: 'deepseek-v4.1-flash-search' }),
     { modelType: 'default', searchEnabled: true, thinkingEnabled: false },
   )
   assert.deepEqual(
@@ -67,7 +69,7 @@ test('DeepSeek exposes two primary models and keeps feature aliases in default m
     { modelType: 'expert', searchEnabled: true, thinkingEnabled: true },
   )
   assert.deepEqual(
-    resolveDeepSeekChatOptions({ model: 'deepseek-v4-flash' }, 'please use deep thinking if helpful'),
+    resolveDeepSeekChatOptions({ model: 'deepseek-v4.1-flash' }, 'please use deep thinking if helpful'),
     { modelType: 'default', searchEnabled: false, thinkingEnabled: false },
   )
 })
@@ -76,19 +78,19 @@ test('DeepSeek persisted model overrides are migrated away from old built-in ali
   assert.deepEqual(
     sanitizeDeepSeekModelOverrides({
       addedModels: [
-        { displayName: 'deepseek-v4-flash-search', actualModelId: 'deepseek-v4-flash' },
-        { displayName: 'DeepSeek-R1', actualModelId: 'deepseek-v4-flash' },
+        { displayName: 'deepseek-v4.1-flash-search', actualModelId: 'deepseek-v4.1-flash' },
+        { displayName: 'DeepSeek-R1', actualModelId: 'deepseek-v4.1-flash' },
         { displayName: 'custom-deepseek-web', actualModelId: 'custom-upstream-model' },
-        { displayName: 'my-flash-alias', actualModelId: 'deepseek-v4-flash' },
+        { displayName: 'my-flash-alias', actualModelId: 'deepseek-v4.1-flash' },
       ],
-      excludedModels: ['DeepSeek-R1', 'deepseek-v4-flash'],
+      excludedModels: ['DeepSeek-R1', 'deepseek-v4.1-flash'],
     }),
     {
       addedModels: [
         { displayName: 'custom-deepseek-web', actualModelId: 'custom-upstream-model' },
-        { displayName: 'my-flash-alias', actualModelId: 'deepseek-v4-flash' },
+        { displayName: 'my-flash-alias', actualModelId: 'deepseek-v4.1-flash' },
       ],
-      excludedModels: ['deepseek-v4-flash'],
+      excludedModels: ['deepseek-v4.1-flash'],
     },
   )
 
@@ -105,16 +107,16 @@ test('DeepSeek persisted model overrides are migrated away from old built-in ali
 
 test('DeepSeek feature aliases are seeded as global model mappings', () => {
   assert.deepEqual(Object.keys(DEFAULT_DEEPSEEK_MODEL_MAPPINGS), [
-    'deepseek-v4-flash-think',
-    'deepseek-v4-flash-search',
-    'deepseek-v4-flash-think-search',
+    'deepseek-v4.1-flash-think',
+    'deepseek-v4.1-flash-search',
+    'deepseek-v4.1-flash-think-search',
     'deepseek-v4-pro-think',
     'deepseek-v4-pro-search',
     'deepseek-v4-pro-think-search',
   ])
-  assert.deepEqual(DEFAULT_DEEPSEEK_MODEL_MAPPINGS['deepseek-v4-flash-think'], {
-    requestModel: 'deepseek-v4-flash-think',
-    actualModel: 'deepseek-v4-flash',
+  assert.deepEqual(DEFAULT_DEEPSEEK_MODEL_MAPPINGS['deepseek-v4.1-flash-think'], {
+    requestModel: 'deepseek-v4.1-flash-think',
+    actualModel: 'deepseek-v4.1-flash',
     preferredProviderId: 'deepseek',
   })
   assert.deepEqual(DEFAULT_DEEPSEEK_MODEL_MAPPINGS['deepseek-v4-pro-search'], {
@@ -129,26 +131,26 @@ test('DeepSeek feature aliases are seeded as global model mappings', () => {
 })
 
 test('built-in model mappings are restored and cannot be replaced by custom config', () => {
-  assert.equal(isDefaultModelMapping('deepseek-v4-flash-search'), true)
+  assert.equal(isDefaultModelMapping('deepseek-v4.1-flash-search'), true)
   assert.equal(isDefaultModelMapping('deepseek-chat'), false)
 
   assert.deepEqual(
     normalizeModelMappingsWithDefaults({
-      'deepseek-v4-flash-search': {
-        requestModel: 'deepseek-v4-flash-search',
+      'deepseek-v4.1-flash-search': {
+        requestModel: 'deepseek-v4.1-flash-search',
         actualModel: 'tampered',
         preferredProviderId: 'custom',
       },
       'custom-alias': {
         requestModel: 'custom-alias',
-        actualModel: 'deepseek-v4-flash',
+        actualModel: 'deepseek-v4.1-flash',
       },
     }),
     {
       ...createDefaultModelMappings(),
       'custom-alias': {
         requestModel: 'custom-alias',
-        actualModel: 'deepseek-v4-flash',
+        actualModel: 'deepseek-v4.1-flash',
       },
     },
   )
@@ -156,8 +158,8 @@ test('built-in model mappings are restored and cannot be replaced by custom conf
 
 test('DeepSeek default model mapping seeding preserves editable replacement semantics', () => {
   const first = createDefaultModelMappings()
-  first['deepseek-v4-flash-search'].actualModel = 'mutated'
-  assert.equal(createDefaultModelMappings()['deepseek-v4-flash-search'].actualModel, 'deepseek-v4-flash')
+  first['deepseek-v4.1-flash-search'].actualModel = 'mutated'
+  assert.equal(createDefaultModelMappings()['deepseek-v4.1-flash-search'].actualModel, 'deepseek-v4.1-flash')
 
   const storeSource = readFileSync(
     join(root, 'src/main/store/store.ts'),
@@ -178,15 +180,25 @@ test('DeepSeek provider config uses Web 2.0 browser headers', () => {
 })
 
 test('GLM, Kimi, and MiniMax built-in default models match current web providers', () => {
-  assert.deepEqual(glmConfig.supportedModels, ['GLM-5.1'])
-  assert.equal(glmConfig.modelMappings?.['GLM-5.1'], 'glm-5.1')
+  assert.deepEqual(glmConfig.supportedModels, ['GLM-5.3', 'GLM-5.3-flash'])
+  assert.equal(glmConfig.modelMappings?.['GLM-5.3'], 'glm-5.3')
+  assert.equal(glmConfig.modelMappings?.['GLM-5.3-flash'], 'glm-5.3-flash')
 
   assert.deepEqual(kimiConfig.supportedModels, ['Kimi-K2.6'])
   assert.equal(kimiConfig.modelMappings?.['Kimi-K2.6'], 'kimi-k2.6')
   assert.equal(kimiConfig.modelMappings?.['Kimi-K2.5'], undefined)
+  assert.equal(kimiConfig.modelMappings?.['Kimi-K3'], undefined)
+  assert.equal(kimiConfig.modelMappings?.['Kimi-K3.1-Pro'], undefined)
+  assert.equal(kimiConfig.modelMappings?.['Kimi-K2.8-Preview'], undefined)
 
-  assert.deepEqual(minimaxConfig.supportedModels, ['MiniMax-M2.7'])
+  assert.deepEqual(minimaxConfig.supportedModels, [
+    'MiniMax-M3.1-Flash',
+    'MiniMax-M3',
+    'MiniMax-M2.7',
+  ])
   assert.deepEqual(minimaxConfig.modelMappings, {
+    'MiniMax-M3.1-Flash': 'MiniMax-M3.1-Flash',
+    'MiniMax-M3': 'MiniMax-M3',
     'MiniMax-M2.7': 'MiniMax-M2.7',
   })
 
@@ -194,16 +206,14 @@ test('GLM, Kimi, and MiniMax built-in default models match current web providers
     join(root, 'src/main/proxy/adapters/minimax.ts'),
     'utf8',
   )
-  assert.match(minimaxAdapterSource, /this\.model = 'MiniMax-M2\.7'/)
-  assert.match(minimaxAdapterSource, /request\.model \|\| 'MiniMax-M2\.7'/)
+  assert.match(minimaxAdapterSource, /this\.model = 'MiniMax-M3\.1-Flash'/)
+  assert.match(minimaxAdapterSource, /request\.model \|\| 'MiniMax-M3\.1-Flash'/)
   assert.doesNotMatch(minimaxAdapterSource, /MiniMax-M2\.5/)
 })
 
 test('Kimi K2.6 model mapping reaches the web chat request payload', () => {
-  assert.deepEqual(kimiConfig.supportedModels, ['Kimi-K2.6'])
-  assert.equal(kimiConfig.modelMappings?.['Kimi-K2.6'], 'kimi-k2.6')
   assert.equal(resolveKimiScenario('kimi-k2.6'), 'SCENARIO_K2D6')
-  assert.equal(resolveKimiScenario('kimi-k2.5'), 'SCENARIO_K2D5')
+  assert.equal(resolveKimiScenario('kimi-k2.5'), 'SCENARIO_CHAT')
 
   const payload = createKimiChatPayload({
     model: 'kimi-k2.6',
@@ -214,6 +224,8 @@ test('Kimi K2.6 model mapping reaches the web chat request payload', () => {
 
   assert.equal(payload.scenario, 'SCENARIO_K2D6')
   assert.equal(payload.message.scenario, 'SCENARIO_K2D6')
+  assert.equal(payload.kimiplusId, undefined)
+  assert.equal(payload.options.model, undefined)
   assert.deepEqual(payload.tools, [{ type: 'TOOL_TYPE_SEARCH', search: {} }])
   assert.equal(payload.options.thinking, true)
 
@@ -251,20 +263,16 @@ test('Kimi and domestic Qwen support account-level chat cleanup', () => {
 
 test('domestic Qwen models match the web chat model ids captured from HAR', () => {
   const expectedModels = [
-    'Qwen3.6',
-    'Qwen3.7-Max',
-    'Qwen3.5-Flash',
-    'Qwen3-Max',
-    'Qwen3-Max-Thinking-Preview',
-    'Qwen3-Coder',
+    'Qwen3.8',
+    'Qwen3.8-Max',
+    'Qwen3.8-Flash',
+    'Qwen3.8-Omni-Flash',
   ]
   const expectedMappings = {
-    'Qwen3.6': 'Qwen',
-    'Qwen3.7-Max': 'Qwen3.7-Max',
-    'Qwen3.5-Flash': 'Qwen3.5-Flash',
-    'Qwen3-Max': 'Qwen3-Max',
-    'Qwen3-Max-Thinking-Preview': 'Qwen3-Max-Thinking-Preview',
-    'Qwen3-Coder': 'Qwen3-Coder',
+    'Qwen3.8': 'Qwen',
+    'Qwen3.8-Max': 'Qwen3.8-Max',
+    'Qwen3.8-Flash': 'Qwen3.8-Flash',
+    'Qwen3.8-Omni-Flash': 'Qwen3.8-Omni-Flash',
   }
 
   assert.deepEqual(qwenConfig.supportedModels, expectedModels)
@@ -274,8 +282,10 @@ test('domestic Qwen models match the web chat model ids captured from HAR', () =
   const zh = JSON.parse(readFileSync(join(root, 'src/renderer/src/i18n/locales/zh-CN.json'), 'utf8'))
   const en = JSON.parse(readFileSync(join(root, 'src/renderer/src/i18n/locales/en-US.json'), 'utf8'))
 
-  assert.match(qwenAdapterSource, /'Qwen3\.6': 'Qwen'/)
-  assert.match(qwenAdapterSource, /'Qwen3-Coder': 'Qwen3-Coder'/)
+  assert.match(qwenAdapterSource, /'Qwen3\.8': 'Qwen'/)
+  assert.doesNotMatch(qwenAdapterSource, /'Qwen-Image-3\.0': 'Qwen-Image-3\.0'/)
+  assert.doesNotMatch(qwenAdapterSource, /'Wan3\.0-Video': 'Wan3\.0-Video'/)
+  assert.doesNotMatch(qwenAdapterSource, /'Qwen3-Coder': 'Qwen3-Coder'/)
   assert.doesNotMatch(qwenAdapterSource, /qwen3-coder-plus|tongyi-qwen3-max-model-agent|tongyi-qwen-plus-agent/)
   assert.deepEqual(zh.qwen.models, expectedMappings)
   assert.deepEqual(en.qwen.models, expectedMappings)
@@ -283,30 +293,37 @@ test('domestic Qwen models match the web chat model ids captured from HAR', () =
 
 test('Qwen AI defaults keep only the filtered current web model set', () => {
   const expectedModels = [
-    'Qwen3.7-Max',
-    'Qwen3.6-Plus',
-    'Qwen3.6-35B-A3B',
-    'Qwen3.6-27B',
-    'Qwen3-Coder',
+    'Qwen4-Max-Preview',
+    'Qwen3.8-Max',
+    'Qwen3.8-Plus',
+    'Qwen3.8-Flash',
+    'Qwen3.8-Omni-Flash',
+    'Qwen-Image-3.0',
+    'Wan3.0-Video',
   ]
   const expectedMappings = {
-    'Qwen3.7-Max': 'qwen3.7-max',
-    'Qwen3.6-Plus': 'qwen3.6-plus',
-    'Qwen3.6-35B-A3B': 'qwen3.6-35b-a3b',
-    'Qwen3.6-27B': 'qwen3.6-27b',
-    'Qwen3-Coder': 'qwen3-coder-plus',
+    'Qwen4-Max-Preview': 'qwen4.0-max-preview',
+    'Qwen3.8-Max': 'qwen3.8-max',
+    'Qwen3.8-Plus': 'qwen3.8-plus',
+    'Qwen3.8-Flash': 'qwen3.8-flash',
+    'Qwen3.8-Omni-Flash': 'qwen3.8-omni-flash',
+    'Qwen-Image-3.0': 'qwen-image-3.0',
+    'Wan3.0-Video': 'wan3.0-video',
   }
 
   assert.deepEqual(qwenAiConfig.supportedModels, expectedModels)
   assert.deepEqual(qwenAiConfig.modelMappings, expectedMappings)
 
   for (const removedModel of [
+    'Qwen3.7-Max',
     'Qwen3.7-Max-Preview',
     'Qwen3.7-Plus-Preview',
     'Qwen3.6-Max-Preview',
     'Qwen3.6-Plus-Preview',
     'Qwen3.5-Plus',
     'Qwen3-Max',
+    'Qwen3.8-27B',
+    'Qwen3-Coder',
     'Qwen3-235B-A22B-2507',
     'Qwen3-VL-235B-A22B',
     'Qwen3-Omni-Flash',
@@ -316,11 +333,15 @@ test('Qwen AI defaults keep only the filtered current web model set', () => {
   }
 
   const qwenAiAdapterSource = readFileSync(join(root, 'src/main/proxy/adapters/qwen-ai.ts'), 'utf8')
-  assert.match(qwenAiAdapterSource, /qwen:\s*'qwen3\.7-max'/)
-  assert.match(qwenAiAdapterSource, /qwen3:\s*'qwen3\.7-max'/)
-  assert.match(qwenAiAdapterSource, /'qwen3\.7':\s*'qwen3\.7-max'/)
-  assert.match(qwenAiAdapterSource, /'qwen3\.6':\s*'qwen3\.6-plus'/)
-  assert.match(qwenAiAdapterSource, /'qwen3-coder':\s*'qwen3-coder-plus'/)
+  assert.match(qwenAiAdapterSource, /qwen:\s*'qwen3\.8-max'/)
+  assert.match(qwenAiAdapterSource, /qwen3:\s*'qwen3\.8-max'/)
+  assert.match(qwenAiAdapterSource, /qwen4:\s*'qwen4\.0-max-preview'/)
+  assert.match(qwenAiAdapterSource, /'qwen4\.0-max-preview':\s*'qwen4\.0-max-preview'/)
+  assert.match(qwenAiAdapterSource, /'qwen3\.8':\s*'qwen3\.8-max'/)
+  assert.match(qwenAiAdapterSource, /'qwen3\.8-plus':\s*'qwen3\.8-plus'/)
+  assert.match(qwenAiAdapterSource, /'qwen-image-3\.0':\s*'qwen-image-3\.0'/)
+  assert.match(qwenAiAdapterSource, /'wan3\.0-video':\s*'wan3\.0-video'/)
+  assert.doesNotMatch(qwenAiAdapterSource, /'qwen3-coder':\s*'qwen3-coder-plus'/)
   assert.doesNotMatch(qwenAiAdapterSource, /'qwen3\.5':/)
   assert.doesNotMatch(qwenAiAdapterSource, /'qwen3-vl':/)
   assert.doesNotMatch(qwenAiAdapterSource, /'qwen3-omni':/)
@@ -329,34 +350,33 @@ test('Qwen AI defaults keep only the filtered current web model set', () => {
 
 test('Z.ai default models match the latest chat.z.ai HAR model ids', () => {
   const expectedModels = [
-    'GLM-5.1',
-    'GLM-5-Turbo',
-    'GLM-5V-Turbo',
-    'GLM-5',
-    'GLM-4.7',
+    'GLM-5.3',
+    'GLM-5.3-flash',
+    'GLM-5.2',
   ]
   const expectedMappings = {
-    'GLM-5.1': 'GLM-5.1',
-    'GLM-5-Turbo': 'GLM-5-Turbo',
-    'GLM-5V-Turbo': 'GLM-5v-Turbo',
-    'GLM-5': 'glm-5',
-    'GLM-4.7': 'glm-4.7',
+    'GLM-5.3': 'glm-5.3',
+    'GLM-5.3-flash': 'x-preview-l',
+    'GLM-5.2': 'glm-5.2',
   }
 
   assert.deepEqual(zaiConfig.supportedModels, expectedModels)
   assert.deepEqual(zaiConfig.modelMappings, expectedMappings)
 
-  for (const removedModel of ['glm-4.6v', 'glm-4.6', 'glm-4.5v', 'glm-4.5-air']) {
+  for (const removedModel of ['glm-5-turbo', 'glm-5v-turbo', 'glm-4.7', 'glm-4.6v', 'glm-4.6', 'glm-4.5v', 'glm-4.5-air']) {
     assert.equal(zaiConfig.modelMappings?.[removedModel], undefined, removedModel)
   }
 
   const zaiAdapterSource = readFileSync(join(root, 'src/main/proxy/adapters/zai.ts'), 'utf8')
-  assert.match(zaiAdapterSource, /'glm-5\.1': 'GLM-5\.1'/)
-  assert.match(zaiAdapterSource, /'glm-5v-turbo': 'GLM-5v-Turbo'/)
-  assert.match(zaiAdapterSource, /'GLM-5V-Turbo': 'GLM-5v-Turbo'/)
-  assert.match(zaiAdapterSource, /const X_FE_VERSION = 'prod-fe-1\.1\.37'/)
-  assert.match(zaiAdapterSource, /'X-Region': 'domestic'/)
+  assert.match(zaiAdapterSource, /'glm-5\.3': 'GLM-5\.3'/)
+  assert.match(zaiAdapterSource, /'glm-5\.3-flash': 'x-preview-l'/)
+  assert.doesNotMatch(zaiAdapterSource, /'glm-5-turbo': 'GLM-5-Turbo'/)
+  assert.doesNotMatch(zaiAdapterSource, /'glm-5v-turbo': 'GLM-5v-Turbo'/)
+  assert.doesNotMatch(zaiAdapterSource, /'glm-4\.7': 'glm-4\.7'/)
+  assert.match(zaiAdapterSource, /const X_FE_VERSION = 'prod-fe-1\.1\.128'/)
+  assert.match(zaiAdapterSource, /'X-Region': 'overseas'/)
   assert.match(zaiAdapterSource, /captcha_verify_param/)
+  assert.match(zaiAdapterSource, /computeCaptchaParam/)
   assert.match(zaiAdapterSource, /new URLSearchParams\(\{[\s\S]*token,/)
   assert.match(zaiAdapterSource, /api\/v2\/chat\/completions\?\$\{queryParams\.toString\(\)\}/)
   assert.match(zaiAdapterSource, /Authorization: `Bearer \$\{token\}`/)
@@ -365,23 +385,99 @@ test('Z.ai default models match the latest chat.z.ai HAR model ids', () => {
   assert.doesNotMatch(zaiAdapterSource, /'glm-4\.5-air':/)
 })
 
-test('Z.ai docs mark provider temporarily unavailable due to captcha risk control', () => {
+test('Z.ai docs and README reflect automatic captcha support', () => {
   const readme = readFileSync(join(root, 'README.md'), 'utf8')
   const readmeCn = readFileSync(join(root, 'README_CN.md'), 'utf8')
   const doc = readFileSync(join(root, 'docs/providers/zai.md'), 'utf8')
 
-  assert.match(readme, /Z\.ai[^\n]*Temporarily unavailable due to frontend captcha risk control/)
-  assert.match(readmeCn, /Z\.ai[^\n]*受前端验证码风控限制，暂不可用/)
-  assert.match(doc, /当前状态 \| 受前端验证码风控限制，暂不可用/)
+  assert.match(readme, /Z\.ai[^\n]*GLM-5\.3, GLM-5\.3-flash, GLM-5\.2/)
+  assert.match(readmeCn, /Z\.ai[^\n]*GLM-5\.3, GLM-5\.3-flash, GLM-5\.2/)
+  assert.doesNotMatch(readme, /Temporarily unavailable due to frontend captcha risk control/)
+  assert.doesNotMatch(readmeCn, /暂不可用/)
+  assert.match(doc, /当前状态 \| 自动完成前端验证码/)
   assert.match(doc, /FRONTEND_CAPTCHA_REQUIRED/)
-  assert.match(doc, /captcha_verify_param.*调试字段/)
+  assert.match(doc, /captcha_verify_param/)
+  assert.match(doc, /隐藏的 `chat\.z\.ai` 窗口/)
+  assert.match(doc, /prod-fe-1\.1\.128/)
+})
+
+test('LongCat uses longcat.ai with the passport_token_key cookie and OAuth login', () => {
+  assert.equal(longcatConfig.id, 'longcat')
+  assert.equal(longcatConfig.authType, 'cookie')
+  assert.deepEqual(longcatConfig.supportedModels, ['LongCat', 'LongCat-Search'])
+  assert.deepEqual(longcatConfig.modelMappings, {
+    LongCat: 'LongCat',
+    'LongCat-Search': 'LongCat-Search',
+  })
+  assert.equal(longcatConfig.credentialFields?.[0]?.name, 'passport_token_key')
+  assert.match(longcatConfig.apiEndpoint, /longcat\.ai/)
+  assert.doesNotMatch(longcatConfig.apiEndpoint, /longcat\.chat/)
+
+  const longcatAdapterSource = readFileSync(join(root, 'src/main/proxy/adapters/longcat.ts'), 'utf8')
+  assert.match(longcatAdapterSource, /passport_token_key/)
+  assert.match(longcatAdapterSource, /\/api\/v1\/session-create/)
+  assert.match(longcatAdapterSource, /\/api\/v1\/chat-completion/)
+  assert.match(longcatAdapterSource, /\/api\/v1\/chat-completion-V2/)
+  assert.match(longcatAdapterSource, /\/api\/v1\/session-delete/)
+
+  const oauthAdapterSource = readFileSync(join(root, 'src/main/oauth/adapters/longcat.ts'), 'utf8')
+  assert.match(oauthAdapterSource, /longcat\.ai/)
+  assert.match(oauthAdapterSource, /\/api\/v1\/user-current/)
+
+  const tokenConfigSource = readFileSync(join(root, 'src/main/oauth/tokenExtractionConfig.ts'), 'utf8')
+  assert.match(tokenConfigSource, /loginUrl: 'https:\/\/longcat\.ai\/chat'/)
+  assert.match(tokenConfigSource, /type: 'cookieJar'/)
+
+  const longcatDoc = readFileSync(join(root, 'docs/providers/longcat.md'), 'utf8')
+  assert.match(longcatDoc, /passport_token_key/)
+  assert.match(longcatDoc, /longcat\.ai/)
+  assert.match(longcatDoc, /OAuth/)
+  assert.match(longcatDoc, /LongCat-Search/)
+})
+
+test('Inception is a no-login anonymous provider on chat.inceptionlabs.ai', () => {
+  assert.equal(inceptionConfig.id, 'inception')
+  assert.equal(inceptionConfig.authType, 'cookie')
+  assert.deepEqual(inceptionConfig.supportedModels, ['mercury-3'])
+  assert.deepEqual(inceptionConfig.modelMappings, { 'mercury-3': 'mercury-3' })
+  assert.equal(inceptionConfig.credentialFields?.[0]?.name, '_vcrcs')
+  assert.equal(inceptionConfig.credentialFields?.[0]?.required, false)
+  assert.equal(inceptionConfig.apiEndpoint, 'https://chat.inceptionlabs.ai')
+
+  const adapterSource = readFileSync(join(root, 'src/main/proxy/adapters/inception.ts'), 'utf8')
+  assert.match(adapterSource, /x-session-token/)
+  assert.match(adapterSource, /\/api\/chat/)
+  assert.match(adapterSource, /getInceptionClearance/)
+
+  const providerSource = readFileSync(join(root, 'src/main/providers/inception.ts'), 'utf8')
+  assert.match(providerSource, /request-challenge/)
+  assert.match(providerSource, /solveVercelChallenge/)
+  assert.match(providerSource, /_vcrc/)
+
+  // No in-app login: the token extraction config must not carry inception.
+  const tokenConfigSource = readFileSync(join(root, 'src/main/oauth/tokenExtractionConfig.ts'), 'utf8')
+  assert.doesNotMatch(tokenConfigSource, /inception: \{/)
+  assert.doesNotMatch(tokenConfigSource, /chat\.inceptionlabs\.ai\/api\/session/)
+
+  // The OAuth adapter exists for manual validation only.
+  const oauthAdapterSource = readFileSync(join(root, 'src/main/oauth/adapters/inception.ts'), 'utf8')
+  assert.match(oauthAdapterSource, /chat\.inceptionlabs\.ai|INCEPTION_API_BASE/)
+  assert.match(oauthAdapterSource, /fetchInceptionSessionToken/)
+
+  const inceptionDoc = readFileSync(join(root, 'docs/providers/inception.md'), 'utf8')
+  assert.match(inceptionDoc, /_vcrcs/)
+  assert.match(inceptionDoc, /chat\.inceptionlabs\.ai/)
+  assert.match(inceptionDoc, /无需登录|no login/i)
+  assert.match(inceptionDoc, /mercury-3/)
 })
 
 test('provider docs cover every built-in provider and Qwen AI manual model additions', () => {
   const providerDocs = [
     'deepseek',
     'glm',
+    'inception',
     'kimi',
+    'longcat',
     'minimax',
     'mimo',
     'perplexity',
@@ -441,6 +537,8 @@ test('README Supported Providers model lists mirror current defaults with Perple
     ['Kimi', kimiConfig.supportedModels?.join(', ')],
     ['MiniMax', minimaxConfig.supportedModels?.join(', ')],
     ['Mimo', mimoConfig.supportedModels?.join(', ')],
+    ['LongCat', longcatConfig.supportedModels?.join(', ')],
+    ['Inception', inceptionConfig.supportedModels?.join(', ')],
     ['Perplexity', 'Auto'],
     ['Qwen', qwenConfig.supportedModels?.join(', ')],
     ['Qwen AI', qwenAiConfig.supportedModels?.join(', ')],
@@ -454,8 +552,8 @@ test('README Supported Providers model lists mirror current defaults with Perple
     assert.match(readmeCn, new RegExp(`\\| ${provider.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[^\\n]*\\| ${models?.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\|`))
   }
 
-  assert.match(readme, /Z\.ai[^\n]*Temporarily unavailable due to frontend captcha risk control/)
-  assert.match(readmeCn, /Z\.ai[^\n]*受前端验证码风控限制，暂不可用/)
+  assert.match(readme, /Z\.ai[^\n]*GLM-5\.3, GLM-5\.3-flash, GLM-5\.2/)
+  assert.match(readmeCn, /Z\.ai[^\n]*GLM-5\.3, GLM-5\.3-flash, GLM-5\.2/)
 
   assert.doesNotMatch(readme, /Perplexity[^\n]*(Turbo|PPLX-Pro|GPT-5|Gemini-2\.5-Pro|Claude-Sonnet-4|Claude-Opus-4|Nemotron)/)
   assert.doesNotMatch(readmeCn, /Perplexity[^\n]*(Turbo|PPLX-Pro|GPT-5|Gemini-2\.5-Pro|Claude-Sonnet-4|Claude-Opus-4|Nemotron)/)
@@ -466,10 +564,19 @@ test('README Supported Providers model lists mirror current defaults with Perple
 })
 
 test('Mimo model names and conversation flow match Xiaomi AI Studio web requests', () => {
-  assert.deepEqual(mimoConfig.supportedModels, ['MiMo-V2.5-Pro', 'MiMo-V2.5', 'MiMo-V2-Flash'])
-  assert.equal(mimoConfig.modelMappings?.['MiMo-V2.5-Pro'], 'mimo-v2.5-pro')
-  assert.equal(mimoConfig.modelMappings?.['MiMo-V2.5'], 'mimo-v2.5')
-  assert.equal(mimoConfig.modelMappings?.['MiMo-V2-Flash'], 'mimo-v2-flash')
+  assert.deepEqual(mimoConfig.supportedModels, [
+    'MiMo-V2.6-Pro',
+    'MiMo-V2.6-Flash',
+    'MiMo-V2.5-TTS',
+    'MiMo-V2.5-TTS-VoiceDesign',
+    'MiMo-V2.5-TTS-VoiceClone',
+  ])
+  assert.equal(mimoConfig.modelMappings?.['MiMo-V2.6-Pro'], 'mimo-v2.6-pro')
+  assert.equal(mimoConfig.modelMappings?.['MiMo-V2.6-Flash'], 'mimo-v2.6-flash')
+  assert.equal(mimoConfig.modelMappings?.['MiMo-V2.5-TTS'], 'mimo-v2.5-tts')
+  assert.equal(mimoConfig.modelMappings?.['MiMo-V2.5-TTS-VoiceDesign'], 'mimo-v2.5-tts-voicedesign')
+  assert.equal(mimoConfig.modelMappings?.['MiMo-V2.5-TTS-VoiceClone'], 'mimo-v2.5-tts-voiceclone')
+  assert.equal(mimoConfig.modelMappings?.['MiMo-V2.6-Pro-UltraSpeed'], undefined)
 
   const forwarderSource = readFileSync(
     join(root, 'src/main/proxy/forwarder.ts'),
@@ -534,13 +641,14 @@ test('DeepSeek locale model labels only describe primary provider models', () =>
   const enData = JSON.parse(en)
 
   assert.deepEqual(zhData.deepseek.models, {
-    'deepseek-v4-flash': 'DeepSeek V4 Flash',
+    'deepseek-v4.1-flash': 'DeepSeek V4.1 Flash',
     'deepseek-v4-pro': 'DeepSeek V4 Pro',
   })
   assert.deepEqual(enData.deepseek.models, {
-    'deepseek-v4-flash': 'DeepSeek V4 Flash',
+    'deepseek-v4.1-flash': 'DeepSeek V4.1 Flash',
     'deepseek-v4-pro': 'DeepSeek V4 Pro',
   })
+  assert.equal('deepseek-v4-flash' in zhData.deepseek.models, false)
   assert.equal('DeepSeek-R1' in zhData.deepseek.models, false)
   assert.equal('deepseek-reasoner' in enData.deepseek.models, false)
 })

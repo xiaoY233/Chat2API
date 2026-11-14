@@ -1,6 +1,7 @@
 name: Release
 
 on:
+  workflow_dispatch:
   push:
     tags:
       - 'v*.*.*'
@@ -17,15 +18,14 @@ jobs:
       matrix:
         include:
           - os: macos-latest
-            arch: arm64
-          - os: macos-latest
-            arch: x64
+            target: mac
+            args: --mac --x64 --arm64
           - os: windows-latest
-            arch: x64
+            target: win
+            args: --win --x64
           - os: ubuntu-latest
-            arch: x64
-          - os: ubuntu-latest
-            arch: arm64
+            target: linux
+            args: --linux
 
     steps:
       - name: Checkout repository
@@ -45,23 +45,8 @@ jobs:
       - name: Build application
         run: npm run build
 
-      - name: Build and Publish (macOS)
-        if: matrix.os == 'macos-latest'
-        run: npx electron-builder --mac --${{ matrix.arch }} --publish=always
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ELECTRON_MIRROR: https://github.com/electron/electron/releases/download/
-
-      - name: Build and Publish (Windows)
-        if: matrix.os == 'windows-latest'
-        run: npx electron-builder --win --${{ matrix.arch }} --publish=always
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ELECTRON_MIRROR: https://github.com/electron/electron/releases/download/
-
-      - name: Build and Publish (Linux)
-        if: matrix.os == 'ubuntu-latest'
-        run: npx electron-builder --linux --${{ matrix.arch }} --publish=always
+      - name: Build and Publish (${{ matrix.target }})
+        run: npx electron-builder ${{ matrix.args }} --publish=always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ELECTRON_MIRROR: https://github.com/electron/electron/releases/download/

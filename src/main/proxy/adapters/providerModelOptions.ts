@@ -29,10 +29,42 @@ export function resolveDeepSeekChatOptions(
   }
 }
 
-export type KimiScenario = 'SCENARIO_K2D5' | 'SCENARIO_K2D6'
+export type KimiScenario = 'SCENARIO_OK_COMPUTER' | 'SCENARIO_K2D5' | 'SCENARIO_K2D6' | 'SCENARIO_CHAT'
+
+export interface KimiChatModelOptions {
+  scenario: KimiScenario
+  modelId?: string
+  kimiPlusId?: string
+}
+
+// Scenario/model values mirror the web client's GetAvailableModels config:
+// K3 / K3.1 Pro use k3-agent and K2.8 Preview uses k28-agent-preview, both under
+// the OK Computer agent scenario with the ok-computer kimiplus id. K2.6 keeps
+// SCENARIO_K2D6; anything else falls back to the default chat scenario.
+export function resolveKimiChatModel(model: string): KimiChatModelOptions {
+  const modelLower = model.toLowerCase()
+  if (modelLower.includes('k3')) {
+    return {
+      scenario: 'SCENARIO_OK_COMPUTER',
+      modelId: 'k3-agent',
+      kimiPlusId: 'ok-computer',
+    }
+  }
+  if (modelLower.includes('k2.8') || modelLower.includes('k28')) {
+    return {
+      scenario: 'SCENARIO_OK_COMPUTER',
+      modelId: 'k28-agent-preview',
+      kimiPlusId: 'ok-computer',
+    }
+  }
+  if (modelLower.includes('k2.6') || modelLower.includes('k2d6')) {
+    return { scenario: 'SCENARIO_K2D6' }
+  }
+  return { scenario: 'SCENARIO_CHAT', modelId: 'k2d6-chat' }
+}
 
 export function resolveKimiScenario(model: string): KimiScenario {
-  return model.toLowerCase().includes('k2.6') ? 'SCENARIO_K2D6' : 'SCENARIO_K2D5'
+  return resolveKimiChatModel(model).scenario
 }
 
 export function createKimiChatPayload(options: {
@@ -41,11 +73,13 @@ export function createKimiChatPayload(options: {
   enableWebSearch: boolean
   enableThinking: boolean
 }) {
-  const scenario = resolveKimiScenario(options.model)
+  const chatModel = resolveKimiChatModel(options.model)
+  const scenario = chatModel.scenario
 
   return {
     scenario,
     chat_id: '',
+    ...(chatModel.kimiPlusId ? { kimiplusId: chatModel.kimiPlusId } : {}),
     tools: options.enableWebSearch ? [{ type: 'TOOL_TYPE_SEARCH', search: {} }] : [],
     message: {
       parent_id: '',
@@ -57,7 +91,8 @@ export function createKimiChatPayload(options: {
       scenario,
     },
     options: {
-      thinking: options.enableThinking
+      thinking: options.enableThinking,
+      ...(chatModel.modelId ? { model: chatModel.modelId } : {}),
     }
   }
 }

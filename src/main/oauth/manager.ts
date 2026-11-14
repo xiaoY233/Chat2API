@@ -18,6 +18,7 @@ import {
 import { createAdapter, BaseOAuthAdapter } from './adapters'
 import { storeManager } from '../store/store'
 import { inAppLoginManager, InAppLoginResult } from './inAppLogin'
+import { resolveProviderSessionPartition } from './sessionPartitions'
 
 const DEFAULT_CALLBACK_PORT = 8311
 const DEFAULT_TIMEOUT = 300000 // 5 minutes
@@ -277,7 +278,8 @@ export class OAuthManager extends EventEmitter {
     providerId: string,
     providerType: ProviderType,
     timeout?: number,
-    proxyMode?: 'system' | 'none'
+    proxyMode?: 'system' | 'none',
+    options?: { silent?: boolean; partition?: string }
   ): Promise<OAuthResult> {
     this.emit('statusChange', 'pending')
     this.sendProgressToRenderer({
@@ -482,6 +484,72 @@ export class OAuthManager extends EventEmitter {
               ph_token: phToken,
             }
             console.log('[OAuthManager] Mimo: Final credentials prepared:', Object.keys(finalCredentials))
+          } else if (providerType === 'qwen-ai') {
+            const token =
+              collectedTokens.token ||
+              collectedTokens.accessToken ||
+              collectedTokens.tongyi_sso_ticket
+            const refreshToken =
+              collectedTokens.refresh_token || collectedTokens.refreshToken
+            const rawCookies = collectedTokens.cookies
+            const allCookies =
+              rawCookies && typeof rawCookies === 'object'
+                ? (rawCookies as unknown as Record<string, string>)
+                : {}
+            const cookies =
+              typeof rawCookies === 'string'
+                ? rawCookies
+                : Object.entries(allCookies)
+                    .filter(([, value]) => typeof value === 'string' && value)
+                    .map(([name, value]) => `${name}=${value}`)
+                    .join('; ')
+
+            if (!token) {
+              console.log('[OAuthManager] Qwen AI: missing access token, waiting for login...')
+              this.sendProgressToRenderer({
+                status: 'pending',
+                message: 'Waiting for Qwen AI login...',
+              })
+              isValidating = false
+              return
+            }
+
+            validationCredentials = { token }
+            finalCredentials = { token }
+            if (refreshToken) {
+              finalCredentials.refresh_token = refreshToken
+            }
+            if (cookies) {
+              finalCredentials.cookies = cookies
+            }
+            console.log(
+              '[OAuthManager] Qwen AI: final credentials prepared:',
+              Object.keys(finalCredentials),
+              'refresh_token:',
+              refreshToken ? 'yes' : 'no',
+            )
+          } else if (providerType === 'longcat') {
+            const cookieJar = collectedTokens.cookieJar || collectedTokens.cookie || ''
+            const allCookies = (collectedTokens.cookies as unknown as Record<string, string>) || {}
+            const passport = collectedTokens.passport_token_key || allCookies['passport_token_key'] || ''
+            const cookieHeader = cookieJar || (passport ? `passport_token_key=${passport}` : '')
+
+            if (!cookieHeader) {
+              console.log('[OAuthManager] LongCat: missing cookie jar, waiting for login...')
+              this.sendProgressToRenderer({
+                status: 'pending',
+                message: 'Waiting for LongCat login...',
+              })
+              isValidating = false
+              return
+            }
+
+            validationCredentials = { cookie: cookieHeader }
+            finalCredentials = {
+              passport_token_key: passport || cookieHeader,
+              cookie: cookieHeader,
+            }
+            console.log('[OAuthManager] LongCat: final credentials prepared:', Object.keys(finalCredentials))
           } else {
             validationCredentials = { ...collectedTokens }
             finalCredentials = { ...collectedTokens }
@@ -521,10 +589,18 @@ export class OAuthManager extends EventEmitter {
         providerType,
         timeout: timeout || DEFAULT_TIMEOUT,
         proxyMode,
+        silent: options?.silent,
+        partition: options?.partition,
       }).then((result) => {
         if (!result.success) {
           completeHandler(result)
         }
+      }).catch((error) => {
+        console.error('[OAuthManager] In-app login failed to start:', error)
+        completeHandler({
+          success: false,
+          error: error instanceof Error ? error.message : 'Login failed to start',
+        })
       })
     })
   }
@@ -534,6 +610,52 @@ export class OAuthManager extends EventEmitter {
    */
   cancelInAppLogin(): void {
     inAppLoginManager.cancel()
+  }
+
+  /**
+   * Silently re-acquire provider credentials using the retained login session.
+   *
+   * When a token captured at login time expires server-side, the browser
+   * session stored in the provider's partition is often still valid. Reloading
+   * the provider page in a hidden window lets the extractor capture a freshly
+   * minted token. Returns null when the session is no longer logged in.
+   */
+  async reacquireCredentials(
+    providerId: string,
+    providerType: ProviderType,
+    timeout = 30000
+  ): Promise<Record<string, string> | null> {
+    if (inAppLoginManager.isWindowOpen()) {
+      return null
+    }
+    try {
+      const partition = await resolveProviderSessionPartition(providerType)
+      const reacquire = this.startInAppLogin(
+        providerId,
+        providerType,
+        timeout,
+        undefined,
+        { silent: true, partition }
+      )
+      const result = await Promise.race([
+        reacquire,
+        new Promise<OAuthResult>((resolve) =>
+          setTimeout(
+            () => resolve({ success: false, providerId, providerType, error: 'Re-acquisition timed out' }),
+            timeout + 5000
+          )
+        ),
+      ])
+      if (result.success && result.credentials) {
+        console.log('[OAuthManager] Re-acquired credentials for', providerType)
+        return result.credentials
+      }
+      console.log('[OAuthManager] Silent re-acquisition failed:', result.error)
+      return null
+    } catch (error) {
+      console.error('[OAuthManager] Silent re-acquisition error:', error)
+      return null
+    }
   }
 
   /**

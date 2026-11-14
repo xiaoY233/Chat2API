@@ -12,7 +12,8 @@
 
 | 显示名称 | 实际模型 ID |
 | --- | --- |
-| GLM-5.1 | glm-5.1 |
+| GLM-5.3 | glm-5.3 |
+| GLM-5.3-flash | glm-5.3-flash |
 
 ## 适配状态
 
@@ -25,4 +26,4 @@
 1. 登录 `chatglm.cn`。
 2. 打开 DevTools -> Application -> Local Storage，复制 `chatglm_refresh_token`。
 3. 在供应商管理中添加 GLM 账号，填入 `refresh_token`。
-4. 使用默认模型 `GLM-5.1` 验证流式和非流式请求。
+4. 使用默认模型 `GLM-5.3` 验证流式和非流式请求。

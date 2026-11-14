@@ -17,6 +17,7 @@ import deepseekIcon from '@/assets/providers/deepseek.svg'
 import glmIcon from '@/assets/providers/glm.svg'
 import kimiIcon from '@/assets/providers/kimi.svg'
 import minimaxIcon from '@/assets/providers/minimax.svg'
+import longcatIcon from '@/assets/providers/longcat.svg'
 import qwenIcon from '@/assets/providers/qwen.svg'
 import zaiIcon from '@/assets/providers/zai.svg'
 
@@ -25,6 +26,7 @@ const providerIcons: Record<string, string> = {
   glm: glmIcon,
   kimi: kimiIcon,
   minimax: minimaxIcon,
+  longcat: longcatIcon,
   qwen: qwenIcon,
   'qwen-ai': qwenIcon,
   zai: zaiIcon,
@@ -136,6 +138,19 @@ export function LoginGuideDialog({
         t('oauth.step3'),
         'In Cookies → chat.z.ai',
         'Find token field (starts with "eyJ...")',
+        t('loginGuide.paste'),
+      ],
+    },
+    longcat: {
+      loginUrl: 'https://longcat.ai/chat',
+      steps: [
+        t('loginGuide.openWebsite', { provider: t('longcat.name') }),
+        'Or use the OAuth Login tab to sign in inside the app',
+        t('oauth.step1'),
+        t('oauth.step2'),
+        t('oauth.step3'),
+        'In Cookies → longcat.ai',
+        'Find passport_token_key and copy its value',
         t('loginGuide.paste'),
       ],
     },

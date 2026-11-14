@@ -12,6 +12,7 @@ import managementRoutes from './routes/management'
 import { proxyStatusManager } from './status'
 import { storeManager } from '../store/store'
 import { sessionManager } from './sessionManager'
+import { modelAvailability } from './modelAvailability'
 
 const SLOW_REQUEST_THRESHOLD_MS = 1500
 
@@ -289,6 +290,7 @@ export class ProxyServer {
           proxyStatusManager.start()
           proxyStatusManager.setPort(this.port)
           proxyStatusManager.setHost(this.host)
+          modelAvailability.start()
 
           storeManager.addLog('info', `Proxy server started successfully, listening on ${this.host}:${this.port}`)
 
@@ -324,6 +326,7 @@ export class ProxyServer {
     }
     
     sessionManager.destroy()
+    modelAvailability.stop()
 
     return new Promise((resolve) => {
       this.server!.close((err) => {

@@ -108,10 +108,12 @@ function generateSign(): { timestamp: string; nonce: string; sign: string } {
 export class GLMAdapter {
   private provider: Provider
   private account: Account
+  private toolCallingPlan?: ToolCallingPlan
 
-  constructor(provider: Provider, account: Account) {
+  constructor(provider: Provider, account: Account, toolCallingPlan?: ToolCallingPlan) {
     this.provider = provider
     this.account = account
+    this.toolCallingPlan = toolCallingPlan
   }
 
   private getRefreshToken(): string {
@@ -278,7 +280,7 @@ export class GLMAdapter {
   }
 
   private messagesToPrompt(messages: GLMMessage[], refs: any[] = [], toolsPrompt?: string, isMultiTurn: boolean = false): { role: string; content: any[] }[] {
-    const toolProfile = getProviderToolProfile('glm')
+    const toolProfile = getProviderToolProfile('glm', this.toolCallingPlan?.protocol)
     // Separate image refs and file refs
     const imageRefs = refs.filter((ref) => ref.width !== undefined || ref.height !== undefined || ref.image_url)
     const fileRefs = refs.filter((ref) => !ref.width && !ref.height && !ref.image_url)
@@ -736,6 +738,7 @@ export class GLMStreamHandler {
         created: this.created,
       })}\n\n`
     )
+    sentRole = true
 
     const parser = createParser({
       onEvent: (event: any) => {

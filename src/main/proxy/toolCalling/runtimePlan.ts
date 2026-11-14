@@ -1,5 +1,7 @@
+import type { ChatMessage } from '../types.ts'
 import type { ToolCallingConfig } from '../../../shared/toolCalling.ts'
 import type { NormalizedClientToolRequest } from './clientAdapters/types.ts'
+import { isCodingToolRequest } from './codingMode.ts'
 import { getProviderToolProfile } from './providerProfiles.ts'
 import type { ToolCallingPlan } from './types.ts'
 
@@ -10,6 +12,7 @@ export function buildToolCallingRuntimePlan(input: {
   model?: string
   config: ToolCallingConfig
   clientRequest: NormalizedClientToolRequest
+  messages?: ChatMessage[]
 }): ToolCallingPlan {
   const profile = getProviderToolProfile(input.providerId)
   const tools = input.clientRequest.tools
@@ -22,6 +25,7 @@ export function buildToolCallingRuntimePlan(input: {
 
   const allowedToolNames = forcedName ? new Set([forcedName]) : toolNames
   const allowedTools = forcedName ? tools.filter((tool) => tool.name === forcedName) : tools
+  const coding = isCodingToolRequest(input.messages ?? [], allowedTools)
   const disabledReason = getDisabledReason(
     input.config,
     allowedTools.length,
@@ -29,13 +33,14 @@ export function buildToolCallingRuntimePlan(input: {
     profile.managedSupport,
   )
   const mode = disabledReason ? 'disabled' : 'managed'
-  const protocol = profile.preferredManagedProtocol
+  const protocol = coding ? 'managed_bracket' : profile.preferredManagedProtocol
   const shouldInjectPrompt = mode === 'managed'
   const shouldParseResponse = mode === 'managed'
 
   return {
     mode,
     protocol,
+    coding,
     clientAdapterId: input.clientRequest.clientAdapterId,
     providerId: input.providerId,
     tools: allowedTools,
@@ -53,9 +58,10 @@ export function buildToolCallingRuntimePlan(input: {
       toolSource: input.clientRequest.toolSource,
       mode,
       protocol,
+      coding,
       toolCount: allowedTools.length,
       injected: shouldInjectPrompt,
-      reason: disabledReason ?? `managed_${input.config.mode}`,
+      reason: disabledReason ?? (coding ? 'managed_coding' : `managed_${input.config.mode}`),
       toolChoiceMode: input.clientRequest.toolChoice.mode,
       forcedToolName: forcedName,
       allowedToolNames: [...allowedToolNames],

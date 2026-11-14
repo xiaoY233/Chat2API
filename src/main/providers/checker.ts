@@ -1,5 +1,9 @@
 import axios, { AxiosError } from 'axios'
 import { getBuiltinProvider } from './builtin'
+import { LONGCAT_API_BASE, buildLongCatCookieHeader, longCatHeaders } from './longcatCookie'
+import { buildInceptionCookieHeader, fetchInceptionSessionToken, getInceptionClearance } from './inception'
+import { getQwenBaxiaSession, isQwenWafResponse } from '../proxy/adapters/qwen-baxia'
+import { normalizeCookieHeader } from '../oauth/qwenAiAuth'
 import type { Provider, ProviderCheckResult, Account } from '../../shared/types'
 import type { BuiltinProviderConfig } from '../store/types'
 
@@ -144,9 +148,16 @@ export class ProviderChecker {
       case 'qwen':
         return this.checkQwenToken(account.credentials.ticket)
       case 'qwen-ai':
-        return this.checkQwenAiToken(account.credentials.token)
+        return this.checkQwenAiToken(
+          account.credentials.token,
+          account.credentials.cookies || account.credentials.cookie
+        )
       case 'perplexity':
         return this.checkPerplexityToken(account.credentials.sessionToken || account.credentials.token)
+      case 'longcat':
+        return this.checkLongCatToken(account.credentials)
+      case 'inception':
+        return this.checkInceptionToken(account.credentials)
       case 'mimo':
         return this.checkMimoToken(
           account.credentials.service_token,
@@ -213,7 +224,7 @@ export class ProviderChecker {
       }
       
       if (response.status === 401 || response.data?.code === 40003 || response.data?.data?.biz_code === 40003) {
-        return { valid: false, error: 'Token expired or invalid' }
+        return { valid: false, error: response.data?.msg || 'Token expired or invalid, please log in again' }
       }
       
       return { valid: false, error: `Validation failed: ${response.data?.msg || response.data?.message || JSON.stringify(response.data)}` }
@@ -356,8 +367,12 @@ export class ProviderChecker {
           },
         }
       }
-      
-      return { valid: false, error: 'Token expired or invalid' }
+
+      const detail =
+        response.data?.message ||
+        response.data?.error_type ||
+        response.data?.msg
+      return { valid: false, error: detail || 'Token expired or invalid, please log in again' }
     } catch (error) {
       console.error('[Kimi] Validation error:', error)
       return {
@@ -537,37 +552,66 @@ export class ProviderChecker {
     }
   }
 
-  private static async checkQwenAiToken(token: string): Promise<TokenCheckResult> {
+  private static async checkQwenAiToken(
+    token: string,
+    cookies?: string
+  ): Promise<TokenCheckResult> {
     try {
+      const baxia = await getQwenBaxiaSession()
+      const cookieHeader = [baxia?.cookies, normalizeCookieHeader(cookies)]
+        .filter((value): value is string => !!value)
+        .join('; ')
+
       const response = await axios.get(
-        'https://chat.qwen.ai/api/v2/user',
+        'https://auth.qwen.ai/api/v2/auths/',
         {
           headers: {
             Authorization: `Bearer ${token}`,
             'Content-Type': 'application/json',
             Accept: 'application/json',
+            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
             source: 'web',
+            Version: '0.3.42',
+            'x-request-origin': 'https://chat.qwen.ai',
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36',
+            Origin: 'https://chat.qwen.ai',
+            ...(baxia
+              ? { 'bx-ua': baxia.bxUa, 'bx-umidtoken': baxia.bxUmidToken, 'bx-v': baxia.bxV }
+              : {}),
+            ...(cookieHeader ? { Cookie: cookieHeader } : {}),
           },
           timeout: CHECK_TIMEOUT,
           validateStatus: () => true,
+          transformResponse: [(data) => data],
         }
       )
 
-      if (response.status === 200 && response.data?.data) {
+      const contentType = String(response.headers?.['content-type'] || '')
+      if (isQwenWafResponse(contentType, typeof response.data === 'string' ? response.data : undefined)) {
+        return {
+          valid: false,
+          error: 'Qwen AI anti-bot (WAF) challenge could not be solved. Run Chat2API with a display and retry.',
+        }
+      }
+
+      const data = typeof response.data === 'string' ? JSON.parse(response.data) : response.data
+
+      if (response.status === 200 && data?.data) {
         return {
           valid: true,
           userInfo: {
-            name: response.data.data.name || response.data.data.email,
-            email: response.data.data.email,
+            name: data.data.name || data.data.email,
+            email: data.data.email,
           },
         }
       }
 
-      if (response.status === 401) {
+      if (response.status === 401 || data?.data?.code === 'unauthorized') {
         return { valid: false, error: 'Token expired or invalid' }
       }
 
-      return { valid: false, error: `Validation failed: HTTP ${response.status}` }
+      const detail = data?.data?.details || data?.data?.message || data?.msg
+      return { valid: false, error: `Validation failed: ${detail || `HTTP ${response.status}`}` }
     } catch (error) {
       return {
         valid: false,
@@ -592,6 +636,91 @@ export class ProviderChecker {
       userInfo: {
         name: 'Perplexity User',
       },
+    }
+  }
+
+  private static async checkLongCatToken(credentials: Record<string, string>): Promise<TokenCheckResult> {
+    const cookie = buildLongCatCookieHeader(credentials)
+    if (!cookie) {
+      return { valid: false, error: 'passport_token_key cookie is required' }
+    }
+
+    try {
+      const response = await axios({
+        method: 'GET',
+        url: `${LONGCAT_API_BASE}/api/v1/user-current`,
+        params: { t: Date.now() },
+        headers: longCatHeaders(cookie),
+        timeout: CHECK_TIMEOUT,
+        validateStatus: () => true,
+      })
+
+      if (response.status === 401 || response.status === 403) {
+        return { valid: false, error: 'Cookie expired or invalid, please log in again' }
+      }
+      if (response.status < 200 || response.status >= 300) {
+        return { valid: false, error: `Validation failed: HTTP ${response.status}` }
+      }
+
+      const payload = response.data?.data && typeof response.data.data === 'object'
+        ? response.data.data
+        : response.data
+      if (!payload || typeof payload !== 'object') {
+        return { valid: false, error: 'Unexpected response from LongCat' }
+      }
+
+      if (Number(payload.loginStatus) !== 1) {
+        return { valid: false, error: 'LongCat session is not logged in' }
+      }
+
+      return {
+        valid: true,
+        userInfo: {
+          name: payload.nickname || payload.userName || payload.user_name,
+          email: payload.email,
+        },
+      }
+    } catch (error) {
+      return {
+        valid: false,
+        error: error instanceof AxiosError ? error.message : 'Connection failed',
+      }
+    }
+  }
+
+  private static async checkInceptionToken(credentials: Record<string, string>): Promise<TokenCheckResult> {
+    try {
+      // Prefer the captured browser clearance cookie; fall back to solving a
+      // fresh Vercel checkpoint natively when it is missing or stale.
+      const stored = buildInceptionCookieHeader(credentials)
+      let token: string | null = null
+
+      if (stored) {
+        try {
+          token = await fetchInceptionSessionToken(stored)
+        } catch {
+          token = null
+        }
+      }
+
+      if (!token) {
+        const cookie = await getInceptionClearance()
+        token = await fetchInceptionSessionToken(cookie)
+      }
+
+      if (!token) {
+        return { valid: false, error: 'Inception session could not be created' }
+      }
+
+      return {
+        valid: true,
+        userInfo: { name: 'Inception Mercury' },
+      }
+    } catch (error) {
+      return {
+        valid: false,
+        error: error instanceof AxiosError ? error.message : 'Connection failed',
+      }
     }
   }
 

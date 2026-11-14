@@ -7,6 +7,9 @@ export type ToolProtocolId =
   | 'managed_xml'
   | 'anthropic_tool_use'
   | 'codex_responses'
+  | 'json_tool_calls'
+  | 'cherry_tool_use'
+  | 'xml_tool_tag'
 
 export type ToolSource = 'openai' | 'mcp'
 
@@ -45,6 +48,7 @@ export interface ToolCallDiagnostics {
   toolCount: number
   injected: boolean
   reason: string
+  coding?: boolean
   parserFormat?: ToolProtocolId | 'unknown'
   parsedToolCallCount?: number
   malformedReason?: string
@@ -58,6 +62,7 @@ export interface ToolCallDiagnostics {
 export interface ToolCallingPlan {
   mode: ToolCallingMode
   protocol: ToolProtocolId
+  coding: boolean
   clientAdapterId: string
   providerId: string
   tools: NormalizedToolDefinition[]

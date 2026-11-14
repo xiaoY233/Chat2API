@@ -96,6 +96,21 @@ export interface ChatCompletionRequest {
   reasoningEffort?: 'low' | 'medium' | 'high'
   /** Enable deep research mode (GLM specific) */
   deep_research?: boolean
+  /**
+   * Internal: delete the provider-side chat as soon as this request finishes,
+   * even when the account keeps sessions by default. Used by health probes so
+   * they do not fill the account's chat list.
+   */
+  deleteSession?: boolean
+  /** Image/video generation size or aspect ratio (e.g. "1024x1024" or "16:9") */
+  size?: string
+  /** Audio output options for speech synthesis models */
+  audio?: {
+    format?: string
+    voice?: string
+    optimize_text_preview?: boolean
+    [key: string]: unknown
+  }
   /** Tools for function calling */
   tools?: ChatCompletionTool[]
   /** Tool choice strategy */

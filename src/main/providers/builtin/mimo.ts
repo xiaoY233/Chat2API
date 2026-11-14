@@ -25,16 +25,20 @@ export const mimoConfig: BuiltinProviderConfig = {
     'X-Timezone': 'Asia/Shanghai',
   },
   enabled: true,
-  description: 'XiaomiMIMO - Xiaomi General Intelligence Foundation Model',
+  description: 'XiaomiMIMO - Xiaomi General Intelligence Foundation Model, includes V2.6 chat and V2.5 TTS models (TTS requires an API key)',
   supportedModels: [
-    'MiMo-V2.5-Pro',
-    'MiMo-V2.5',
-    'MiMo-V2-Flash',
+    'MiMo-V2.6-Pro',
+    'MiMo-V2.6-Flash',
+    'MiMo-V2.5-TTS',
+    'MiMo-V2.5-TTS-VoiceDesign',
+    'MiMo-V2.5-TTS-VoiceClone',
   ],
   modelMappings: {
-    'MiMo-V2.5-Pro': 'mimo-v2.5-pro',
-    'MiMo-V2.5': 'mimo-v2.5',
-    'MiMo-V2-Flash': 'mimo-v2-flash',
+    'MiMo-V2.6-Pro': 'mimo-v2.6-pro',
+    'MiMo-V2.6-Flash': 'mimo-v2.6-flash',
+    'MiMo-V2.5-TTS': 'mimo-v2.5-tts',
+    'MiMo-V2.5-TTS-VoiceDesign': 'mimo-v2.5-tts-voicedesign',
+    'MiMo-V2.5-TTS-VoiceClone': 'mimo-v2.5-tts-voiceclone',
   },
   credentialFields: [
     {
@@ -60,6 +64,14 @@ export const mimoConfig: BuiltinProviderConfig = {
       required: true,
       placeholder: 'Enter xiaomichatbot_ph from Cookie',
       helpText: 'Found in browser DevTools -> Application -> Cookies -> xiaomichatbot_ph',
+    },
+    {
+      name: 'api_key',
+      label: 'API Key (for TTS)',
+      type: 'password',
+      required: false,
+      placeholder: 'Enter a MiMo Open Platform API key (sk-...)',
+      helpText: 'Required for MiMo-V2.5-TTS models. Create one at platform.xiaomimimo.com; chat models keep using the cookies above.',
     },
   ],
 }

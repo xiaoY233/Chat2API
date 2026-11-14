@@ -314,6 +314,10 @@ class StoreManager {
             chatPath: builtinConfig.chatPath,
             supportedModels: builtinConfig.supportedModels,
             modelMappings: builtinConfig.modelMappings,
+            // Preserve a lifted gate ([]) across restarts; only seed it on the
+            // first run, when the stored provider has no value yet.
+            temporarilyUnavailableModels:
+              p.temporarilyUnavailableModels ?? builtinConfig.temporarilyUnavailableModels,
             headers: builtinConfig.headers,
             credentialFields: builtinConfig.credentialFields,
             description: builtinConfig.description,
@@ -355,6 +359,7 @@ class StoreManager {
           description: builtinConfig.description,
           supportedModels: builtinConfig.supportedModels,
           modelMappings: builtinConfig.modelMappings,
+          temporarilyUnavailableModels: builtinConfig.temporarilyUnavailableModels,
         }
         providers.push(newProvider)
         this.store!.set('providers', providers)

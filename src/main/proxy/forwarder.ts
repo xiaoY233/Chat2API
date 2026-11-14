@@ -7,7 +7,7 @@ import axios, { AxiosRequestConfig, AxiosResponse, AxiosError } from 'axios'
 import http2 from 'http2'
 import { PassThrough } from 'stream'
 import { Account, Provider } from '../store/types'
-import { ForwardResult, ChatCompletionRequest, ProxyContext } from './types'
+import { ForwardResult, ChatCompletionRequest, ChatCompletionResponse, ProxyContext } from './types'
 import { proxyStatusManager } from './status'
 import { storeManager } from '../store/store'
 import { DeepSeekAdapter } from './adapters/deepseek'
@@ -17,13 +17,22 @@ import { KimiAdapter, KimiStreamHandler } from './adapters/kimi'
 import { MimoAdapter, MimoStreamHandler } from './adapters/mimo'
 import { QwenAdapter, QwenStreamHandler } from './adapters/qwen'
 import { QwenAiAdapter, QwenAiStreamHandler } from './adapters/qwen-ai'
+import {
+  buildQwenMediaContent,
+  extractMediaPrompt,
+  qwenAiMediaKind,
+  type QwenMediaKind,
+} from './adapters/qwen-ai-media'
 import { ZaiAdapter, ZaiStreamHandler } from './adapters/zai'
 import { MiniMaxAdapter, MiniMaxStreamHandler } from './adapters/minimax'
+import { LongCatAdapter, LongCatStreamHandler } from './adapters/longcat'
+import { InceptionAdapter, InceptionStreamHandler } from './adapters/inception'
 import { PerplexityAdapter } from './adapters/perplexity'
 import { PerplexityStreamHandler } from './adapters/perplexity-stream'
 import { ToolCallingEngine } from './toolCalling/ToolCallingEngine'
 import type { ToolCallingTransformResult } from './toolCalling/types'
 import { sessionManager } from './sessionManager'
+import { isAuthFailure, isRenewableProvider, renewAccountCredentials } from './accountRenewal'
 import {
   createContextManagementService,
   SummaryGenerator,
@@ -104,6 +113,18 @@ export class RequestForwarder {
       matches: MimoAdapter.isMimoProvider,
       forward: (request, account, provider, actualModel, startTime) =>
         this.forwardMimo(request, account, provider, actualModel, startTime),
+    },
+    {
+      name: 'longcat',
+      matches: LongCatAdapter.isLongCatProvider,
+      forward: (request, account, provider, actualModel, startTime) =>
+        this.forwardLongCat(request, account, provider, actualModel, startTime),
+    },
+    {
+      name: 'inception',
+      matches: InceptionAdapter.isInceptionProvider,
+      forward: (request, account, provider, actualModel, startTime) =>
+        this.forwardInception(request, account, provider, actualModel, startTime),
     },
     {
       name: 'perplexity',
@@ -232,9 +253,15 @@ export class RequestForwarder {
     const maxRetries = config.retryCount
 
     let lastError: string | undefined
+    let currentAccount = account
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       if (attempt > 0) {
+        // Credentials may have been renewed during the previous attempt.
+        const fresh = storeManager.getAccountById(account.id, true)
+        if (fresh) {
+          currentAccount = fresh
+        }
         await this.delay(5000)
       }
 
@@ -243,7 +270,7 @@ export class RequestForwarder {
       if (config.contextManagement?.enabled && modifiedRequest.messages && modifiedRequest.messages.length > 0) {
         try {
           const summaryGenerator = this.createSummaryGenerator(
-            account,
+            currentAccount,
             provider,
             actualModel,
             context
@@ -290,13 +317,19 @@ export class RequestForwarder {
       }
 
       try {
-        const result = await this.doForward(modifiedRequest, account, provider, actualModel, context)
+        const result = await this.doForward(modifiedRequest, currentAccount, provider, actualModel, context)
 
         if (result.success) {
           return result
         }
 
         lastError = result.error
+
+        // An authentication failure was already given a chance to renew the
+        // token; repeating the request with the same stale account cannot help.
+        if (isAuthFailure(result.error)) {
+          break
+        }
 
         if (result.status && result.status < 500 && result.status !== 429) {
           break
@@ -327,7 +360,15 @@ export class RequestForwarder {
 
     const dedicatedForwarder = this.providerForwarders.find(forwarder => forwarder.matches(provider))
     if (dedicatedForwarder) {
-      return dedicatedForwarder.forward(request, account, provider, actualModel, startTime)
+      const result = await dedicatedForwarder.forward(request, account, provider, actualModel, startTime)
+      if (!result.success && isAuthFailure(result.error) && isRenewableProvider(provider.id)) {
+        const renewed = await renewAccountCredentials(account, provider)
+        if (renewed) {
+          console.log('[Forwarder] Renewed credentials for', provider.id, '- retrying request once')
+          return dedicatedForwarder.forward(request, renewed, provider, actualModel, startTime)
+        }
+      }
+      return result
     }
 
     try {
@@ -413,7 +454,7 @@ export class RequestForwarder {
         tools: transformed.tools,
       }
 
-      const adapter = new DeepSeekAdapter(provider, account)
+      const adapter = new DeepSeekAdapter(provider, account, transformed.plan)
       
       const { response, sessionId } = await adapter.chatCompletion({
         model: request.model,
@@ -526,7 +567,7 @@ export class RequestForwarder {
         tools: transformed.tools,
       }
 
-      const adapter = new GLMAdapter(provider, account)
+      const adapter = new GLMAdapter(provider, account, transformed.plan)
       const { response, conversationId } = await adapter.chatCompletion({
         model: actualModel,
         originalModel: request.model,
@@ -630,7 +671,7 @@ export class RequestForwarder {
     try {
       const transformed = this.transformRequestForPromptToolUse(request, provider)
       
-      const adapter = new KimiAdapter(provider, account)
+      const adapter = new KimiAdapter(provider, account, transformed.plan)
       const { response, conversationId } = await adapter.chatCompletion({
         model: actualModel,
         originalModel: request.model,
@@ -730,7 +771,7 @@ export class RequestForwarder {
         tools: transformed.tools,
       }
 
-      const adapter = new QwenAdapter(provider, account)
+      const adapter = new QwenAdapter(provider, account, transformed.plan)
       const { response, sessionId, reqId } = await adapter.chatCompletion({
         model: actualModel,
         originalModel: request.model,
@@ -816,10 +857,16 @@ export class RequestForwarder {
     actualModel: string,
     startTime: number
   ): Promise<ForwardResult> {
+    const mediaKind = qwenAiMediaKind(actualModel)
+    if (mediaKind) {
+      return this.forwardQwenAiMedia(request, account, provider, actualModel, mediaKind, startTime)
+    }
+
     try {
       const transformed = this.transformRequestForPromptToolUse(request, provider)
+      const deleteSession = request.deleteSession === true || shouldDeleteSession()
       
-      const adapter = new QwenAiAdapter(provider, account)
+      const adapter = new QwenAiAdapter(provider, account, transformed.plan)
       const { response, chatId, parentId } = await adapter.chatCompletion({
         model: actualModel,
         originalModel: request.model,
@@ -841,13 +888,13 @@ export class RequestForwarder {
         }
       }
 
-      const handler = new QwenAiStreamHandler(actualModel)
+      const handler = new QwenAiStreamHandler(actualModel, undefined, transformed.plan)
       handler.setChatId(chatId)
 
       if (request.stream) {
         const transformedStream = await handler.handleStream(response.data)
 
-        if (shouldDeleteSession()) {
+        if (deleteSession) {
           const originalEnd = transformedStream.end.bind(transformedStream)
           transformedStream.end = function(chunk?: any, encoding?: any, callback?: any) {
             adapter.deleteChat(chatId).catch(err => {
@@ -872,7 +919,7 @@ export class RequestForwarder {
 
       this.applyToolCallsToResponse(result, transformed)
 
-      if (shouldDeleteSession()) {
+      if (deleteSession) {
         await adapter.deleteChat(chatId)
       }
 
@@ -895,6 +942,111 @@ export class RequestForwarder {
   }
 
   /**
+   * Qwen AI image/video generation.
+   * Returns the generated media URL as OpenAI chat completion content so any
+   * chat client can display it without a separate media endpoint.
+   */
+  private async forwardQwenAiMedia(
+    request: ChatCompletionRequest,
+    account: Account,
+    provider: Provider,
+    actualModel: string,
+    kind: QwenMediaKind,
+    startTime: number
+  ): Promise<ForwardResult> {
+    try {
+      const prompt = extractMediaPrompt(request.messages as any)
+      if (!prompt) {
+        return {
+          success: false,
+          status: 400,
+          error: 'A non-empty user message is required for image/video generation',
+          latency: Date.now() - startTime,
+        }
+      }
+
+      const adapter = new QwenAiAdapter(provider, account)
+      const media = await adapter.mediaCompletion({
+        model: actualModel,
+        prompt,
+        kind,
+        size: (request as any).size,
+      })
+
+      const latency = Date.now() - startTime
+      if (!media.url) {
+        return {
+          success: false,
+          status: 502,
+          error: `Qwen ${kind} generation returned no media URL`,
+          latency,
+        }
+      }
+
+      const id = `chatcmpl-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+      const created = Math.floor(Date.now() / 1000)
+      const content = buildQwenMediaContent(kind, media.url)
+
+      if (request.stream) {
+        const transStream = new PassThrough()
+        const chunk = (delta: any, finishReason: string | null = null) =>
+          `data: ${JSON.stringify({
+            id,
+            model: request.model,
+            object: 'chat.completion.chunk',
+            choices: [{ index: 0, delta, finish_reason: finishReason }],
+            created,
+          })}\n\n`
+
+        transStream.write(chunk({ role: 'assistant', content: '' }))
+        transStream.write(chunk({ content }))
+        transStream.write(chunk({}, 'stop'))
+        transStream.end('data: [DONE]\n\n')
+
+        return {
+          success: true,
+          status: 200,
+          headers: { 'Content-Type': 'text/event-stream' },
+          stream: transStream,
+          skipTransform: true,
+          latency,
+          providerSessionId: media.chatId,
+        }
+      }
+
+      const body: ChatCompletionResponse = {
+        id,
+        object: 'chat.completion',
+        created,
+        model: request.model,
+        choices: [
+          {
+            index: 0,
+            message: { role: 'assistant', content },
+            finish_reason: 'stop',
+          },
+        ],
+        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+      }
+
+      return {
+        success: true,
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+        body,
+        latency,
+        providerSessionId: media.chatId,
+      }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+        latency: Date.now() - startTime,
+      }
+    }
+  }
+
+  /**
    * Z.ai Dedicated Forward
    */
   private async forwardZai(
@@ -909,7 +1061,7 @@ export class RequestForwarder {
     try {
       const transformed = this.transformRequestForPromptToolUse(request, provider)
       
-      const adapter = new ZaiAdapter(provider, account)
+      const adapter = new ZaiAdapter(provider, account, transformed.plan)
       const { response, chatId, requestId } = await adapter.chatCompletion({
         model: actualModel,
         originalModel: request.model,
@@ -942,7 +1094,7 @@ export class RequestForwarder {
           }
         : undefined
 
-      const handler = new ZaiStreamHandler(actualModel, deleteChatCallback)
+      const handler = new ZaiStreamHandler(actualModel, deleteChatCallback, transformed.plan)
       handler.setChatId(chatId)
       
       if (request.stream === true) {
@@ -1000,7 +1152,7 @@ export class RequestForwarder {
     try {
       const transformed = this.transformRequestForPromptToolUse(request, provider)
       
-      const adapter = new MiniMaxAdapter(provider, account)
+      const adapter = new MiniMaxAdapter(provider, account, transformed.plan)
       const { response, stream, chatId } = await adapter.chatCompletion({
         model: actualModel,
         originalModel: request.model,
@@ -1092,7 +1244,12 @@ export class RequestForwarder {
    * Mimo Dedicated Forward
    * Uses Mimo adapter for Xiaomi AI Studio
    */
-  private async forwardMimo(
+  /**
+   * MiMo TTS via the OpenAI-compatible MiMo Open Platform API.
+   * The upstream response is already OpenAI-compatible (including audio data),
+   * so it is relayed as-is.
+   */
+  private async forwardMimoTts(
     request: ChatCompletionRequest,
     account: Account,
     provider: Provider,
@@ -1100,13 +1257,64 @@ export class RequestForwarder {
     startTime: number
   ): Promise<ForwardResult> {
     try {
+      const adapter = new MimoAdapter(provider, account, transformed.plan)
+      const { response, body } = await adapter.ttsCompletion({
+        model: actualModel,
+        originalModel: request.originalModel,
+        messages: request.messages as any,
+        stream: request.stream,
+        audio: request.audio,
+      })
+
+      const latency = Date.now() - startTime
+
+      if (response.status >= 400) {
+        const detail = body ? JSON.stringify(body).slice(0, 500) : ''
+        return {
+          success: false,
+          status: response.status,
+          error: `HTTP ${response.status}${detail ? `: ${detail}` : ''}`,
+          latency,
+        }
+      }
+
+      return {
+        success: true,
+        status: response.status,
+        headers: this.extractHeaders(response.headers),
+        ...(request.stream
+          ? { stream: response.data, skipTransform: true }
+          : { body, skipTransform: true }),
+        latency,
+      }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+        latency: Date.now() - startTime,
+      }
+    }
+  }
+
+  private async forwardMimo(
+    request: ChatCompletionRequest,
+    account: Account,
+    provider: Provider,
+    actualModel: string,
+    startTime: number
+  ): Promise<ForwardResult> {
+    if (MimoAdapter.isTtsModel(actualModel)) {
+      return this.forwardMimoTts(request, account, provider, actualModel, startTime)
+    }
+
+    try {
       const transformed = this.transformRequestForPromptToolUse(request, provider)
       const transformedRequest = {
         ...request,
         messages: transformed.messages,
         tools: transformed.tools,
       }
-      const adapter = new MimoAdapter(provider, account)
+      const adapter = new MimoAdapter(provider, account, transformed.plan)
 
       const { response, conversationId, query } = await adapter.chatCompletion({
         model: actualModel,
@@ -1211,6 +1419,192 @@ export class RequestForwarder {
    * Perplexity Dedicated Forward
    * Uses Electron's net API to bypass Cloudflare protection
    */
+  /**
+   * LongCat Dedicated Forward
+   */
+  private async forwardLongCat(
+    request: ChatCompletionRequest,
+    account: Account,
+    provider: Provider,
+    actualModel: string,
+    startTime: number
+  ): Promise<ForwardResult> {
+    console.log('[forwardLongCat] actualModel:', actualModel)
+    try {
+      const transformed = this.transformRequestForPromptToolUse(request, provider)
+
+      const adapter = new LongCatAdapter(provider, account, transformed.plan)
+      const { response, conversationId } = await adapter.chatCompletion({
+        model: actualModel,
+        originalModel: request.model,
+        messages: transformed.messages as any,
+        stream: request.stream,
+        web_search: request.web_search,
+        reasoning_effort: request.reasoning_effort,
+      })
+
+      const latency = Date.now() - startTime
+
+      if (response.status >= 400) {
+        let errorMessage = `HTTP ${response.status}`
+        const body = response.data
+        if (body && typeof body.on === 'function') {
+          try {
+            body.destroy()
+          } catch {
+            // Ignore teardown errors
+          }
+        } else if (body && typeof body === 'object') {
+          errorMessage = body.message || body.error || errorMessage
+        }
+        return {
+          success: false,
+          status: response.status,
+          error: errorMessage,
+          latency,
+        }
+      }
+
+      const deleteSessionCallback = shouldDeleteSession()
+        ? async (id: string) => {
+            try {
+              await adapter.deleteSession(id)
+            } catch (error) {
+              console.error('[LongCat] Failed to delete session:', error)
+            }
+          }
+        : undefined
+
+      const handler = new LongCatStreamHandler(
+        actualModel,
+        conversationId,
+        deleteSessionCallback,
+        transformed.plan,
+      )
+
+      if (request.stream === true) {
+        const transformedStream = await handler.handleStream(response.data)
+
+        return {
+          success: true,
+          status: response.status,
+          headers: this.extractHeaders(response.headers),
+          stream: transformedStream,
+          skipTransform: true,
+          latency,
+          providerSessionId: conversationId,
+        }
+      }
+
+      const result = await handler.handleNonStream(response.data)
+
+      this.applyToolCallsToResponse(result, transformed)
+
+      if (deleteSessionCallback) {
+        await deleteSessionCallback(conversationId)
+      }
+
+      return {
+        success: true,
+        status: response.status,
+        headers: this.extractHeaders(response.headers),
+        body: result,
+        latency,
+        providerSessionId: conversationId,
+      }
+    } catch (error) {
+      const latency = Date.now() - startTime
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+        latency,
+      }
+    }
+  }
+
+  /**
+   * Inception (Mercury) Dedicated Forward
+   */
+  private async forwardInception(
+    request: ChatCompletionRequest,
+    account: Account,
+    provider: Provider,
+    actualModel: string,
+    startTime: number
+  ): Promise<ForwardResult> {
+    console.log('[forwardInception] actualModel:', actualModel)
+    try {
+      const transformed = this.transformRequestForPromptToolUse(request, provider)
+
+      const adapter = new InceptionAdapter(provider, account)
+      const { response } = await adapter.chatCompletion({
+        model: actualModel,
+        originalModel: request.model,
+        messages: transformed.messages as any,
+        stream: request.stream,
+        web_search: request.web_search,
+        reasoning_effort: request.reasoning_effort,
+      })
+
+      const latency = Date.now() - startTime
+
+      if (response.status >= 400) {
+        let errorMessage = `HTTP ${response.status}`
+        const body = response.data
+        if (body && typeof body.on === 'function') {
+          try {
+            body.destroy()
+          } catch {
+            // Ignore teardown errors
+          }
+        } else if (body && typeof body === 'object') {
+          errorMessage = body.message || body.error || errorMessage
+        }
+        return {
+          success: false,
+          status: response.status,
+          error: errorMessage,
+          latency,
+        }
+      }
+
+      const handler = new InceptionStreamHandler(actualModel, transformed.plan)
+
+      if (request.stream === true) {
+        const transformedStream = await handler.handleStream(response.data)
+
+        return {
+          success: true,
+          status: response.status,
+          headers: this.extractHeaders(response.headers),
+          stream: transformedStream,
+          skipTransform: true,
+          latency,
+        }
+      }
+
+      const result = await handler.handleNonStream(response.data)
+
+      this.applyToolCallsToResponse(result, transformed)
+
+      return {
+        success: true,
+        status: response.status,
+        headers: this.extractHeaders(response.headers),
+        body: result,
+        latency,
+      }
+    } catch (error) {
+      const latency = Date.now() - startTime
+      console.error('[Inception] Forward error:', error)
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+        latency,
+      }
+    }
+  }
+
   private async forwardPerplexity(
     request: ChatCompletionRequest,
     account: Account,
@@ -1222,7 +1616,7 @@ export class RequestForwarder {
     try {
       const transformed = this.transformRequestForPromptToolUse(request, provider)
       
-      const adapter = new PerplexityAdapter(provider, account)
+      const adapter = new PerplexityAdapter(provider, account, transformed.plan)
       
       const { stream, sessionId } = await adapter.chatCompletion({
         model: actualModel,
@@ -1244,7 +1638,7 @@ export class RequestForwarder {
             }
           : undefined
 
-        const handler = new PerplexityStreamHandler(actualModel, sessionId, deleteSessionCallback, adapter)
+        const handler = new PerplexityStreamHandler(actualModel, sessionId, deleteSessionCallback, adapter, transformed.plan)
         const transformedStream = await handler.handleStream(stream)
         
         return {
@@ -1258,7 +1652,7 @@ export class RequestForwarder {
         }
       }
 
-      const handler = new PerplexityStreamHandler(actualModel, sessionId, undefined, adapter)
+      const handler = new PerplexityStreamHandler(actualModel, sessionId, undefined, adapter, transformed.plan)
       const result = await handler.handleNonStream(stream)
       
       this.applyToolCallsToResponse(result, transformed)

@@ -12,16 +12,16 @@
 
 | 显示名称 | 实际模型 ID |
 | --- | --- |
-| Qwen3.6 | Qwen |
-| Qwen3.7-Max | Qwen3.7-Max |
-| Qwen3.5-Flash | Qwen3.5-Flash |
-| Qwen3-Max | Qwen3-Max |
-| Qwen3-Max-Thinking-Preview | Qwen3-Max-Thinking-Preview |
-| Qwen3-Coder | Qwen3-Coder |
+| Qwen3.8 | Qwen |
+| Qwen3.8-Max | Qwen3.8-Max |
+| Qwen3.8-Flash | Qwen3.8-Flash |
+| Qwen3.8-Omni-Flash | Qwen3.8-Omni-Flash |
 
 ## 适配状态
 
 已适配：国内版网页对话、流式对话、非流式对话、多轮会话、账号级批量清理对话记录、文件记录清理。
+
+说明：国内版网页的图像/视频生成走独立的 `ai_tool_scene` + `biz_data` 协议，当前尚未适配；需要图像/视频生成请使用 Qwen AI (国际版) 供应商。
 
 后续验证：官网模型名称、批量删除会话接口、附件/文件记录清理字段。
 

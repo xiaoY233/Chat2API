@@ -5,8 +5,10 @@
 
 import { BrowserWindow, session, Session } from 'electron'
 import { EventEmitter } from 'events'
+import axios from 'axios'
 import { ProviderType } from './types'
 import { TokenExtractionConfig, getTokenExtractionConfig, TokenSource } from './tokenExtractionConfig'
+import { decodeJwtPayload, getJwtExpiryMs } from './qwenAiAuth'
 
 export interface InAppLoginResult {
   success: boolean
@@ -17,6 +19,7 @@ export interface InAppLoginResult {
 export interface TokenFoundEvent {
   key: string
   value: string
+  allCookies?: Record<string, string>
 }
 
 export interface InAppLoginOptions {
@@ -24,10 +27,23 @@ export interface InAppLoginOptions {
   providerType: ProviderType
   timeout?: number
   proxyMode?: 'system' | 'none'
+  /** Open the window hidden (used for silent credential re-acquisition). */
+  silent?: boolean
+  /** Override the persistent session partition (defaults to a per-provider one). */
+  partition?: string
 }
 
 const DEFAULT_TIMEOUT = 300000 // 5 minutes
 const MIN_LOGIN_TIME = 5000 // Minimum time before checking tokens (5 seconds)
+
+function readDotPath(input: unknown, path: string): unknown {
+  return path.split('.').reduce<unknown>((value, key) => {
+    if (value && typeof value === 'object' && key in (value as Record<string, unknown>)) {
+      return (value as Record<string, unknown>)[key]
+    }
+    return undefined
+  }, input)
+}
 
 export class InAppLoginManager extends EventEmitter {
   private loginWindow: BrowserWindow | null = null
@@ -39,6 +55,8 @@ export class InAppLoginManager extends EventEmitter {
   private resolvePromise: ((result: InAppLoginResult) => void) | null = null
   private loginStartTime: number = 0
   private lastTokenCheckTime: number = 0
+  private lastCookieJarProbeKey: string = ''
+  private lastCookieJarProbeAt: number = 0
   private options: InAppLoginOptions | null = null
 
   constructor() {
@@ -87,7 +105,9 @@ export class InAppLoginManager extends EventEmitter {
   private createLoginWindow(): void {
     if (!this.config) return
 
-    const partition = `persist:oauth-${Date.now()}`
+    // A deterministic partition per provider keeps the login session on disk so
+    // expired tokens can later be re-acquired silently without another login.
+    const partition = this.options?.partition || `persist:oauth-${this.options?.providerType}`
     this.loginSession = session.fromPartition(partition)
 
     if (this.options?.proxyMode === 'none') {
@@ -97,8 +117,8 @@ export class InAppLoginManager extends EventEmitter {
     }
 
     this.loginWindow = new BrowserWindow({
-      width: 500,
-      height: 700,
+      width: this.config.windowWidth || 500,
+      height: this.config.windowHeight || 700,
       show: false,
       webPreferences: {
         nodeIntegration: false,
@@ -111,10 +131,12 @@ export class InAppLoginManager extends EventEmitter {
       autoHideMenuBar: true,
     })
 
-    this.loginWindow.once('ready-to-show', () => {
-      this.loginWindow?.show()
-      this.emit('status', { status: 'ready', message: 'Login window ready - please log in' })
-    })
+    if (!this.options?.silent) {
+      this.loginWindow.once('ready-to-show', () => {
+        this.loginWindow?.show()
+        this.emit('status', { status: 'ready', message: 'Login window ready - please log in' })
+      })
+    }
 
     this.loginWindow.on('closed', () => {
       if (!this.isCompleted) {
@@ -297,15 +319,31 @@ export class InAppLoginManager extends EventEmitter {
       // JWT format (3 parts)
       if (parts.length === 3) {
         try {
-          const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString())
+          const payload = decodeJwtPayload(value)
+          if (!payload) {
+            console.log('[InAppLogin] Token rejected: invalid JWT')
+            return false
+          }
           console.log('[InAppLogin] JWT payload:', payload)
-          
+
           // Reject guest accounts
-          if (payload.email && payload.email.includes('@guest.com')) {
+          if (typeof payload.email === 'string' && payload.email.includes('@guest.com')) {
             console.log('[InAppLogin] Token rejected: guest account')
             return false
           }
-          
+
+          // An expired access token is not usable. Accepting it here made the
+          // silent re-acquisition hand the stale localStorage value back to the
+          // proxy instead of waiting for the page to mint a fresh one.
+          const expiry = getJwtExpiryMs(value)
+          if (expiry !== null && expiry <= Date.now()) {
+            console.log(
+              '[InAppLogin] Token rejected: JWT expired at',
+              new Date(expiry).toISOString(),
+            )
+            return false
+          }
+
           if (payload && (payload.app_id || payload.sub || payload.exp || payload.id || payload.user_id || payload.uid || payload.email)) {
             console.log('[InAppLogin] Token accepted as valid JWT')
             return true
@@ -363,10 +401,18 @@ export class InAppLoginManager extends EventEmitter {
 
     const localStorageSources = this.config.tokenSources.filter((s) => s.type === 'localStorage')
     const cookieSources = this.config.tokenSources.filter((s) => s.type === 'cookie')
+    const cookieJarSources = this.config.tokenSources.filter((s) => s.type === 'cookieJar')
 
-    if (localStorageSources.length === 0 && cookieSources.length === 0) return
+    if (localStorageSources.length === 0 && cookieSources.length === 0 && cookieJarSources.length === 0) return
 
-    console.log('[InAppLogin] Checking tokens, localStorage:', localStorageSources.map(s => s.key), 'cookies:', cookieSources.map(s => s.key))
+    console.log(
+      '[InAppLogin] Checking tokens, localStorage:',
+      localStorageSources.map(s => s.key),
+      'cookies:',
+      cookieSources.map(s => s.key),
+      'cookieJar:',
+      cookieJarSources.map(s => s.key),
+    )
 
     try {
       for (const source of localStorageSources) {
@@ -407,8 +453,22 @@ export class InAppLoginManager extends EventEmitter {
         if (value && value.startsWith('{') && value.endsWith('}')) {
           try {
             const parsed = JSON.parse(value)
-            if (parsed.value) {
-              tokenValue = parsed.value
+            // Qwen AI stores { version, stateId, token, expiresAt, ... } in
+            // qwen_access_token_state; other providers wrap the value as
+            // { value } or { access_token }.
+            tokenValue = parsed.token || parsed.access_token || parsed.value || null
+            if (
+              tokenValue &&
+              typeof parsed.expiresAt === 'number' &&
+              parsed.expiresAt <= Date.now()
+            ) {
+              console.log(
+                '[InAppLogin] Token rejected: stored state expired at',
+                new Date(parsed.expiresAt).toISOString(),
+              )
+              continue
+            }
+            if (tokenValue) {
               console.log('[InAppLogin] Extracted token from JSON:', tokenValue.substring(0, 50) + '...')
             }
           } catch (e) {
@@ -418,7 +478,10 @@ export class InAppLoginManager extends EventEmitter {
 
         if (tokenValue && typeof tokenValue === 'string' && this.isValidToken(tokenValue)) {
           console.log('[InAppLogin] Token found and valid from localStorage:', source.key)
-          const emitKey = source.key === '_token' ? 'token' : source.key
+          const emitKey =
+            source.key === '_token' || source.key === 'qwen_access_token_state'
+              ? 'token'
+              : source.key
           this.emit('tokenFound', { key: emitKey, value: tokenValue })
         }
       }
@@ -461,7 +524,7 @@ export class InAppLoginManager extends EventEmitter {
                 allCookiesObj[c.name] = c.value
               }
             }
-            this.emit('tokenFound', { key: source.key, value: cookie.value, allCookies: allCookiesObj })
+            this.emitToken({ key: source.key, value: cookie.value, allCookies: allCookiesObj })
           } else {
             console.log('[InAppLogin] Cookie token is invalid:', source.key, cookie.value ? cookie.value.substring(0, 50) : 'null')
           }
@@ -469,9 +532,115 @@ export class InAppLoginManager extends EventEmitter {
           console.log('[InAppLogin] Cookie not found:', source.key)
         }
       }
+
+      for (const source of cookieJarSources) {
+        if (this.isCompleted || !this.loginSession) continue
+
+        const cookies = await this.collectCookieJar(source.cookieDomains)
+        if (cookies.length === 0) {
+          console.log('[InAppLogin] Cookie jar is empty:', source.key)
+          continue
+        }
+
+        const allCookiesObj: Record<string, string> = {}
+        for (const cookie of cookies) {
+          allCookiesObj[cookie.name] = cookie.value
+        }
+        const header = cookies.map((cookie) => `${cookie.name}=${cookie.value}`).join('; ')
+
+        if (source.probeUrl) {
+          let loggedIn = false
+          try {
+            loggedIn = await this.probeCookieJar(source, header)
+          } catch (error) {
+            console.log('[InAppLogin] Cookie jar probe failed:', error)
+          }
+          if (!loggedIn) {
+            console.log('[InAppLogin] Cookie jar session not logged in yet:', source.key)
+            continue
+          }
+        }
+
+        console.log(
+          '[InAppLogin] Cookie jar session confirmed:',
+          source.key,
+          cookies.map((cookie) => cookie.name),
+        )
+        this.emitToken({ key: source.key, value: header, allCookies: allCookiesObj })
+      }
     } catch (error) {
       console.error('[InAppLogin] Error in checkForTokens:', error)
     }
+  }
+
+  private async collectCookieJar(domains?: string[]): Promise<Array<{ name: string; value: string }>> {
+    if (!this.loginSession) return []
+
+    const collected = new Map<string, { name: string; value: string }>()
+    const push = (cookies: Array<{ name: string; value: string }>) => {
+      for (const cookie of cookies) {
+        if (cookie.value && !collected.has(cookie.name)) {
+          collected.set(cookie.name, { name: cookie.name, value: cookie.value })
+        }
+      }
+    }
+
+    const targetDomains = domains && domains.length > 0 ? domains : (this.config?.targetDomains || [])
+    if (targetDomains.length === 0) {
+      push(await this.loginSession.cookies.get({}))
+    } else {
+      for (const domain of targetDomains) {
+        try {
+          push(await this.loginSession.cookies.get({ domain }))
+        } catch (error) {
+          console.log(`[InAppLogin] Error getting cookie jar for domain ${domain}:`, error)
+        }
+      }
+    }
+
+    return Array.from(collected.values())
+  }
+
+  private async probeCookieJar(source: TokenSource, cookieHeader: string): Promise<boolean> {
+    if (!source.probeUrl) return true
+
+    const probeKey = `${source.key}:${cookieHeader}`
+    const now = Date.now()
+    if (probeKey === this.lastCookieJarProbeKey && now - this.lastCookieJarProbeAt < 2000) {
+      return false
+    }
+    this.lastCookieJarProbeKey = probeKey
+    this.lastCookieJarProbeAt = now
+
+    const response = await axios.get(source.probeUrl, {
+      params: { t: Date.now() },
+      headers: {
+        Accept: 'application/json',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+        'X-Requested-With': 'XMLHttpRequest',
+        Cookie: cookieHeader,
+      },
+      timeout: 15000,
+      validateStatus: () => true,
+    })
+
+    if (response.status < 200 || response.status >= 300) {
+      console.log('[InAppLogin] Cookie jar probe HTTP status:', response.status)
+      return false
+    }
+
+    const path = source.probeLoginStatusPath || 'data.loginStatus'
+    const value = readDotPath(response.data, path)
+    console.log('[InAppLogin] Cookie jar probe login status:', value)
+    return Number(value) === 1
+  }
+
+  private emitToken(event: TokenFoundEvent): void {
+    if (this.foundTokens.get(event.key) === event.value) {
+      return
+    }
+    this.foundTokens.set(event.key, event.value)
+    this.emit('tokenFound', event)
   }
 
   completeWithSuccess(credentials: Record<string, string>): void {

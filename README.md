@@ -23,7 +23,7 @@
 </p>
 
 <p align="center">
-  Chat2API enables zero-cost access to leading AI models by leveraging official web UIs. It supports providers such as DeepSeek, GLM, Kimi, MiniMax, Qwen, and Z.ai, and seamlessly integrates with tools like openlcaw, Cline, and Roo-Code — making any OpenAI-compatible client work out of the box.
+  Chat2API enables zero-cost access to leading AI models by leveraging official web UIs. It supports providers such as DeepSeek, GLM, Kimi, MiniMax, LongCat, Qwen, and Z.ai, and seamlessly integrates with tools like openlcaw, Cline, and Roo-Code — making any OpenAI-compatible client work out of the box.
 </p>
 
 ![Product Preview](docs/screenshots/preview.png)
@@ -31,7 +31,7 @@
 ## ✨ Features
 
 - OpenAI Compatible API: Provides standard OpenAI-compatible API endpoints for seamless integration
-- Multi-Provider Support: Connect DeepSeek, GLM, Kimi, MiniMax, Perplexity 🆕, Qwen, Z.ai and more
+- Multi-Provider Support: Connect DeepSeek, GLM, Inception (Mercury), Kimi, MiniMax, LongCat, Perplexity, Qwen, Z.ai and more
 - 🆕 Context Management: Intelligent conversation context management with sliding window, token limit, and summary strategies
 - 🆕 Function Calling Support: Universal tool calling capability for all models via prompt engineering, compatible with Cherry Studio, Kilo Code, and other clients
 - 🆕 Model Mapping: Flexible model name mapping with wildcard support and preferred provider/account selection
@@ -49,23 +49,25 @@
 
 | Provider         | Auth Type     | OAuth | Models                                                                                                                                                                                                                                          |
 | ---------------- | ------------- | ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| DeepSeek         | User Token    | Yes   | deepseek-v4-flash, deepseek-v4-pro                                                                                                                                                                                                              |
-| GLM              | Refresh Token | Yes   | GLM-5.1                                                                                                                                                                                                                                         |
-| Kimi             | JWT Token     | Yes   | Kimi-K2.6                                                                                                                                                                                                                                       |
-| MiniMax          | JWT Token     | Yes   | MiniMax-M2.7                                                                                                                                                                                                                                    |
-| Mimo             | Cookie        | Yes   | MiMo-V2.5-Pro, MiMo-V2.5, MiMo-V2-Flash                                                                                                                                                                                                         |
-| Perplexity       | Cookie        | Yes   | Auto                                                                                                                                                                                                                                           |
-| Qwen (CN)        | SSO Ticket    | Yes   | Qwen3.6, Qwen3.7-Max, Qwen3.5-Flash, Qwen3-Max, Qwen3-Max-Thinking-Preview, Qwen3-Coder                                                                                                                                                         |
-| Qwen AI (Global) | JWT Token     | Yes   | Qwen3.7-Max, Qwen3.6-Plus, Qwen3.6-35B-A3B, Qwen3.6-27B, Qwen3-Coder                                                                                                                                                                           |
-| Z.ai             | JWT Token     | Yes   | Temporarily unavailable due to frontend captcha risk control                                                                                                                                                                                    |
+| DeepSeek         | User Token    | Yes   | deepseek-v4.1-flash, deepseek-v4-pro |
+| GLM              | Refresh Token | Yes   | GLM-5.3, GLM-5.3-flash |
+| Kimi             | JWT Token     | Yes   | Kimi-K2.6 |
+| MiniMax          | JWT Token     | Yes   | MiniMax-M3.1-Flash, MiniMax-M3, MiniMax-M2.7 |
+| Mimo             | Cookie        | Yes   | MiMo-V2.6-Pro, MiMo-V2.6-Flash, MiMo-V2.5-TTS, MiMo-V2.5-TTS-VoiceDesign, MiMo-V2.5-TTS-VoiceClone |
+| LongCat          | Cookie        | Yes   | LongCat, LongCat-Search |
+| Inception        | Cookie        | No    | mercury-3 |
+| Perplexity       | Cookie        | Yes   | Auto |
+| Qwen (CN)        | SSO Ticket    | Yes   | Qwen3.8, Qwen3.8-Max, Qwen3.8-Flash, Qwen3.8-Omni-Flash |
+| Qwen AI (Global) | JWT Token     | Yes   | Qwen4-Max-Preview, Qwen3.8-Max, Qwen3.8-Plus, Qwen3.8-Flash, Qwen3.8-Omni-Flash, Qwen-Image-3.0, Wan3.0-Video |
+| Z.ai             | JWT Token     | Yes   | GLM-5.3, GLM-5.3-flash, GLM-5.2 |
 
-Provider adaptation notes and manual model-addition guides are in [docs/providers](docs/providers/README.md).
+Provider adaptation notes and manual model-addition guides are in [docs/providers](docs/providers/README.md). MiMo TTS models require an optional `api_key` account credential; Qwen image/video generation is available through Qwen AI (Global). Z.ai generates its captcha parameter automatically through a hidden captcha window. `Qwen4-Max-Preview` is temporarily gated: it stays listed and mapped, but requests answer `503 model_unavailable` until a verified bare no-system call returns a non-empty answer.
 
 ## 📥 Installation
 
 ### Download
 
-Download the latest release from [GitHub Releases](https://github.com/xiaoY233/Chat2API/releases):
+Download the latest release from [GitHub Releases](https://github.com/JustScriptzz/Chat2API/releases):
 
 | Platform              | Download                                |
 | --------------------- | --------------------------------------- |
@@ -84,7 +86,7 @@ Download the latest release from [GitHub Releases](https://github.com/xiaoY233/C
 
 ```bash
 # Clone the repository
-git clone https://github.com/xiaoY233/Chat2API.git
+git clone https://github.com/JustScriptzz/Chat2API.git
 cd Chat2API
 
 # Install dependencies
@@ -148,7 +150,7 @@ client = OpenAI(
 )
 
 response = client.chat.completions.create(
-    model="deepseek-v4-flash",
+    model="deepseek-v4.1-flash",
     messages=[
         {"role": "user", "content": "Hello, who are you?"}
     ]
@@ -242,7 +244,23 @@ sudo xattr -rd com.apple.quarantine "/Applications/Chat2API.app"
 
 ### How to update?
 
-Check for updates in the **About** page, or download the latest version from [GitHub Releases](https://github.com/xiaoY233/Chat2API/releases).
+Check for updates in the **About** page, or download the latest version from [GitHub Releases](https://github.com/JustScriptzz/Chat2API/releases).
+
+### Linux: `glxQueryExtensionsString returned NULL` / `Initialization of all EGL display types failed`
+
+Chromium tries to initialize ANGLE through GLX/EGL at startup. Those errors mean the GL stack is not usable — common under Xvfb, WSL, VMs, remote X sessions, and some NVIDIA/Xwayland setups. A `/dev/dri` render node can exist even when GLX/EGL is broken, so on Linux the app now uses software rendering (SwiftShader) by default. To opt back into hardware GL:
+
+```bash
+CHAT2API_DISABLE_GPU=0 ./Chat2API   # force hardware GL
+CHAT2API_DISABLE_GPU=1 ./Chat2API   # force software rendering
+```
+
+The startup log prints the running version and the built-in Qwen AI model list, which makes it easy to confirm what a build contains:
+
+```
+[App] Chat2API v1.5.2 (linux/x64)
+[Providers] qwen-ai models: Qwen4-Max-Preview, Qwen3.8-Max, ...
+```
 
 ## 🤝 Contributing
 

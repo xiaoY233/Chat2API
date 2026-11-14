@@ -7,6 +7,8 @@ export { BaseOAuthAdapter } from './base'
 export { DeepSeekAdapter } from './deepseek'
 export { GLMAdapter } from './glm'
 export { KimiAdapter } from './kimi'
+export { LongCatAdapter } from './longcat'
+export { InceptionAdapter } from './inception'
 export { MimoAdapter } from './mimo'
 export { MiniMaxAdapter } from './minimax'
 export { PerplexityAdapter } from './perplexity'
@@ -17,6 +19,8 @@ import { BaseOAuthAdapter } from './base'
 import { DeepSeekAdapter } from './deepseek'
 import { GLMAdapter } from './glm'
 import { KimiAdapter } from './kimi'
+import { LongCatAdapter } from './longcat'
+import { InceptionAdapter } from './inception'
 import { MimoAdapter } from './mimo'
 import { MiniMaxAdapter } from './minimax'
 import { PerplexityAdapter } from './perplexity'
@@ -39,6 +43,10 @@ export function createAdapter(
       return new GLMAdapter(config)
     case 'kimi':
       return new KimiAdapter(config)
+    case 'longcat':
+      return new LongCatAdapter(config)
+    case 'inception':
+      return new InceptionAdapter(config)
     case 'mimo':
       return new MimoAdapter(config)
     case 'minimax':
@@ -66,6 +74,10 @@ export function getSupportedAuthMethods(providerType: ProviderType): string[] {
     case 'glm':
       return ['manual']
     case 'kimi':
+      return ['manual']
+    case 'longcat':
+      return ['manual', 'cookie']
+    case 'inception':
       return ['manual']
     case 'mimo':
       return ['manual', 'cookie']

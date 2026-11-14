@@ -13,6 +13,9 @@ import FormData from 'form-data'
 import { Account, Provider } from '../../store/types'
 import { toolsToSystemPrompt, TOOL_WRAP_HINT, hasToolPromptInjected, shouldInjectToolPrompt } from '../utils/tools'
 import { parseToolCallsFromText } from '../utils/toolParser'
+import { getProviderToolProfile } from '../toolCalling/providerProfiles'
+import { ToolStreamParser } from '../toolCalling/ToolStreamParser'
+import type { ToolCallingPlan } from '../toolCalling/types'
 import { 
   createToolCallState, 
   processStreamContent, 
@@ -184,12 +187,14 @@ export class MiniMaxAdapter {
   private realUserID: string
   private model: string
   private created: number
+  private toolCallingPlan?: ToolCallingPlan
 
-  constructor(provider: Provider, account: Account) {
+  constructor(provider: Provider, account: Account, toolCallingPlan?: ToolCallingPlan) {
     this.provider = provider
     this.account = account
+    this.toolCallingPlan = toolCallingPlan
     this.rawToken = account.credentials.token || ''
-    this.model = 'MiniMax-M2.7'
+    this.model = 'MiniMax-M3.1-Flash'
     this.created = unixTimestamp()
 
     // Check if realUserID is provided separately in credentials
@@ -426,21 +431,29 @@ export class MiniMaxAdapter {
   }
 
   private messagesPrepare(messages: MiniMaxMessage[], toolsPrompt?: string, isMultiTurn: boolean = false): any {
+    const toolProfile = getProviderToolProfile('minimax', this.toolCallingPlan?.protocol)
     // Process messages including tool calls and tool responses
     const processedMessages = messages.map(msg => {
       // Handle tool calls in assistant message
       if (msg.role === 'assistant' && msg.tool_calls && msg.tool_calls.length > 0) {
-        const toolCallsText = msg.tool_calls.map(tc => {
-          return `[call:${tc.function.name}]${tc.function.arguments}[/call]`
-        }).join('\n')
-        return { ...msg, content: `[function_calls]\n${toolCallsText}\n[/function_calls]` }
+        return {
+          ...msg,
+          content: toolProfile.formatAssistantToolCalls(msg.tool_calls.map(tc => ({
+            id: tc.id,
+            name: tc.function.name,
+            arguments: tc.function.arguments,
+          }))),
+        }
       }
       // Handle tool response message
       if (msg.role === 'tool' && msg.tool_call_id) {
         return { 
           ...msg, 
           role: 'user' as const,
-          content: `[TOOL_RESULT for ${msg.tool_call_id}] ${msg.content || ''}` 
+          content: toolProfile.formatToolResult({
+            toolCallId: msg.tool_call_id,
+            content: msg.content || '',
+          }),
         }
       }
       return msg
@@ -548,7 +561,7 @@ export class MiniMaxAdapter {
   async chatCompletion(request: ChatCompletionRequest): Promise<{ response: AxiosResponse | null; stream: { session: ClientHttp2Session; stream: ClientHttp2Stream } | null; chatId: string }> {
     console.log('[MiniMax] chatCompletion called with model:', request.model, 'stream:', request.stream)
     
-    this.model = request.model || 'MiniMax-M2.7'
+    this.model = request.model || 'MiniMax-M3.1-Flash'
     this.created = unixTimestamp()
     
     const deviceInfo = await this.requestDeviceInfo()
@@ -720,6 +733,9 @@ export class MiniMaxAdapter {
     const maxPolls = 120
     const pollInterval = 500
     const toolCallState = createToolCallState()
+    const toolStreamParser = this.toolCallingPlan?.shouldParseResponse
+      ? new ToolStreamParser(this.toolCallingPlan)
+      : undefined
     let sentRole = false
     let sentThinkingRole = false
     let lastMsgId = ''
@@ -810,13 +826,15 @@ export class MiniMaxAdapter {
               const newChunk = currentContent.substring(lastContent.length)
               
               const baseChunk = createBaseChunk(chatId.toString(), model, created)
-              const { chunks: outputChunks } = processStreamContent(
-                newChunk, 
-                toolCallState, 
-                baseChunk, 
-                !sentRole,
-                'minimax'
-              )
+              const outputChunks = toolStreamParser
+                ? toolStreamParser.push(newChunk, baseChunk, !sentRole)
+                : processStreamContent(
+                    newChunk,
+                    toolCallState,
+                    baseChunk,
+                    !sentRole,
+                    'minimax'
+                  ).chunks
 
               for (const outChunk of outputChunks) {
                 transStream.write(`data: ${JSON.stringify(outChunk)}\n\n`)
@@ -833,13 +851,17 @@ export class MiniMaxAdapter {
               console.log('[MiniMax] Stream completed - chat_status: 2, polls:', pollCount, 'content length:', lastContent.length, 'thinking length:', lastThinkingContent.length)
               
               const baseChunk = createBaseChunk(chatId.toString(), model, created)
-              const flushChunks = flushToolCallBuffer(toolCallState, baseChunk, 'minimax')
+              const flushChunks = toolStreamParser
+                ? toolStreamParser.flush(baseChunk)
+                : flushToolCallBuffer(toolCallState, baseChunk, 'minimax')
               
               for (const outChunk of flushChunks) {
                 transStream.write(`data: ${JSON.stringify(outChunk)}\n\n`)
               }
               
-              const finishReason = toolCallState.hasEmittedToolCall ? 'tool_calls' : 'stop'
+              const finishReason = (toolStreamParser
+                ? toolStreamParser.hasEmittedToolCall()
+                : toolCallState.hasEmittedToolCall) ? 'tool_calls' : 'stop'
               
               transStream.write(
                 `data: ${JSON.stringify({

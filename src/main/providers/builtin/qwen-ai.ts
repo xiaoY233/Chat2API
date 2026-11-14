@@ -22,19 +22,27 @@ export const qwenAiConfig: BuiltinProviderConfig = {
     Version: '0.2.35',
   },
   supportedModels: [
-    'Qwen3.7-Max',
-    'Qwen3.6-Plus',
-    'Qwen3.6-35B-A3B',
-    'Qwen3.6-27B',
-    'Qwen3-Coder',
+    'Qwen4-Max-Preview',
+    'Qwen3.8-Max',
+    'Qwen3.8-Plus',
+    'Qwen3.8-Flash',
+    'Qwen3.8-Omni-Flash',
+    'Qwen-Image-3.0',
+    'Wan3.0-Video',
   ],
   modelMappings: {
-    'Qwen3.7-Max': 'qwen3.7-max',
-    'Qwen3.6-Plus': 'qwen3.6-plus',
-    'Qwen3.6-35B-A3B': 'qwen3.6-35b-a3b',
-    'Qwen3.6-27B': 'qwen3.6-27b',
-    'Qwen3-Coder': 'qwen3-coder-plus',
+    'Qwen4-Max-Preview': 'qwen4.0-max-preview',
+    'Qwen3.8-Max': 'qwen3.8-max',
+    'Qwen3.8-Plus': 'qwen3.8-plus',
+    'Qwen3.8-Flash': 'qwen3.8-flash',
+    'Qwen3.8-Omni-Flash': 'qwen3.8-omni-flash',
+    'Qwen-Image-3.0': 'qwen-image-3.0',
+    'Wan3.0-Video': 'wan3.0-video',
   },
+  // Kept in supportedModels/modelMappings so the route and catalog entry stay
+  // wired. The proxy answers 503 model_unavailable while the model returns
+  // empty answers, then restores it after a fresh bare no-system call passes.
+  temporarilyUnavailableModels: ['Qwen4-Max-Preview'],
   credentialFields: [
     {
       name: 'token',

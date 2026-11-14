@@ -4,6 +4,9 @@ import { managedBracketProtocol } from './managedBracket.ts'
 import { managedXmlProtocol } from './managedXml.ts'
 import { anthropicToolUseProtocol } from './anthropicToolUse.ts'
 import { codexResponsesProtocol } from './codexResponses.ts'
+import { jsonToolCallsProtocol } from './jsonToolCalls.ts'
+import { cherryToolUseProtocol } from './cherryToolUse.ts'
+import { xmlToolTagProtocol } from './xmlToolTag.ts'
 
 const protocols: Record<ToolProtocolId, ToolProtocolAdapter> = {
   openai_chat: managedBracketProtocol,
@@ -11,6 +14,9 @@ const protocols: Record<ToolProtocolId, ToolProtocolAdapter> = {
   managed_xml: managedXmlProtocol,
   anthropic_tool_use: anthropicToolUseProtocol,
   codex_responses: codexResponsesProtocol,
+  json_tool_calls: jsonToolCallsProtocol,
+  cherry_tool_use: cherryToolUseProtocol,
+  xml_tool_tag: xmlToolTagProtocol,
 }
 
 export function getToolProtocol(id: ToolProtocolId): ToolProtocolAdapter {
@@ -22,6 +28,9 @@ export function getManagedProtocols(): ToolProtocolAdapter[] {
     managedBracketProtocol,
     managedXmlProtocol,
     anthropicToolUseProtocol,
+    cherryToolUseProtocol,
+    xmlToolTagProtocol,
+    jsonToolCallsProtocol,
     codexResponsesProtocol,
   ]
 }

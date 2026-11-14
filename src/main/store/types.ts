@@ -150,6 +150,12 @@ export interface Provider {
   supportedModels?: string[]
   /** Model name mapping */
   modelMappings?: Record<string, string>
+  /**
+   * Models gated as temporarily unavailable. They stay in `supportedModels`
+   * and `modelMappings` (route and price/catalog wiring stay intact) but are
+   * not served until a fresh verification call returns a non-empty answer.
+   */
+  temporarilyUnavailableModels?: string[]
   /** Provider status */
   status?: ProviderStatus
   /** Last status check time */
@@ -602,7 +608,7 @@ export interface ProviderModelOverrides {
  */
 export type UserModelOverrides = Record<string, ProviderModelOverrides>
 
-export const DEEPSEEK_PRIMARY_MODELS = ['deepseek-v4-flash', 'deepseek-v4-pro']
+export const DEEPSEEK_PRIMARY_MODELS = ['deepseek-v4.1-flash', 'deepseek-v4-pro']
 
 export const DEEPSEEK_LEGACY_MODEL_MAPPING_NAMES = [
   'deepseek-chat',
@@ -712,19 +718,19 @@ export const DEFAULT_REQUEST_LOG_CONFIG: RequestLogConfig = {
 }
 
 export const DEFAULT_DEEPSEEK_MODEL_MAPPINGS: Record<string, ModelMapping> = {
-  'deepseek-v4-flash-think': {
-    requestModel: 'deepseek-v4-flash-think',
-    actualModel: 'deepseek-v4-flash',
+  'deepseek-v4.1-flash-think': {
+    requestModel: 'deepseek-v4.1-flash-think',
+    actualModel: 'deepseek-v4.1-flash',
     preferredProviderId: 'deepseek',
   },
-  'deepseek-v4-flash-search': {
-    requestModel: 'deepseek-v4-flash-search',
-    actualModel: 'deepseek-v4-flash',
+  'deepseek-v4.1-flash-search': {
+    requestModel: 'deepseek-v4.1-flash-search',
+    actualModel: 'deepseek-v4.1-flash',
     preferredProviderId: 'deepseek',
   },
-  'deepseek-v4-flash-think-search': {
-    requestModel: 'deepseek-v4-flash-think-search',
-    actualModel: 'deepseek-v4-flash',
+  'deepseek-v4.1-flash-think-search': {
+    requestModel: 'deepseek-v4.1-flash-think-search',
+    actualModel: 'deepseek-v4.1-flash',
     preferredProviderId: 'deepseek',
   },
   'deepseek-v4-pro-think': {

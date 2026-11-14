@@ -4,8 +4,8 @@ import {
   createParseResult,
   genericToolResultBlock,
   detectMarkers,
+  removeToolBlocks,
   renderToolList,
-  stripFencedCodeBlocks,
   toolNames,
 } from './shared.ts'
 
@@ -20,40 +20,46 @@ Use Anthropic-style tool invocation only when this protocol is enabled.`
   },
 
   detectStart(buffer) {
-    return detectMarkers(buffer, ['<antml:function_calls>'])
+    return detectMarkers(buffer, ['<antml:function_calls>', '<function_calls>'])
   },
 
   parse(content, context) {
-    const parseable = stripFencedCodeBlocks(content)
     const allowedNames = toolNames(context.tools)
     const rawMatches: string[] = []
     const invalidToolNames: string[] = []
     const toolCalls = []
-    const blockPattern = /<antml:function_calls>([\s\S]*?)<\/antml:function_calls>/g
-    let blockMatch: RegExpExecArray | null
 
-    while ((blockMatch = blockPattern.exec(parseable)) !== null) {
-      rawMatches.push(blockMatch[0])
-      const invokePattern = /<antml:invoke\s+name="([^"]+)"\s*>([\s\S]*?)<\/antml:invoke>/g
-      let invokeMatch: RegExpExecArray | null
+    const blockPatterns = [
+      /<antml:function_calls>([\s\S]*?)<\/antml:function_calls>/g,
+      /<function_calls>([\s\S]*?)<\/function_calls>/g,
+    ]
 
-      while ((invokeMatch = invokePattern.exec(blockMatch[1])) !== null) {
-        const name = invokeMatch[1].trim()
-        if (!allowedNames.has(name)) {
-          invalidToolNames.push(name)
-          continue
+    for (const blockPattern of blockPatterns) {
+      let blockMatch: RegExpExecArray | null
+      while ((blockMatch = blockPattern.exec(content)) !== null) {
+        rawMatches.push(blockMatch[0])
+        const invokePattern = /<(?:antml:)?invoke\s+name="([^"]+)"\s*>([\s\S]*?)<\/(?:antml:)?invoke>/g
+        let invokeMatch: RegExpExecArray | null
+
+        while ((invokeMatch = invokePattern.exec(blockMatch[1])) !== null) {
+          const name = invokeMatch[1].trim()
+          if (!allowedNames.has(name)) {
+            invalidToolNames.push(name)
+            continue
+          }
+
+          const parameters = invokeMatch[2].match(/<(?:antml:)?parameters>([\s\S]*?)<\/(?:antml:)?parameters>/)
+          const body = parameters ? parameters[1] : invokeMatch[2]
+          toolCalls.push(
+            buildToolCall(
+              `call_${toolCalls.length}`,
+              toolCalls.length,
+              name,
+              body,
+              invokeMatch[0],
+            ),
+          )
         }
-
-        const parameters = invokeMatch[2].match(/<antml:parameters>([\s\S]*?)<\/antml:parameters>/)
-        toolCalls.push(
-          buildToolCall(
-            `call_${toolCalls.length}`,
-            toolCalls.length,
-            name,
-            parameters ? parameters[1] : '{}',
-            invokeMatch[0],
-          ),
-        )
       }
     }
 
@@ -68,7 +74,7 @@ Use Anthropic-style tool invocation only when this protocol is enabled.`
     }
 
     return createParseResult({
-      content: rawMatches.reduce((acc, raw) => acc.replace(raw, ''), parseable).trim(),
+      content: removeToolBlocks(content, rawMatches),
       toolCalls,
       protocol: 'anthropic_tool_use',
       rawMatches,

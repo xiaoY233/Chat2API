@@ -16,20 +16,16 @@ export const qwenConfig: BuiltinProviderConfig = {
   enabled: true,
   description: 'Qwen AI assistant by Alibaba Cloud (www.qianwen.com)',
   supportedModels: [
-    'Qwen3.6',
-    'Qwen3.7-Max',
-    'Qwen3.5-Flash',
-    'Qwen3-Max',
-    'Qwen3-Max-Thinking-Preview',
-    'Qwen3-Coder',
+    'Qwen3.8',
+    'Qwen3.8-Max',
+    'Qwen3.8-Flash',
+    'Qwen3.8-Omni-Flash',
   ],
   modelMappings: {
-    'Qwen3.6': 'Qwen',
-    'Qwen3.7-Max': 'Qwen3.7-Max',
-    'Qwen3.5-Flash': 'Qwen3.5-Flash',
-    'Qwen3-Max': 'Qwen3-Max',
-    'Qwen3-Max-Thinking-Preview': 'Qwen3-Max-Thinking-Preview',
-    'Qwen3-Coder': 'Qwen3-Coder',
+    'Qwen3.8': 'Qwen',
+    'Qwen3.8-Max': 'Qwen3.8-Max',
+    'Qwen3.8-Flash': 'Qwen3.8-Flash',
+    'Qwen3.8-Omni-Flash': 'Qwen3.8-Omni-Flash',
   },
   credentialFields: [
     {

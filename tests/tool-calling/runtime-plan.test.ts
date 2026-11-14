@@ -110,3 +110,38 @@ test('forced missing tool name is rejected before provider call', () => {
     },
   }), /Forced tool missing_tool is not declared/)
 })
+
+test('coding tool names switch the plan to the compact bracket protocol', () => {
+  const codingTools: NormalizedToolDefinition[] = [{
+    name: 'default_api:read_file',
+    description: 'Read a file',
+    parameters: { type: 'object', properties: { filePath: { type: 'string' } } },
+    source: 'openai',
+  }]
+
+  const plan = buildToolCallingRuntimePlan({
+    requestId: 'r5',
+    providerId: 'deepseek',
+    actualModel: 'deepseek-chat',
+    config: {
+      enabled: true,
+      mode: 'auto',
+      clientAdapterId: 'standard-openai-tools',
+      diagnosticsEnabled: false,
+      advanced: { promptPreviewEnabled: false },
+    },
+    clientRequest: {
+      clientAdapterId: 'standard-openai-tools',
+      toolSource: 'openai',
+      tools: codingTools,
+      toolChoice: { mode: 'auto' },
+      diagnostics: { rawToolCount: 1, normalizedToolNames: ['default_api:read_file'] },
+    },
+    messages: [{ role: 'user', content: 'read /tmp/a' }],
+  })
+
+  assert.equal(plan.coding, true)
+  assert.equal(plan.protocol, 'managed_bracket')
+  assert.equal(plan.diagnostics.coding, true)
+  assert.equal(plan.diagnostics.reason, 'managed_coding')
+})

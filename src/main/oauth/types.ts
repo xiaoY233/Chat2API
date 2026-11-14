@@ -208,4 +208,24 @@ export const MANUAL_TOKEN_CONFIGS: Record<ProviderType, ManualTokenConfig[]> = {
       helpUrl: 'https://www.perplexity.ai',
     },
   ],
+  longcat: [
+    {
+      providerType: 'longcat',
+      tokenType: 'cookie',
+      label: 'passport_token_key Cookie',
+      placeholder: 'Enter passport_token_key or the full Cookie header',
+      description: 'Log in to longcat.ai, then copy the passport_token_key cookie (or use the OAuth Login tab)',
+      helpUrl: 'https://longcat.ai/chat',
+    },
+  ],
+  inception: [
+    {
+      providerType: 'inception',
+      tokenType: 'cookie',
+      label: 'Vercel clearance cookie (_vcrcs)',
+      placeholder: 'Optional: enter the _vcrcs cookie value or a full Cookie header',
+      description: 'No login needed: the app solves the Vercel checkpoint automatically. Optionally paste the _vcrcs cookie from chat.inceptionlabs.ai.',
+      helpUrl: 'https://chat.inceptionlabs.ai/',
+    },
+  ],
 }

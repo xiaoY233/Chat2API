@@ -12,6 +12,7 @@ import { requestForwarder } from '../forwarder'
 import { streamHandler } from '../stream'
 import { proxyStatusManager } from '../status'
 import { modelMapper } from '../modelMapper'
+import { modelAvailability } from '../modelAvailability'
 import { storeManager } from '../../store/store'
 import { 
   isAnthropicToolFormat,
@@ -107,6 +108,24 @@ router.post('/completions', async (ctx: Context) => {
         type: 'invalid_request_error',
         param: 'messages',
         code: null,
+      },
+    }
+    return
+  }
+
+  // Models pinned as temporarily unavailable keep their route and catalog
+  // entry, but are not served until a fresh verification call answers.
+  const gate = modelAvailability.findGate(request.model)
+  if (gate) {
+    modelAvailability.requestVerification(request.model)
+    ctx.set('Retry-After', '60')
+    ctx.status = 503
+    ctx.body = {
+      error: {
+        message: `Model ${request.model} is temporarily unavailable. It will be restored automatically after a verified recovery check; use another model meanwhile.`,
+        type: 'service_unavailable_error',
+        param: null,
+        code: 'model_unavailable',
       },
     }
     return

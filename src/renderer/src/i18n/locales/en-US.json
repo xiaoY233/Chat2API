@@ -243,13 +243,13 @@
     "userTokenPlaceholder": "Enter DeepSeek User Token",
     "userTokenHelp": "Authentication Token from DeepSeek web version, found in browser DevTools Application -> Local Storage -> userToken",
     "models": {
-      "deepseek-v4-flash": "DeepSeek V4 Flash",
+      "deepseek-v4.1-flash": "DeepSeek V4.1 Flash",
       "deepseek-v4-pro": "DeepSeek V4 Pro"
     }
   },
   "glm": {
     "name": "GLM",
-    "description": "Zhipu Qingyan AI Assistant, supports GLM-5.1 flagship model, deep thinking and web search",
+    "description": "Zhipu Qingyan AI Assistant, supports GLM-5.3 flagship model, deep thinking and web search",
     "refreshToken": "Refresh Token",
     "refreshTokenPlaceholder": "Enter chatglm_refresh_token",
     "refreshTokenHelp": "Get chatglm_refresh_token from Zhipu Qingyan web version, found in browser DevTools Application -> Cookie"
@@ -293,12 +293,10 @@
     "codeMode": "Code Mode",
     "codeModeDesc": "Use Qwen-Coder model, specialized for programming tasks",
     "models": {
-      "Qwen3.6": "Qwen",
-      "Qwen3.7-Max": "Qwen3.7-Max",
-      "Qwen3.5-Flash": "Qwen3.5-Flash",
-      "Qwen3-Max": "Qwen3-Max",
-      "Qwen3-Max-Thinking-Preview": "Qwen3-Max-Thinking-Preview",
-      "Qwen3-Coder": "Qwen3-Coder"
+      "Qwen3.8": "Qwen",
+      "Qwen3.8-Max": "Qwen3.8-Max",
+      "Qwen3.8-Flash": "Qwen3.8-Flash",
+      "Qwen3.8-Omni-Flash": "Qwen3.8-Omni-Flash"
     }
   },
   "qwen-ai": {
@@ -315,7 +313,7 @@
   },
   "zai": {
     "name": "Z.ai",
-    "description": "Z.ai - Free AI Chatbot powered by GLM-5.1, GLM-5, and GLM-4.7",
+    "description": "Z.ai - Free AI Chatbot powered by GLM-5.3, GLM-5.3-flash, and GLM-5.2",
     "token": "Access Token",
     "tokenPlaceholder": "Enter Z.ai JWT Token",
     "tokenHelp": "Get token from Z.ai web version, found in browser DevTools Application -> Cookie, starts with \"eyJ...\""
@@ -340,6 +338,20 @@
     "sessionTokenPlaceholder": "Enter Perplexity session token",
     "sessionTokenHelp": "Get __Secure-next-auth.session-token Cookie from browser DevTools, or switch to OAuth Login tab for automatic extraction",
     "freeUserNotice": "Official free users: Auto model only, auto routing"
+  },
+  "longcat": {
+    "name": "LongCat",
+    "description": "LongCat web chat (Meituan) on longcat.ai using the web session cookie, with optional web search",
+    "passportTokenKey": "passport_token_key Cookie",
+    "passportTokenKeyPlaceholder": "Enter the passport_token_key cookie value or full Cookie header",
+    "passportTokenKeyHelp": "Use the OAuth Login tab to sign in to longcat.ai automatically. Manual fallback: DevTools -> Application -> Cookies -> longcat.ai -> passport_token_key. You can paste the cookie value or the full Cookie header."
+  },
+  "inception": {
+    "name": "Inception (Mercury)",
+    "description": "Inception Mercury web chat on chat.inceptionlabs.ai. Anonymous: no login needed, the app solves the Vercel challenge itself",
+    "vcrcs": "Vercel clearance cookie (_vcrcs)",
+    "vcrcsPlaceholder": "Optional: paste the _vcrcs cookie value or a full Cookie header",
+    "vcrcsHelp": "No login is required. The app solves the Vercel checkpoint and creates a session automatically, so you can add this account with this field left empty. Advanced/manual fallback: DevTools -> Application -> Cookies -> chat.inceptionlabs.ai -> _vcrcs."
   },
   "proxy": {
     "title": "Proxy Settings",

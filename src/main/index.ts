@@ -1,10 +1,12 @@
 import { app, BrowserWindow } from 'electron'
 import { join } from 'path'
 import { createWindow, getMainWindow, loadUrl, loadFile, openDevTools } from './window/manager'
+import { applySoftwareRenderingSwitches, shouldUseSoftwareRendering } from './window/gpu'
 import { createTrayManager, TrayManager } from './tray/TrayManager'
 import { registerIpcHandlers } from './ipc/handlers'
 import { UpdaterManager } from './updater'
 import { storeManager } from './store/store'
+import { getBuiltinProvider } from './providers/builtin'
 
 // Prevent uncaught exceptions from crashing the app
 process.on('uncaughtException', (error) => {
@@ -26,6 +28,22 @@ if (process.platform === 'darwin' && process.arch === 'arm64') {
 // Automatically add --no-sandbox flag when running as root user
 if (process.getuid && process.getuid() === 0) {
   console.log('Detected running as root user, sandbox settings have been automatically handled')
+}
+
+// Printed so support logs always identify the running build and the models it
+// ships with. The Add Provider dialog reads these same builtin configs.
+console.log(`[App] Chat2API v${app.getVersion()} (${process.platform}/${process.arch})`)
+const qwenAiConfig = getBuiltinProvider('qwen-ai')
+if (qwenAiConfig) {
+  console.log(`[Providers] qwen-ai models: ${qwenAiConfig.supportedModels.join(', ')}`)
+}
+
+// Linux defaults to software rendering: a DRI render node does not prove that
+// GLX/EGL works, and Chromium's ANGLE probe fails noisily before falling back
+// to software anyway. CHAT2API_DISABLE_GPU=0 opts back into hardware.
+if (shouldUseSoftwareRendering()) {
+  console.log('Using software rendering (SwiftShader)')
+  applySoftwareRenderingSwitches(app)
 }
 
 declare module 'electron' {
