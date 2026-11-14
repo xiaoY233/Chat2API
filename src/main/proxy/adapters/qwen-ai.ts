@@ -56,6 +56,11 @@ const WAF_ERROR_MESSAGE =
   'Chat2API could not mint a fresh browser signature for this account. ' +
   'Make sure Chat2API runs with a display, or retry in a moment.'
 
+const WAF_CAPTCHA_MESSAGE =
+  'Qwen AI requires an Aliyun WAF captcha challenge for this account (bxpunish). ' +
+  'The account is temporarily rate-limited. Wait a few minutes and retry; ' +
+  'if it keeps happening, open chat.qwen.ai, complete the captcha, and sign in again.'
+
 function mergeCookieHeader(...parts: Array<string | undefined>): string {
   const seen = new Set<string>()
   const pairs: string[] = []
@@ -82,11 +87,63 @@ const MODEL_ALIASES: Record<string, string> = {
   'qwen4.0-max-preview': 'qwen4.0-max-preview',
   'qwen3.8': 'qwen3.8-max',
   'qwen3.8-max': 'qwen3.8-max',
-  'qwen3.8-plus': 'qwen3.8-plus',
-  'qwen3.8-flash': 'qwen3.8-flash',
   'qwen3.8-omni-flash': 'qwen3.8-omni-flash',
+  'qwen3.7-plus': 'qwen3.7-plus',
+  'qwen3.7-max': 'qwen3.7-max',
+  'qwen3.5-omni-plus': 'qwen3.5-omni-plus',
   'qwen-image-3.0': 'qwen-image-3.0',
   'wan3.0-video': 'wan3.0-video',
+}
+
+export interface QwenUpstreamError {
+  message: string
+  code?: string
+}
+
+/**
+ * Qwen can answer HTTP 200 with a JSON error envelope instead of an SSE
+ * stream, for example `{"success":false,"data":{"code":"Not_Found",
+ * "details":"Model not found"}}` after a model is removed upstream. Those
+ * payloads carry no `choices`, so without this check they were silently
+ * converted into an empty answer / empty stream and the client waited for a
+ * reply that never came.
+ */
+export function extractQwenUpstreamError(payload: any): QwenUpstreamError | null {
+  if (!payload || typeof payload !== 'object') return null
+
+  // Aliyun WAF captcha challenge. Qwen answers HTTP 200 with
+  // {"ret":["FAIL_SYS_USER_VALIDATE","RGV587_ERROR::..."],"data":{"url":
+  // ".../_____tmd_____/punish?..."}} and no choices, so clients otherwise
+  // waited for an empty stream that never produced an answer.
+  const ret = payload.ret
+  const retText = Array.isArray(ret) ? ret.join(' ') : String(ret ?? '')
+  const punishUrl = String(payload.data?.url ?? '')
+  if (
+    /FAIL_SYS_USER_VALIDATE|RGV587|punish/i.test(retText) ||
+    /\/punish\?/.test(punishUrl)
+  ) {
+    return {
+      message:
+        'Aliyun WAF requires a captcha challenge; the account is temporarily rate-limited. Wait a few minutes and retry, or open chat.qwen.ai and complete the challenge.',
+      code: 'waf_captcha',
+    }
+  }
+
+  const failed = payload.success === false || payload.error != null
+  if (!failed) return null
+
+  const detail =
+    payload.data?.details ??
+    payload.data?.message ??
+    payload.error?.message ??
+    payload.message
+  const code = payload.data?.code ?? payload.error?.code ?? payload.code
+  const message =
+    typeof detail === 'string' && detail.trim()
+      ? detail.trim()
+      : 'Qwen upstream returned an error'
+
+  return { message, code: typeof code === 'string' ? code : undefined }
 }
 
 interface QwenAiMessage {
@@ -275,6 +332,11 @@ export class QwenAiAdapter {
   private isWafResponse(response: AxiosResponse): boolean {
     const contentType = response.headers?.['content-type'] as string | undefined
     return isQwenWafResponse(contentType, typeof response.data === 'string' ? response.data : undefined)
+  }
+
+  private isPunishedResponse(response: AxiosResponse): boolean {
+    const flag = response.headers?.['bxpunish'] ?? response.headers?.['bx-punish']
+    return String(flag ?? '') === '1'
   }
 
   mapModel(openaiModel: string): string {
@@ -569,6 +631,13 @@ export class QwenAiAdapter {
       throw new Error(WAF_ERROR_MESSAGE)
     }
 
+    if (this.isPunishedResponse(response)) {
+      try { (response.data as any)?.destroy?.() } catch { /* ignore */ }
+      void this.deleteChat(chatId).catch(() => { /* best effort */ })
+      console.warn('[QwenAI] Completion rejected with bxpunish (Aliyun WAF captcha)')
+      throw new Error(WAF_CAPTCHA_MESSAGE)
+    }
+
     console.log('[QwenAI] Response status:', response.status)
     console.log('[QwenAI] Response headers:', JSON.stringify(response.headers, null, 2))
 
@@ -769,8 +838,8 @@ export class QwenAiStreamHandler {
     this.chatId = chatId
   }
 
-  private sendToolCalls(transStream: PassThrough): void {
-    if (this.toolCallsSent) return
+  private sendToolCalls(transStream: PassThrough): boolean {
+    if (this.toolCallsSent) return false
     
     const toolCalls = parseToolUse(this.content)
     if (toolCalls && toolCalls.length > 0) {
@@ -815,11 +884,9 @@ export class QwenAiStreamHandler {
           created: this.created,
         })}\n\n`
       )
-      transStream.end('data: [DONE]\n\n')
-      if (this.onEnd && this.chatId) {
-        this.onEnd(this.chatId)
-      }
+      return true
     }
+    return false
   }
 
   async handleStream(stream: any): Promise<PassThrough> {
@@ -831,6 +898,28 @@ export class QwenAiStreamHandler {
     let hasSentReasoning = false
     let summaryText = ''
     let initialChunkSent = false
+    let streamEnded = false
+
+    const endStream = (chunk?: string) => {
+      if (streamEnded) return
+      streamEnded = true
+      transStream.end(chunk)
+    }
+
+    const failStream = (error: QwenUpstreamError) => {
+      console.error(
+        `[QwenAI] Upstream error${error.code ? ` (${error.code})` : ''}: ${error.message}`
+      )
+      endStream(
+        `data: ${JSON.stringify({
+          error: {
+            message: `Qwen AI: ${error.message}`,
+            type: 'api_error',
+            code: error.code ?? 'upstream_error',
+          },
+        })}\n\ndata: [DONE]\n\n`
+      )
+    }
 
     const sendInitialChunk = () => {
       if (!initialChunkSent) {
@@ -859,6 +948,12 @@ export class QwenAiStreamHandler {
 
           const data = JSON.parse(event.data)
           console.log('[QwenAI] Parsed JSON data keys:', Object.keys(data))
+
+          const upstreamError = extractQwenUpstreamError(data)
+          if (upstreamError) {
+            failStream(upstreamError)
+            return
+          }
 
           if (data['response.created']?.response_id) {
             this.responseId = data['response.created'].response_id
@@ -1014,7 +1109,7 @@ export class QwenAiStreamHandler {
                     created: this.created,
                   }
                   transStream.write(`data: ${JSON.stringify(toolFinishChunk)}\n\n`)
-                  transStream.end('data: [DONE]\n\n')
+                  endStream('data: [DONE]\n\n')
                   if (this.onEnd && this.chatId) {
                     this.onEnd(this.chatId)
                   }
@@ -1022,7 +1117,12 @@ export class QwenAiStreamHandler {
                 }
               } else if (hasToolUse(this.content)) {
                 console.log('[QwenAI] Found tool_use in stream, sending tool_calls')
-                this.sendToolCalls(transStream)
+                if (this.sendToolCalls(transStream)) {
+                  endStream('data: [DONE]\n\n')
+                  if (this.onEnd && this.chatId) {
+                    this.onEnd(this.chatId)
+                  }
+                }
                 return
               }
               
@@ -1035,7 +1135,7 @@ export class QwenAiStreamHandler {
                 created: this.created,
               }
               transStream.write(`data: ${JSON.stringify(finalChunk)}\n\n`)
-              transStream.end('data: [DONE]\n\n')
+              endStream('data: [DONE]\n\n')
 
               if (this.onEnd && this.chatId) {
                 this.onEnd(this.chatId)
@@ -1051,15 +1151,28 @@ export class QwenAiStreamHandler {
     stream.on('data', (buffer: Buffer) => {
       const text = buffer.toString()
       console.log('[QwenAI] Raw stream data:', text.substring(0, 500))
+      const trimmed = text.trim()
+      if (trimmed.startsWith('{')) {
+        try {
+          const payload = JSON.parse(trimmed)
+          const upstreamError = extractQwenUpstreamError(payload)
+          if (upstreamError) {
+            failStream(upstreamError)
+            return
+          }
+        } catch {
+          // Incomplete JSON chunk: let the SSE parser keep buffering it.
+        }
+      }
       parser.feed(text)
     })
     stream.once('error', (err: Error) => {
       console.error('[QwenAI] Stream error:', err)
-      transStream.end('data: [DONE]\n\n')
+      endStream('data: [DONE]\n\n')
     })
     stream.once('close', () => {
       console.log('[QwenAI] Stream closed')
-      transStream.end('data: [DONE]\n\n')
+      endStream('data: [DONE]\n\n')
     })
 
     return transStream
@@ -1106,6 +1219,12 @@ export class QwenAiStreamHandler {
             if (event.data === '[DONE]') return
 
             const parsed = JSON.parse(event.data)
+
+            const upstreamError = extractQwenUpstreamError(parsed)
+            if (upstreamError) {
+              rejectOnce(new Error(`Qwen AI: ${upstreamError.message}`))
+              return
+            }
 
             if (parsed['response.created']?.response_id) {
               this.responseId = parsed['response.created'].response_id
@@ -1157,7 +1276,23 @@ export class QwenAiStreamHandler {
         },
       })
 
-      stream.on('data', (buffer: Buffer) => parser.feed(buffer.toString()))
+      stream.on('data', (buffer: Buffer) => {
+        const text = buffer.toString()
+        const trimmed = text.trim()
+        if (trimmed.startsWith('{')) {
+          try {
+            const payload = JSON.parse(trimmed)
+            const upstreamError = extractQwenUpstreamError(payload)
+            if (upstreamError) {
+              rejectOnce(new Error(`Qwen AI: ${upstreamError.message}`))
+              return
+            }
+          } catch {
+            // Incomplete JSON chunk: let the SSE parser keep buffering it.
+          }
+        }
+        parser.feed(text)
+      })
       stream.once('error', (err: Error) => {
         console.error('[QwenAI] Non-stream error:', err)
         rejectOnce(err)

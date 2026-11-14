@@ -9,9 +9,10 @@
  * Recovery is automatic. While a model is gated, the manager re-checks it with
  * a bare no-system call (no tools, no prompt engineering, `stream: false`) and
  * lifts the gate only when the provider returns a non-empty answer. Checks are
- * rate-limited per model and deduplicated, and a request for a gated model
- * triggers an out-of-band check so traffic can restore it sooner than the
- * periodic sweep.
+ * rate-limited per model and deduplicated. Probes are deliberately infrequent:
+ * Qwen answers repeated checks with an Aliyun WAF captcha that would break
+ * every model on the account, so a gated model is re-checked at most every
+ * 30 minutes (startup sweep plus the periodic sweep).
  */
 
 import { storeManager } from '../store/store'
@@ -23,9 +24,9 @@ import type { ChatCompletionRequest, ForwardResult, ProxyContext } from './types
 /** A probe must not hold a slot for the full upstream timeout. */
 const PROBE_TIMEOUT_MS = 60_000
 /** Periodic recovery sweep for gated models. */
-const PERIODIC_CHECK_MS = 10 * 60_000
+const PERIODIC_CHECK_MS = 30 * 60_000
 /** Never probe the same model more than once a minute, whatever the traffic. */
-const PROBE_COOLDOWN_MS = 60_000
+const PROBE_COOLDOWN_MS = 30 * 60_000
 /** Let the proxy settle before the first sweep. */
 const STARTUP_DELAY_MS = 20_000
 /** The probe is intentionally minimal: the failure mode is empty answers. */

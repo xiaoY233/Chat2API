@@ -95,7 +95,6 @@ router.post('/completions', async (ctx: Context) => {
 
   const gate = modelAvailability.findGate(request.model)
   if (gate) {
-    modelAvailability.requestVerification(request.model)
     ctx.set('Retry-After', '60')
     ctx.status = 503
     ctx.body = {

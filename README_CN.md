@@ -58,7 +58,7 @@
 | Inception     | Cookie        | 否     | mercury-3 |
 | Perplexity    | Cookie        | 是     | Auto                                                                                                                                                                                                                                         |
 | Qwen (国内版)    | SSO Ticket    | 是     | Qwen3.8, Qwen3.8-Max, Qwen3.8-Flash, Qwen3.8-Omni-Flash |
-| Qwen AI (国际版) | JWT Token     | 是     | Qwen4-Max-Preview, Qwen3.8-Max, Qwen3.8-Plus, Qwen3.8-Flash, Qwen3.8-Omni-Flash, Qwen-Image-3.0, Wan3.0-Video |
+| Qwen AI (国际版) | JWT Token     | 是     | Qwen4-Max-Preview, Qwen3.8-Max, Qwen3.8-Omni-Flash, Qwen3.7-Max, Qwen3.7-Plus, Qwen3.5-Omni-Plus, Qwen-Image-3.0, Wan3.0-Video |
 | Z.ai          | JWT Token     | 是     | GLM-5.3, GLM-5.3-flash, GLM-5.2 |
 
 供应商适配说明和手动添加模型教程见 [docs/providers](docs/providers/README.md)。MiMo TTS 模型需在账号中额外填写可选 `api_key` 凭据；Qwen 图像/视频生成请使用 Qwen AI (国际版)。Z.ai 会通过隐藏的验证码窗口自动生成 captcha 参数。`Qwen4-Max-Preview` 当前为临时门禁：模型仍保留在列表和映射中，请求会返回 `503 model_unavailable`，直到一次不带 system 的裸调用验证拿到非空回答后自动恢复。

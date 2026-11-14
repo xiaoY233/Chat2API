@@ -19,22 +19,35 @@ Qwen AI 的 access token 有效期约 15 分钟，`refresh_token` Cookie 有效�
 - 显示名称、`supportedModels`、`modelMappings` 和 `/v1/models` 输出都保持不变，下游的价格与路由配置无需调整。
 - 请求该模型时立即返回 `503`，错误体沿用网关既有的服务不可用格式：`type: "service_unavailable_error"`、`code: "model_unavailable"`，并带 `Retry-After: 60`。
 - 恢复检查由代理自动执行：对门禁模型发送**不带 system prompt 的裸 `ping`**（`stream: false`），只有拿到非空回答（或真实 tool call）才解除门禁；空回答、超时和错误都会保持门禁。
-- 检查在代理启动后约 20 秒开始，之后每 10 分钟一轮；有流量命中门禁模型时会额外触发一次，但同一模型最多每分钟检查一次。
+- 检查在代理启动后约 20 秒开始，之后每 30 分钟一轮；同一模型最多每 30 分钟检查一次。检查刻意保持低频：Qwen 对频繁请求会返回 Aliyun WAF 验证码（`bxpunish`），那会导致账号下所有模型都暂时无法回答。
 - 解除门禁会写回供应商配置（`temporarilyUnavailableModels` 变为空数组），重启后不会重新门禁；若需再次门禁，把模型名加回该字段即可。
+
+## WAF 验证码与空回答
+
+当账号被 Aliyun WAF 判定为需要验证时，Qwen 会返回 HTTP 200、`bxpunish: 1`，响应体类似：
+
+```json
+{"ret":["FAIL_SYS_USER_VALIDATE","RGV587_ERROR::SM::..."],"data":{"url":"https://chat.qwen.ai/.../punish?action=captcha"}}
+```
+
+代理会把它识别为 `waf_captcha` 错误并立即返回明确提示，而不是像以前那样把空内容当成正常回答（流式请求只剩 `data: [DONE]`，客户端会一直等到超时）。遇到该错误时等待几分钟后重试；如果持续出现，在浏览器打开 `chat.qwen.ai` 完成验证码并重新登录账号。降低健康检查频率可以避免再次触发该限制。
 
 ## 默认模型
 
-内置默认模型只保留当前筛选后的稳定清单：以 Qwen4 与 Qwen3.8 系列为主，并补充 Qwen 图像与视频生成模型。
+内置默认模型与登录账号在 `https://chat.qwen.ai/api/models` 返回的当前清单同步：Qwen4 / Qwen3.8 / Qwen3.7 / Qwen3.5 的可用型号，并补充 Qwen 图像与视频生成模型。
 
 | 显示名称 | 实际模型 ID |
 | --- | --- |
 | Qwen4-Max-Preview | qwen4.0-max-preview |
 | Qwen3.8-Max | qwen3.8-max |
-| Qwen3.8-Plus | qwen3.8-plus |
-| Qwen3.8-Flash | qwen3.8-flash |
 | Qwen3.8-Omni-Flash | qwen3.8-omni-flash |
+| Qwen3.7-Max | qwen3.7-max |
+| Qwen3.7-Plus | qwen3.7-plus |
+| Qwen3.5-Omni-Plus | qwen3.5-omni-plus |
 | Qwen-Image-3.0 | qwen-image-3.0 |
 | Wan3.0-Video | wan3.0-video |
+
+`Qwen3.8-Plus` 与 `Qwen3.8-Flash` 已被官网下线：请求会返回 `Model not found`。代理现在会把上游的 JSON 错误（例如 `{"success":false,"data":{"code":"Not_Found","details":"Model not found"}}`）直接返回给客户端，而不再把它转换成空回答或空流。供应商管理中的“同步模型”会携带账号 Token 请求模型列表，因此能拿到完整清单（未登录时官网只返回 3 个模型）。
 
 ## 其他官网模型
 
@@ -47,7 +60,6 @@ Qwen AI 的 access token 有效期约 15 分钟，`refresh_token` Cookie 有效�
 | Qwen3.6-Max-Preview | qwen3.6-max-preview | Preview |
 | Qwen3.6-Plus-Preview | qwen3.6-plus-preview | Preview |
 | Qwen3.5-Plus | qwen3.5-plus | 低版本 |
-| Qwen3.5-Omni-Plus | qwen3.5-omni-plus | 低版本 |
 | Qwen3.5-Flash | qwen3.5-flash | 低版本 |
 | Qwen3.5-Max-Preview | qwen3.5-max-2026-03-08 | 低版本 Preview |
 | Qwen3.5-397B-A17B | qwen3.5-397b-a17b | 低版本 |

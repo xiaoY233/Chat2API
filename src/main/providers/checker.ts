@@ -825,7 +825,8 @@ export class ProviderChecker {
   }
 
   static async fetchProviderModels(
-    providerId: string
+    providerId: string,
+    auth?: { token?: string; cookies?: string }
   ): Promise<{
     supportedModels: string[]
     modelMappings: Record<string, string>
@@ -844,6 +845,13 @@ export class ProviderChecker {
       const headers: Record<string, string> = {
         ...(builtinConfig.modelsApiHeaders || builtinConfig.headers),
       }
+      // Several provider model endpoints return a reduced anonymous list (or
+      // 401) unless the signed-in account is sent along. Qwen, for example,
+      // lists only 3 of its 6 chat models without the Bearer token. Send the
+      // token when present: Qwen's models endpoint ignores the Bearer token
+      // and falls back to the anonymous list if a Cookie header is also sent.
+      if (auth?.token) headers.Authorization = `Bearer ${auth.token}`
+      else if (auth?.cookies) headers.Cookie = auth.cookies
 
       const response = await axios.get(builtinConfig.modelsApiEndpoint, {
         headers,

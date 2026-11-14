@@ -295,18 +295,20 @@ test('Qwen AI defaults keep only the filtered current web model set', () => {
   const expectedModels = [
     'Qwen4-Max-Preview',
     'Qwen3.8-Max',
-    'Qwen3.8-Plus',
-    'Qwen3.8-Flash',
     'Qwen3.8-Omni-Flash',
+    'Qwen3.7-Max',
+    'Qwen3.7-Plus',
+    'Qwen3.5-Omni-Plus',
     'Qwen-Image-3.0',
     'Wan3.0-Video',
   ]
   const expectedMappings = {
     'Qwen4-Max-Preview': 'qwen4.0-max-preview',
     'Qwen3.8-Max': 'qwen3.8-max',
-    'Qwen3.8-Plus': 'qwen3.8-plus',
-    'Qwen3.8-Flash': 'qwen3.8-flash',
     'Qwen3.8-Omni-Flash': 'qwen3.8-omni-flash',
+    'Qwen3.7-Max': 'qwen3.7-max',
+    'Qwen3.7-Plus': 'qwen3.7-plus',
+    'Qwen3.5-Omni-Plus': 'qwen3.5-omni-plus',
     'Qwen-Image-3.0': 'qwen-image-3.0',
     'Wan3.0-Video': 'wan3.0-video',
   }
@@ -315,7 +317,8 @@ test('Qwen AI defaults keep only the filtered current web model set', () => {
   assert.deepEqual(qwenAiConfig.modelMappings, expectedMappings)
 
   for (const removedModel of [
-    'Qwen3.7-Max',
+    'Qwen3.8-Plus',
+    'Qwen3.8-Flash',
     'Qwen3.7-Max-Preview',
     'Qwen3.7-Plus-Preview',
     'Qwen3.6-Max-Preview',
@@ -338,11 +341,12 @@ test('Qwen AI defaults keep only the filtered current web model set', () => {
   assert.match(qwenAiAdapterSource, /qwen4:\s*'qwen4\.0-max-preview'/)
   assert.match(qwenAiAdapterSource, /'qwen4\.0-max-preview':\s*'qwen4\.0-max-preview'/)
   assert.match(qwenAiAdapterSource, /'qwen3\.8':\s*'qwen3\.8-max'/)
-  assert.match(qwenAiAdapterSource, /'qwen3\.8-plus':\s*'qwen3\.8-plus'/)
+  assert.match(qwenAiAdapterSource, /'qwen3\.7-plus':\s*'qwen3\.7-plus'/)
+  assert.match(qwenAiAdapterSource, /'qwen3\.7-max':\s*'qwen3\.7-max'/)
+  assert.match(qwenAiAdapterSource, /'qwen3\.5-omni-plus':\s*'qwen3\.5-omni-plus'/)
   assert.match(qwenAiAdapterSource, /'qwen-image-3\.0':\s*'qwen-image-3\.0'/)
   assert.match(qwenAiAdapterSource, /'wan3\.0-video':\s*'wan3\.0-video'/)
   assert.doesNotMatch(qwenAiAdapterSource, /'qwen3-coder':\s*'qwen3-coder-plus'/)
-  assert.doesNotMatch(qwenAiAdapterSource, /'qwen3\.5':/)
   assert.doesNotMatch(qwenAiAdapterSource, /'qwen3-vl':/)
   assert.doesNotMatch(qwenAiAdapterSource, /'qwen3-omni':/)
   assert.doesNotMatch(qwenAiAdapterSource, /'qwen2\.5':/)

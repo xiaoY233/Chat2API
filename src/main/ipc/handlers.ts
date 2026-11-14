@@ -348,7 +348,18 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow | null): Pro
     error?: string
   }> => {
     try {
-      const result = await ProviderChecker.fetchProviderModels(providerId)
+      const accounts = storeManager.getAccountsByProviderId(providerId, true)
+      const account =
+        accounts.find((candidate) => candidate.status === 'active') ?? accounts[0]
+      const result = await ProviderChecker.fetchProviderModels(
+        providerId,
+        account
+          ? {
+              token: account.credentials.token,
+              cookies: account.credentials.cookies,
+            }
+          : undefined
+      )
       
       const provider = ProviderManager.getById(providerId)
       if (provider) {
